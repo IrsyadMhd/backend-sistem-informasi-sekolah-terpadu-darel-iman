@@ -1,0 +1,418 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\PemantauanDashboard\DaftarPemantauanDashboardRequest;
+use App\Http\Requests\PemantauanDashboard\SimpanIndikatorKinerjaUtamaRequest;
+use App\Http\Requests\PemantauanDashboard\SimpanLaporanBulananPemantauanRequest;
+use App\Http\Requests\PemantauanDashboard\SimpanPemantauanDivisiRequest;
+use App\Http\Requests\PemantauanDashboard\SimpanPengumumanSekolahRequest;
+use App\Http\Requests\PemantauanDashboard\SimpanRekapPrestasiSiswaRequest;
+use App\Http\Resources\RingkasanDashboardPemantauanResource;
+use App\Models\IndikatorKinerjaUtama;
+use App\Models\LaporanBulanan;
+use App\Models\PemantauanDivisi;
+use App\Models\PengumumanSekolah;
+use App\Models\RekapPrestasiSiswa;
+use App\Models\Student;
+use App\Models\Teacher;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
+class DashboardPemantauanController extends Controller
+{
+    private const ROLE_AKSES = [
+        'Super Admin',
+        'Kepala Sekolah',
+        'Divisi Pendidikan',
+        'Guru',
+    ];
+
+    public function ringkasan(Request $request): RingkasanDashboardPemantauanResource
+    {
+        $this->pastikanHakAkses($request);
+
+        $hariIni = now()->toDateString();
+        $awalMinggu = now()->subDays(6)->toDateString();
+
+        if (Schema::hasTable('attendances')) {
+            $hadirHariIni = DB::table('attendances')->whereDate('attendance_date', $hariIni)->count();
+            $terlambatHariIni = DB::table('attendances')->whereDate('attendance_date', $hariIni)->where('status', 'late')->count();
+            $tidakHadirHariIni = DB::table('attendances')->whereDate('attendance_date', $hariIni)->where('status', 'absent')->count();
+
+            $lineChartMingguan = DB::table('attendances')
+                ->selectRaw('attendance_date as label, count(*) as total')
+                ->whereBetween('attendance_date', [$awalMinggu, $hariIni])
+                ->groupBy('attendance_date')
+                ->orderBy('attendance_date')
+                ->get();
+        } else {
+            $hadirHariIni = 0;
+            $terlambatHariIni = 0;
+            $tidakHadirHariIni = 0;
+            $lineChartMingguan = collect();
+        }
+
+        $donutChart = [
+            ['label' => 'Hadir', 'nilai' => max($hadirHariIni - $terlambatHariIni - $tidakHadirHariIni, 0)],
+            ['label' => 'Terlambat', 'nilai' => $terlambatHariIni],
+            ['label' => 'Tidak Hadir', 'nilai' => $tidakHadirHariIni],
+        ];
+
+        if (Schema::hasTable('tahfizh_records') && Schema::hasTable('classes')) {
+            $barTahfizh = DB::table('tahfizh_records')
+                ->join('classes', 'classes.id', '=', 'tahfizh_records.class_id')
+                ->selectRaw('classes.name as kelas, COALESCE(SUM(tahfizh_records.line_count), 0) as total_baris')
+                ->whereBetween('record_date', [$awalMinggu, $hariIni])
+                ->groupBy('classes.name')
+                ->orderByDesc('total_baris')
+                ->limit(7)
+                ->get();
+
+            $rataBarisTahfizh = (float) DB::table('tahfizh_records')
+                ->whereBetween('record_date', [now()->subDays(30)->toDateString(), $hariIni])
+                ->avg('line_count');
+        } else {
+            $barTahfizh = collect();
+            $rataBarisTahfizh = 0;
+        }
+
+        if (Schema::hasTable('mutabaah_records')) {
+            $ibadahRingkas = DB::table('mutabaah_records')
+                ->selectRaw('COALESCE(AVG(tilawah_lines), 0) as rata_tilawah, COALESCE(AVG(CASE WHEN sunnah_fasting THEN 100 ELSE 0 END), 0) as persen_puasa_sunnah')
+                ->whereBetween('record_date', [$awalMinggu, $hariIni])
+                ->first();
+        } else {
+            $ibadahRingkas = (object) [
+                'rata_tilawah' => 0,
+                'persen_puasa_sunnah' => 0,
+            ];
+        }
+
+        $targetBaris = 10;
+        $persenTargetTahfizh = $targetBaris > 0 ? min(round(($rataBarisTahfizh / $targetBaris) * 100, 2), 100) : 0;
+
+        return new RingkasanDashboardPemantauanResource([
+            'total_siswa' => Student::query()->count(),
+            'total_guru' => Teacher::query()->count(),
+            'kehadiran_hari_ini' => $hadirHariIni,
+            'statistik_keterlambatan' => $terlambatHariIni,
+            'statistik_ketidakhadiran' => $tidakHadirHariIni,
+            'donut_chart' => $donutChart,
+            'line_chart_kehadiran_mingguan' => $lineChartMingguan,
+            'bar_chart_tahfizh' => $barTahfizh,
+            'progress_target_tahfizh' => [
+                'target_baris_per_hari' => $targetBaris,
+                'realisasi_rata_baris' => round($rataBarisTahfizh, 2),
+                'persentase' => $persenTargetTahfizh,
+            ],
+            'progress_ibadah_siswa' => [
+                'rata_tilawah_baris' => round((float) ($ibadahRingkas->rata_tilawah ?? 0), 2),
+                'persen_puasa_sunnah' => round((float) ($ibadahRingkas->persen_puasa_sunnah ?? 0), 2),
+            ],
+            'data_tabel_rekap_prestasi' => RekapPrestasiSiswa::query()->latest('tanggal_prestasi')->limit(10)->get(),
+            'pengumuman_sekolah' => PengumumanSekolah::query()
+                ->where('status_aktif', true)
+                ->where(function ($query) {
+                    $query->whereNull('selesai_tampil')->orWhere('selesai_tampil', '>=', now());
+                })
+                ->where('mulai_tampil', '<=', now())
+                ->orderByDesc('prioritas')
+                ->orderByDesc('mulai_tampil')
+                ->limit(10)
+                ->get(),
+            'indikator_kinerja_utama' => IndikatorKinerjaUtama::query()->orderBy('urutan_tampil')->limit(12)->get(),
+        ]);
+    }
+
+    public function daftarPemantauanDivisi(DaftarPemantauanDashboardRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+
+        $data = PemantauanDivisi::query()
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = (string) $request->validated('search');
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('nama_divisi', 'ilike', "%{$search}%")
+                        ->orWhere('aspek_pemantauan', 'ilike', "%{$search}%")
+                        ->orWhere('status_pemantauan', 'ilike', "%{$search}%");
+                });
+            })
+            ->latest('tanggal_pemantauan')
+            ->paginate((int) $request->validated('per_page', 15));
+
+        return response()->json($data);
+    }
+
+    public function simpanPemantauanDivisi(SimpanPemantauanDivisiRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = DB::transaction(function () use ($request) {
+            return PemantauanDivisi::query()->create([
+                ...$request->validated(),
+                'id_penginput' => $request->user()->id,
+            ]);
+        });
+
+        return response()->json(['message' => 'Data pemantauan divisi berhasil disimpan.', 'data' => $model], 201);
+    }
+
+    public function detailPemantauanDivisi(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+        return response()->json(PemantauanDivisi::query()->findOrFail($id));
+    }
+
+    public function ubahPemantauanDivisi(SimpanPemantauanDivisiRequest $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = DB::transaction(function () use ($request, $id) {
+            $model = PemantauanDivisi::query()->findOrFail($id);
+            $model->update($request->validated());
+            return $model->fresh();
+        });
+
+        return response()->json(['message' => 'Data pemantauan divisi berhasil diperbarui.', 'data' => $model]);
+    }
+
+    public function hapusPemantauanDivisi(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+        PemantauanDivisi::query()->findOrFail($id)->delete();
+
+        return response()->json(['message' => 'Data pemantauan divisi berhasil dihapus.']);
+    }
+
+    public function daftarLaporanBulanan(DaftarPemantauanDashboardRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+
+        $data = LaporanBulanan::query()
+            ->when($request->filled('bulan'), fn ($query) => $query->where('bulan', (int) $request->validated('bulan')))
+            ->when($request->filled('tahun'), fn ($query) => $query->where('tahun', (int) $request->validated('tahun')))
+            ->latest('tahun')
+            ->latest('bulan')
+            ->paginate((int) $request->validated('per_page', 15));
+
+        return response()->json($data);
+    }
+
+    public function simpanLaporanBulanan(SimpanLaporanBulananPemantauanRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = LaporanBulanan::query()->create([
+            ...$request->validated(),
+            'id_penginput' => $request->user()->id,
+        ]);
+
+        return response()->json(['message' => 'Laporan bulanan berhasil disimpan.', 'data' => $model], 201);
+    }
+
+    public function detailLaporanBulanan(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+        return response()->json(LaporanBulanan::query()->findOrFail($id));
+    }
+
+    public function ubahLaporanBulanan(SimpanLaporanBulananPemantauanRequest $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = LaporanBulanan::query()->findOrFail($id);
+        $model->update($request->validated());
+
+        return response()->json(['message' => 'Laporan bulanan berhasil diperbarui.', 'data' => $model->fresh()]);
+    }
+
+    public function hapusLaporanBulanan(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+        LaporanBulanan::query()->findOrFail($id)->delete();
+
+        return response()->json(['message' => 'Laporan bulanan berhasil dihapus.']);
+    }
+
+    public function daftarRekapPrestasiSiswa(DaftarPemantauanDashboardRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+
+        $data = RekapPrestasiSiswa::query()
+            ->with('siswa:id,full_name,nis')
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = (string) $request->validated('search');
+                $query->where(function ($inner) use ($search) {
+                    $inner->where('nama_prestasi', 'ilike', "%{$search}%")
+                        ->orWhere('jenis_prestasi', 'ilike', "%{$search}%")
+                        ->orWhere('tingkat_prestasi', 'ilike', "%{$search}%");
+                });
+            })
+            ->latest('tanggal_prestasi')
+            ->paginate((int) $request->validated('per_page', 15));
+
+        return response()->json($data);
+    }
+
+    public function simpanRekapPrestasiSiswa(SimpanRekapPrestasiSiswaRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = RekapPrestasiSiswa::query()->create([
+            ...$request->validated(),
+            'id_penginput' => $request->user()->id,
+        ]);
+
+        return response()->json(['message' => 'Rekap prestasi siswa berhasil disimpan.', 'data' => $model], 201);
+    }
+
+    public function detailRekapPrestasiSiswa(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+        return response()->json(RekapPrestasiSiswa::query()->with('siswa:id,full_name,nis')->findOrFail($id));
+    }
+
+    public function ubahRekapPrestasiSiswa(SimpanRekapPrestasiSiswaRequest $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = RekapPrestasiSiswa::query()->findOrFail($id);
+        $model->update($request->validated());
+
+        return response()->json(['message' => 'Rekap prestasi siswa berhasil diperbarui.', 'data' => $model->fresh()]);
+    }
+
+    public function hapusRekapPrestasiSiswa(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+        RekapPrestasiSiswa::query()->findOrFail($id)->delete();
+
+        return response()->json(['message' => 'Rekap prestasi siswa berhasil dihapus.']);
+    }
+
+    public function daftarPengumumanSekolah(DaftarPemantauanDashboardRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+
+        $data = PengumumanSekolah::query()
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = (string) $request->validated('search');
+                $query->whereRaw("to_tsvector('simple', coalesce(judul_pengumuman,'') || ' ' || coalesce(isi_pengumuman,'')) @@ plainto_tsquery('simple', ?)", [$search]);
+            })
+            ->latest('mulai_tampil')
+            ->paginate((int) $request->validated('per_page', 15));
+
+        return response()->json($data);
+    }
+
+    public function simpanPengumumanSekolah(SimpanPengumumanSekolahRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = PengumumanSekolah::query()->create([
+            ...$request->validated(),
+            'prioritas' => (int) $request->validated('prioritas', 1),
+            'id_penerbit' => $request->user()->id,
+        ]);
+
+        return response()->json(['message' => 'Pengumuman sekolah berhasil dipublikasikan.', 'data' => $model], 201);
+    }
+
+    public function detailPengumumanSekolah(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+        return response()->json(PengumumanSekolah::query()->findOrFail($id));
+    }
+
+    public function ubahPengumumanSekolah(SimpanPengumumanSekolahRequest $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = PengumumanSekolah::query()->findOrFail($id);
+        $model->update($request->validated());
+
+        return response()->json(['message' => 'Pengumuman sekolah berhasil diperbarui.', 'data' => $model->fresh()]);
+    }
+
+    public function hapusPengumumanSekolah(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+        PengumumanSekolah::query()->findOrFail($id)->delete();
+
+        return response()->json(['message' => 'Pengumuman sekolah berhasil dihapus.']);
+    }
+
+    public function daftarIndikatorKinerjaUtama(DaftarPemantauanDashboardRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+
+        $data = IndikatorKinerjaUtama::query()
+            ->when($request->filled('bulan'), fn ($query) => $query->where('bulan_periode', (int) $request->validated('bulan')))
+            ->when($request->filled('tahun'), fn ($query) => $query->where('tahun_periode', (int) $request->validated('tahun')))
+            ->orderBy('urutan_tampil')
+            ->paginate((int) $request->validated('per_page', 15));
+
+        return response()->json($data);
+    }
+
+    public function simpanIndikatorKinerjaUtama(SimpanIndikatorKinerjaUtamaRequest $request): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = IndikatorKinerjaUtama::query()->updateOrCreate(
+            ['kode_indikator' => (string) $request->validated('kode_indikator')],
+            [
+                ...$request->validated(),
+                'urutan_tampil' => (int) $request->validated('urutan_tampil', 0),
+                'id_penginput' => $request->user()->id,
+            ]
+        );
+
+        return response()->json(['message' => 'Indikator kinerja utama berhasil disimpan.', 'data' => $model], 201);
+    }
+
+    public function detailIndikatorKinerjaUtama(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request);
+        return response()->json(IndikatorKinerjaUtama::query()->findOrFail($id));
+    }
+
+    public function ubahIndikatorKinerjaUtama(SimpanIndikatorKinerjaUtamaRequest $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+
+        $model = IndikatorKinerjaUtama::query()->findOrFail($id);
+        $model->update($request->validated());
+
+        return response()->json(['message' => 'Indikator kinerja utama berhasil diperbarui.', 'data' => $model->fresh()]);
+    }
+
+    public function hapusIndikatorKinerjaUtama(Request $request, string $id): JsonResponse
+    {
+        $this->pastikanHakAkses($request, true);
+        IndikatorKinerjaUtama::query()->findOrFail($id)->delete();
+
+        return response()->json(['message' => 'Indikator kinerja utama berhasil dihapus.']);
+    }
+
+    private function pastikanHakAkses(Request $request, bool $butuhKelola = false): void
+    {
+        $user = $request->user();
+
+        if (! $user || ! $user->hasAnyRole(self::ROLE_AKSES)) {
+            abort(403, 'Anda tidak memiliki hak akses modul dashboard pemantauan.');
+        }
+
+        if ($butuhKelola && ! $user->can('dashboard.pemantauan.kelola')) {
+            abort(403, 'Anda tidak memiliki izin kelola modul dashboard pemantauan.');
+        }
+
+        if (! $butuhKelola && ! $user->can('dashboard.pemantauan.lihat')) {
+            abort(403, 'Anda tidak memiliki izin lihat modul dashboard pemantauan.');
+        }
+    }
+}
