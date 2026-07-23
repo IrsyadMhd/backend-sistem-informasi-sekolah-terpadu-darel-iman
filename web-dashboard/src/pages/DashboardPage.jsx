@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FaCheckCircle, FaClock, FaExclamationTriangle } from 'react-icons/fa'
 import { Link } from 'react-router-dom'
 import {
@@ -27,6 +27,8 @@ import {
   useRingkasanDashboardPemantauan,
 } from '../hooks/useDashboardPemantauan'
 import { useUnitStore } from '../stores/unitStore'
+import { useDaftarSiswa } from '../hooks/useStudents'
+import { attendanceService } from '../services/attendanceService'
 
 const warnaDonut = { Hadir: '#059669', Terlambat: '#d97706', 'Tidak Hadir': '#dc2626' }
 const warnaProgress = ['#1f8d63', '#d08b2f', '#dc6d48', '#4e9dd9', '#64748b']
@@ -59,6 +61,7 @@ function IconStatus({ status = '' }) {
 
 export default function DashboardPage() {
   const activeUnit = useUnitStore((state) => state.activeUnit)
+  const [filterUnitKehadiran, setFilterUnitKehadiran] = useState('SEMUA')
   const profilUnit = unitMeta[activeUnit] || unitMeta.SD
   const { data: ringkasan, isLoading: loadingRingkasan, isError: errorRingkasan } = useRingkasanDashboardPemantauan()
   const { data: daftarPemantauan } = useDaftarPemantauanDivisi({ per_page: 8 })
@@ -66,6 +69,9 @@ export default function DashboardPage() {
   const { data: daftarRekap } = useDaftarRekapPrestasiSiswa({ per_page: 5 })
   const { data: daftarPengumuman } = useDaftarPengumumanSekolah({ per_page: 5 })
   const { data: daftarIku } = useDaftarIndikatorKinerjaUtama({ per_page: 5 })
+  const { data: daftarSiswa } = useDaftarSiswa({ per_page: 500 })
+  const [attendanceReport, setAttendanceReport] = useState([])
+  const [loadingAttendance, setLoadingAttendance] = useState(false)
 
   const dataDonut = useMemo(() => (ringkasan?.donut_chart || []).map((item) => ({ ...item, nilai: Number(item.nilai || 0) })), [ringkasan])
   const dataLine = useMemo(() => (ringkasan?.line_chart_kehadiran_mingguan || []).map((item) => ({ hari: item.label, total: Number(item.total || 0) })), [ringkasan])
@@ -136,6 +142,82 @@ export default function DashboardPage() {
     { aspek: 'Tilawah', nilai: Math.max(progressIbadah + 4, 0) },
   ]
 
+  useEffect(() => {
+    let isMounted = true
+
+    const loadAttendance = async () => {
+      setLoadingAttendance(true)
+      try {
+        const result = await attendanceService.report({ per_page: 500 })
+        if (isMounted) {
+          setAttendanceReport(result?.data || [])
+        }
+      } catch {
+        if (isMounted) {
+          setAttendanceReport([])
+        }
+      } finally {
+        if (isMounted) {
+          setLoadingAttendance(false)
+        }
+      }
+    }
+
+    loadAttendance()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const unitMapSiswa = useMemo(() => {
+    const map = new Map()
+    ;(daftarSiswa?.data || []).forEach((siswa) => {
+      map.set(String(siswa.id), siswa?.metadata?.akademik?.unit || 'Lainnya')
+    })
+    return map
+  }, [daftarSiswa])
+
+  const attendanceAugmented = useMemo(() => {
+    return (attendanceReport || []).map((item) => ({
+      ...item,
+      unit: unitMapSiswa.get(String(item.student_id)) || 'Lainnya',
+    }))
+  }, [attendanceReport, unitMapSiswa])
+
+  const rekapGlobal = useMemo(() => {
+    const base = { hadir: 0, tidak_hadir: 0, izin: 0, sakit: 0 }
+    attendanceAugmented.forEach((item) => {
+      const status = String(item.status || '').toLowerCase()
+      if (['present', 'hadir'].includes(status)) base.hadir += 1
+      else if (['absent', 'alpha', 'tidak_hadir', 'tidak hadir'].includes(status)) base.tidak_hadir += 1
+      else if (['izin', 'permission'].includes(status)) base.izin += 1
+      else if (['sakit'].includes(status)) base.sakit += 1
+    })
+    return base
+  }, [attendanceAugmented])
+
+  const daftarUnitKehadiran = useMemo(() => {
+    const setUnit = new Set(attendanceAugmented.map((item) => item.unit))
+    return ['SEMUA', ...Array.from(setUnit)]
+  }, [attendanceAugmented])
+
+  const attendanceByFilter = useMemo(() => {
+    if (filterUnitKehadiran === 'SEMUA') return attendanceAugmented
+    return attendanceAugmented.filter((item) => item.unit === filterUnitKehadiran)
+  }, [attendanceAugmented, filterUnitKehadiran])
+
+  const rekapFilterUnit = useMemo(() => {
+    const base = { hadir: 0, tidak_hadir: 0, izin: 0, sakit: 0 }
+    attendanceByFilter.forEach((item) => {
+      const status = String(item.status || '').toLowerCase()
+      if (['present', 'hadir'].includes(status)) base.hadir += 1
+      else if (['absent', 'alpha', 'tidak_hadir', 'tidak hadir'].includes(status)) base.tidak_hadir += 1
+      else if (['izin', 'permission'].includes(status)) base.izin += 1
+      else if (['sakit'].includes(status)) base.sakit += 1
+    })
+    return base
+  }, [attendanceByFilter])
+
   if (loadingRingkasan) return <section className="panel">Memuat ringkasan dashboard...</section>
   if (errorRingkasan) return <section className="panel"><h3>Gagal memuat data dashboard</h3><p>Pastikan sudah login dan token tersimpan pada localStorage.</p></section>
 
@@ -157,10 +239,76 @@ export default function DashboardPage() {
         <StatCard title="Mutabaah Yaumiyah" value={`${progressIbadah}%`} subtitle={profilUnit.jenjang} />
       </div>
 
+      <article className="panel rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm md:col-span-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-bold text-indigo-900">Dashboard Kehadiran Seluruh Unit</h3>
+            <p className="text-sm text-indigo-700">Menampilkan total global kehadiran dan rincian berdasarkan filter unit.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-indigo-700">Filter Unit</span>
+            <select
+              className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-500"
+              value={filterUnitKehadiran}
+              onChange={(event) => setFilterUnitKehadiran(event.target.value)}
+            >
+              {daftarUnitKehadiran.map((unit) => (
+                <option key={unit} value={unit}>{unit}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {loadingAttendance ? <p className="text-sm text-indigo-700">Memuat data kehadiran...</p> : null}
+
+        <div className="mb-3 grid gap-3 md:grid-cols-4">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-xs text-emerald-700">Global Hadir</p>
+            <p className="text-2xl font-bold text-emerald-900">{rekapGlobal.hadir}</p>
+          </div>
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+            <p className="text-xs text-rose-700">Global Tidak Hadir</p>
+            <p className="text-2xl font-bold text-rose-900">{rekapGlobal.tidak_hadir}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <p className="text-xs text-amber-700">Global Izin</p>
+            <p className="text-2xl font-bold text-amber-900">{rekapGlobal.izin}</p>
+          </div>
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+            <p className="text-xs text-sky-700">Global Sakit</p>
+            <p className="text-2xl font-bold text-sky-900">{rekapGlobal.sakit}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-xl border border-emerald-200 bg-white p-3">
+            <p className="text-xs text-emerald-700">Filter Hadir ({filterUnitKehadiran})</p>
+            <p className="text-xl font-bold text-emerald-900">{rekapFilterUnit.hadir}</p>
+          </div>
+          <div className="rounded-xl border border-rose-200 bg-white p-3">
+            <p className="text-xs text-rose-700">Filter Tidak Hadir</p>
+            <p className="text-xl font-bold text-rose-900">{rekapFilterUnit.tidak_hadir}</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-white p-3">
+            <p className="text-xs text-amber-700">Filter Izin</p>
+            <p className="text-xl font-bold text-amber-900">{rekapFilterUnit.izin}</p>
+          </div>
+          <div className="rounded-xl border border-sky-200 bg-white p-3">
+            <p className="text-xs text-sky-700">Filter Sakit</p>
+            <p className="text-xl font-bold text-sky-900">{rekapFilterUnit.sakit}</p>
+          </div>
+        </div>
+      </article>
+
       <article className="panel panel-monitoring-kehadiran">
         <div className="panel-title-row">
           <h3>Monitoring Kehadiran Siswa {activeUnit}</h3>
           <span>7 Hari Terakhir</span>
+        </div>
+        <div className="panel-aksi-laporan">
+          <Link to="/dashboard/attendance" className="topbar-action">
+            Lihat Laporan Kehadiran
+          </Link>
         </div>
         <div className="ringkas-chip-row">
           {dataDonut.map((item) => (
@@ -222,6 +370,11 @@ export default function DashboardPage() {
           <h3>Monitoring Divisi Pendidikan {activeUnit}</h3>
           <span>Bulan Ini</span>
         </div>
+        <div className="panel-aksi-laporan">
+          <Link to="/dashboard/attendance" className="topbar-action">
+            Lihat Laporan Divisi
+          </Link>
+        </div>
         <div className="table-wrap mini-monitoring-table">
           <table>
             <thead>
@@ -264,6 +417,11 @@ export default function DashboardPage() {
         <div className="panel-title-row">
           <h3>{profilUnit.targetTahfizh} {activeUnit}</h3>
           <span>Tahun Ajaran 2024/2025</span>
+        </div>
+        <div className="panel-aksi-laporan">
+          <Link to="/dashboard/tahfizh" className="topbar-action">
+            Lihat Laporan Tahfizh
+          </Link>
         </div>
 
         <div className="target-tahfizh-wrap">
@@ -328,6 +486,11 @@ export default function DashboardPage() {
           <h3>Mutabaah & Ibadah Siswa {activeUnit}</h3>
           <span>Hari Ini</span>
         </div>
+        <div className="panel-aksi-laporan">
+          <Link to="/dashboard/tahfizh" className="topbar-action">
+            Lihat Laporan Mutabaah
+          </Link>
+        </div>
         <div className="mutabaah-panel-grid">
           <div>
             {mutabaahList.map((item) => (
@@ -356,6 +519,11 @@ export default function DashboardPage() {
           <h3>{profilUnit.laporan}</h3>
           <span>Mei 2024</span>
         </div>
+        <div className="panel-aksi-laporan">
+          <Link to="/dashboard/academic" className="topbar-action">
+            Lihat Laporan Bulanan
+          </Link>
+        </div>
         <div className="laporan-list">
           {dataTemplateLaporan.map((row) => (
             <div key={row.id} className="laporan-item">
@@ -376,6 +544,11 @@ export default function DashboardPage() {
         <div className="panel-title-row">
           <h3>Rekapitulasi Prestasi Siswa {activeUnit}</h3>
           <span>Tahun 2024</span>
+        </div>
+        <div className="panel-aksi-laporan">
+          <Link to="/dashboard/students" className="topbar-action">
+            Lihat Laporan Prestasi
+          </Link>
         </div>
         <div className="prestasi-kategori-grid">
           {komposisiPrestasi.map((item, index) => (

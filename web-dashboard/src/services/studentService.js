@@ -1,6 +1,11 @@
 import { api } from './api'
 
 export const studentService = {
+  getDashboard: async () => {
+    const { data } = await api.get('/students/dashboard')
+    return data
+  },
+
   getDaftar: async (params = {}) => {
     const { data } = await api.get('/students', { params })
     return data

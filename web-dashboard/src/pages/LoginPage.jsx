@@ -28,7 +28,7 @@ export default function LoginPage() {
       }
 
       await Swal.fire('Berhasil', 'Login berhasil, selamat datang.', 'success')
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     } catch (error) {
       await Swal.fire(
         'Login gagal',

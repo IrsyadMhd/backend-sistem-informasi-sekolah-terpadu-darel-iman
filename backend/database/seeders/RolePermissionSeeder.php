@@ -12,10 +12,13 @@ class RolePermissionSeeder extends Seeder
     {
         $roles = [
             'Super Admin',
+            'Yayasan',
             'Kepala Sekolah',
+            'Wakil Kepala Sekolah',
             'Divisi Pendidikan',
             'Tata Usaha',
             'Guru',
+            'Wali Kelas',
             'Orang Tua',
             'Siswa',
         ];
@@ -65,7 +68,7 @@ class RolePermissionSeeder extends Seeder
                 $role->syncPermissions($permissions);
             }
 
-            if (in_array($roleName, ['Kepala Sekolah', 'Divisi Pendidikan', 'Guru'], true)) {
+            if (in_array($roleName, ['Yayasan', 'Kepala Sekolah', 'Wakil Kepala Sekolah', 'Divisi Pendidikan', 'Guru', 'Wali Kelas'], true)) {
                 $role->givePermissionTo([
                     'dashboard.view',
                     'dashboard.pemantauan.lihat',

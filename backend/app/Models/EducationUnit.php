@@ -1,0 +1,32 @@
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasUuidPrimaryKey;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class EducationUnit extends Model
+{
+    use HasFactory, HasUuidPrimaryKey, SoftDeletes;
+
+    protected $table = 'education_units';
+
+    protected $fillable = [
+        'code',
+        'name',
+        'level',
+        'description',
+        'is_active',
+        'metadata',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+            'metadata' => 'array',
+        ];
+    }
+}

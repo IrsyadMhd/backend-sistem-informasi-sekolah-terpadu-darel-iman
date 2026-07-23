@@ -15,6 +15,8 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             RolePermissionSeeder::class,
+            DataDummySiswaSeeder::class,
+            DataDummyUnitPendidikanSeeder::class,
         ]);
 
         $superAdmin = User::query()->firstOrCreate([
