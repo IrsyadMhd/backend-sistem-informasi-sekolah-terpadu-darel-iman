@@ -11,8 +11,15 @@ class StudentRepository implements StudentRepositoryInterface
     public function paginate(string $search = '', int $perPage = 15): LengthAwarePaginator
     {
         return Student::query()
+            ->with(['class'])
             ->when($search !== '', function ($query) use ($search) {
-                $query->whereRaw("to_tsvector('simple', coalesce(nis,'') || ' ' || coalesce(full_name,'')) @@ plainto_tsquery('simple', ?)", [$search]);
+                $term = "%{$search}%";
+                $query->where(function ($q) use ($term) {
+                    $q->where('nis', 'like', $term)
+                        ->orWhere('full_name', 'like', $term)
+                        ->orWhere('address', 'like', $term)
+                        ->orWhere('metadata->nisn', 'like', $term);
+                });
             })
             ->orderBy('full_name')
             ->paginate($perPage);

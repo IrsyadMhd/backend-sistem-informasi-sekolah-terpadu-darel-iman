@@ -18,6 +18,7 @@ const LaporanTahfizhPage = lazy(() => import('../pages/LaporanTahfizhPage'))
 const LaporanAkademikPage = lazy(() => import('../pages/LaporanAkademikPage'))
 const LaporanSiswaPage = lazy(() => import('../pages/LaporanSiswaPage'))
 const LaporanAlumniPage = lazy(() => import('../pages/LaporanAlumniPage'))
+const ParentsPage = lazy(() => import('../pages/ParentsPage'))
 
 function BungkusLazy({ children }) {
   return <Suspense fallback={<section className="panel">Memuat halaman...</section>}>{children}</Suspense>
@@ -148,6 +149,14 @@ export const router = createBrowserRouter([
             element: (
               <BungkusLazy>
                 <AcademicPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'parents',
+            element: (
+              <BungkusLazy>
+                <ParentsPage />
               </BungkusLazy>
             ),
           },

@@ -17,7 +17,7 @@ class StoreEducationUnitRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'code' => ['required', 'string', 'max:30', 'unique:education_units,code'],
+            'code' => ['nullable', 'string', 'max:30', 'unique:education_units,code'],
             'name' => ['required', 'string', 'max:120'],
             'level' => ['nullable', 'string', 'max:50'],
             'description' => ['nullable', 'string'],

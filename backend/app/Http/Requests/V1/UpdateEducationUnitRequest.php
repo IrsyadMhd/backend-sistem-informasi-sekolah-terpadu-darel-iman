@@ -21,7 +21,7 @@ class UpdateEducationUnitRequest extends FormRequest
 
         return [
             'code' => [
-                'required',
+                'nullable',
                 'string',
                 'max:30',
                 Rule::unique('education_units', 'code')->ignore($educationUnitId, 'id'),
