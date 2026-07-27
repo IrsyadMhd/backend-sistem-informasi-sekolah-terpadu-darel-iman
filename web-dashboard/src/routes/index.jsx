@@ -19,6 +19,15 @@ const LaporanAkademikPage = lazy(() => import('../pages/LaporanAkademikPage'))
 const LaporanSiswaPage = lazy(() => import('../pages/LaporanSiswaPage'))
 const LaporanAlumniPage = lazy(() => import('../pages/LaporanAlumniPage'))
 const ParentsPage = lazy(() => import('../pages/ParentsPage'))
+const UserProfileManagementPage = lazy(() => import('../pages/UserProfileManagementPage'))
+const EmployeesPage = lazy(() => import('../pages/EmployeesPage'))
+const MasterKelasPage = lazy(() => import('../pages/MasterKelasPage'))
+const MasterJabatanPage = lazy(() => import('../pages/MasterJabatanPage'))
+const MasterHakAksesPage = lazy(() => import('../pages/MasterHakAksesPage'))
+const MasterJenisUnitPendidikanPage = lazy(() => import('../pages/MasterJenisUnitPendidikanPage'))
+const StudentCrudPage = lazy(() => import('../pages/StudentCrudPage'))
+const MultiRoleDashboardPage = lazy(() => import('../pages/MultiRoleDashboardPage'))
+import RouteErrorElement from '../components/common/RouteErrorElement'
 
 function BungkusLazy({ children }) {
   return <Suspense fallback={<section className="panel">Memuat halaman...</section>}>{children}</Suspense>
@@ -52,7 +61,24 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    path: '/auth',
+    element: (
+      <BungkusLazy>
+        <LoginPage />
+      </BungkusLazy>
+    ),
+  },
+  {
+    path: '/authentication',
+    element: (
+      <BungkusLazy>
+        <LoginPage />
+      </BungkusLazy>
+    ),
+  },
+  {
     element: <RouteTerlindungi />,
+    errorElement: <RouteErrorElement />,
     children: [
       {
         path: '/dashboard',
@@ -66,7 +92,23 @@ export const router = createBrowserRouter([
             index: true,
             element: (
               <BungkusLazy>
+                <MultiRoleDashboardPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'pemantauan',
+            element: (
+              <BungkusLazy>
                 <DashboardPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'crud-demo',
+            element: (
+              <BungkusLazy>
+                <StudentCrudPage />
               </BungkusLazy>
             ),
           },
@@ -98,7 +140,7 @@ export const router = createBrowserRouter([
                 path: 'kelas',
                 element: (
                   <BungkusLazy>
-                    <StudentsPage />
+                    <MasterKelasPage />
                   </BungkusLazy>
                 ),
               },
@@ -111,10 +153,26 @@ export const router = createBrowserRouter([
                 ),
               },
               {
+                path: 'pegawai',
+                element: (
+                  <BungkusLazy>
+                    <EmployeesPage />
+                  </BungkusLazy>
+                ),
+              },
+              {
+                path: 'jabatan',
+                element: (
+                  <BungkusLazy>
+                    <MasterJabatanPage />
+                  </BungkusLazy>
+                ),
+              },
+              {
                 path: 'rombel',
                 element: (
                   <BungkusLazy>
-                    <StudentsPage />
+                    <MasterKelasPage />
                   </BungkusLazy>
                 ),
               },
@@ -127,6 +185,38 @@ export const router = createBrowserRouter([
                 ),
               },
             ],
+          },
+          {
+            path: 'employees',
+            element: (
+              <BungkusLazy>
+                <EmployeesPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-jabatan',
+            element: (
+              <BungkusLazy>
+                <MasterJabatanPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-jenis-unit',
+            element: (
+              <BungkusLazy>
+                <MasterJenisUnitPendidikanPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'hak-akses',
+            element: (
+              <BungkusLazy>
+                <MasterHakAksesPage />
+              </BungkusLazy>
+            ),
           },
           {
             path: 'attendance',
@@ -213,6 +303,14 @@ export const router = createBrowserRouter([
             element: (
               <BungkusLazy>
                 <LaporanAlumniPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'profil-akun',
+            element: (
+              <BungkusLazy>
+                <UserProfileManagementPage />
               </BungkusLazy>
             ),
           },

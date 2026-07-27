@@ -22,6 +22,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(StudentRepositoryInterface::class, StudentRepository::class);
         $this->app->bind(TeacherRepositoryInterface::class, TeacherRepository::class);
         $this->app->bind(ClassRepositoryInterface::class, ClassRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\EmployeeRepositoryInterface::class, \App\Repositories\Eloquent\EmployeeRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\KelasRepositoryInterface::class, \App\Repositories\Eloquent\KelasRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\JenisUnitPendidikanRepositoryInterface::class, \App\Repositories\Eloquent\JenisUnitPendidikanRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\SubjectRepositoryInterface::class, \App\Repositories\Eloquent\SubjectRepository::class);
     }
 
     /**

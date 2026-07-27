@@ -11,6 +11,7 @@ export default function PengaturanPage() {
     namaSekolah: pengaturan.namaSekolah,
     logoTeks: pengaturan.logoTeks,
     logoUrl: pengaturan.logoUrl,
+    faviconUrl: pengaturan.faviconUrl,
     alamatFooter: pengaturan.alamatFooter,
   })
 
@@ -98,6 +99,14 @@ export default function PengaturanPage() {
           <label className="student-field student-field-wide">
             <span>Logo Sekolah (Gambar)</span>
             <input type="file" accept="image/*" onChange={ubahLogo} />
+          </label>
+          <label className="student-field student-field-wide">
+            <span>Favicon URL</span>
+            <input
+              value={form.faviconUrl || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, faviconUrl: e.target.value }))}
+              placeholder="Contoh: https://example.com/favicon.ico"
+            />
           </label>
 
           {logoPreview ? (

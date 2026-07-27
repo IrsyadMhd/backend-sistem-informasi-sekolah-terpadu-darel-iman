@@ -1,81 +1,74 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Swal from 'sweetalert2'
-import { authService } from '../services/authService'
-import { useAuthStore } from '../stores/authStore'
+import { FaMosque } from 'react-icons/fa6'
+import { usePengaturanStore } from '../stores/pengaturanStore'
+
+import LoginCard from '../components/auth/LoginCard'
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const setSession = useAuthStore((state) => state.setSession)
-  const [form, setForm] = useState({
-    email: 'superadmin@school-erp.local',
-    password: 'Password123!',
-    device_name: 'web-dashboard',
-  })
-  const [loading, setLoading] = useState(false)
+  const pengaturan = usePengaturanStore((state) => state.pengaturan)
 
-  const submitLogin = async (event) => {
-    event.preventDefault()
-    setLoading(true)
+  const namaSekolah = pengaturan?.namaSekolah || 'YAYASAN DAR EL - IMAN'
 
-    try {
-      const hasilLogin = await authService.login(form)
-      setSession({ token: hasilLogin.token, user: hasilLogin.user || null })
-
-      if (!hasilLogin.user) {
-        const profil = await authService.profile()
-        setSession({ token: hasilLogin.token, user: profil?.data || profil || null })
-      }
-
-      await Swal.fire('Berhasil', 'Login berhasil, selamat datang.', 'success')
+  const handleLoginSuccess = () => {
+    Swal.fire({
+      title: 'Login Berhasil!',
+      text: `Selamat datang di Sistem Manajemen ${namaSekolah}.`,
+      icon: 'success',
+      confirmButtonColor: '#065f46',
+      timer: 1800,
+      showConfirmButton: false,
+    }).then(() => {
       navigate('/dashboard', { replace: true })
-    } catch (error) {
-      await Swal.fire(
-        'Login gagal',
-        error?.response?.data?.message || 'Email atau password tidak valid.',
-        'error'
-      )
-    } finally {
-      setLoading(false)
-    }
+    })
   }
 
   return (
-    <section className="login-shell">
-      <div className="login-card">
-        <p className="showcase-badge">AKSES DASHBOARD</p>
-        <h2>Masuk ke Sistem Informasi Sekolah</h2>
-        <p>Gunakan akun admin untuk membuka modul monitoring dan CRUD dashboard.</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-emerald-50/30 to-slate-100 flex flex-col font-sans relative">
+      {/* Background pattern */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `radial-gradient(circle at 15% 10%, rgba(16,185,129,0.10) 0%, transparent 40%), radial-gradient(circle at 85% 90%, rgba(208,139,47,0.10) 0%, transparent 40%)`,
+        }}
+      />
 
-        <form className="login-form" onSubmit={submitLogin}>
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            type="email"
-            value={form.email}
-            onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-            required
-          />
-
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            value={form.password}
-            onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-            required
-          />
-
-          <button className="topbar-action" type="submit" disabled={loading}>
-            {loading ? 'Memproses...' : 'Masuk'}
-          </button>
-        </form>
-
-        <div className="login-hint">
-          <strong>Akun default seeder:</strong>
-          <span>superadmin@school-erp.local / Password123!</span>
+      {/* Top Info Bar */}
+      <div className="relative z-10 border-b border-emerald-200/60 bg-white/80 backdrop-blur-sm shadow-xs">
+        <div className="max-w-5xl mx-auto px-4 py-2.5 flex items-center gap-2">
+          {pengaturan?.logoUrl ? (
+            <img
+              src={pengaturan.logoUrl}
+              alt="Logo"
+              className="w-6 h-6 rounded object-contain"
+            />
+          ) : (
+            <div className="w-6 h-6 rounded-lg bg-emerald-800 text-amber-300 flex items-center justify-center">
+              <FaMosque className="w-3.5 h-3.5" />
+            </div>
+          )}
+          <span className="text-xs font-bold text-emerald-900 tracking-tight">
+            {namaSekolah}
+          </span>
+          <span className="hidden sm:block text-xs text-slate-400">•</span>
+          <span className="hidden sm:block text-xs text-slate-500 font-medium">
+            Sistem Manajemen Sekolah Islam Terpadu
+          </span>
         </div>
       </div>
-    </section>
+
+      {/* Main Login Area */}
+      <div className="relative z-10 flex-1 flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          <LoginCard onLoginSuccess={handleLoginSuccess} />
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="relative z-10 text-center py-4 text-[11px] text-slate-400 border-t border-slate-200/60 bg-white/60">
+        © 2024 {namaSekolah} — Sistem Manajemen Sekolah Islam Terpadu. All rights reserved.
+      </div>
+    </div>
   )
 }

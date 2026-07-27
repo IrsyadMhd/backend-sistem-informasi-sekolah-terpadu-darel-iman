@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { useState, useRef, useEffect } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   FaBars,
   FaBell,
@@ -17,6 +17,7 @@ import {
   FaSignOutAlt,
   FaTimes,
   FaUserCircle,
+  FaUserTie,
 } from 'react-icons/fa'
 import Swal from 'sweetalert2'
 import { authService } from '../services/authService'
@@ -26,13 +27,28 @@ import { useUnitStore } from '../stores/unitStore'
 
 export default function DashboardLayout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
   const clearSession = useAuthStore((state) => state.clearSession)
   const activeUnit = useUnitStore((state) => state.activeUnit)
   const pengaturan = usePengaturanStore((state) => state.pengaturan)
+  const namaSekolah = pengaturan?.namaSekolah || 'YAYASAN DAR EL - IMAN'
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [openSection, setOpenSection] = useState('master-data')
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
+  const profileDropdownRef = useRef(null)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = (e) => {
+      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target)) {
+        setProfileDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const namaTampil = user?.name || 'Kepala Sekolah'
   const roleTampil = 'Administrator'
@@ -71,10 +87,19 @@ export default function DashboardLayout() {
       icon: FaDatabase,
       submenus: [
         { to: '/dashboard/students/unit-pendidikan', label: 'Unit Pendidikan' },
-        { to: '/dashboard/students', label: 'Siswa' },
-        { to: '/dashboard/academic', label: 'Guru' },
-        { to: '/dashboard/students/kelas', label: 'Kelas & Rombel' },
-        { to: '/dashboard/parents', label: 'Orang Tua / Wali' },
+        { to: '/dashboard/master-jenis-unit', label: 'Jenis Unit Pendidikan' },
+        { to: '/dashboard/master-jabatan', label: 'Master Jabatan' },
+        { to: '/dashboard/hak-akses', label: 'Hak Akses Sistem' },
+        { to: '/dashboard/employees', label: 'Data Pegawai' },
+        { to: '/dashboard/students', label: 'Data Siswa' },
+      ],
+    },
+    {
+      key: 'kepegawaian',
+      label: 'Kepegawaian',
+      icon: FaUserTie,
+      submenus: [
+        { to: '/dashboard/students/rombel', label: 'Kelas & Rombel' },
       ],
     },
     {
@@ -106,15 +131,15 @@ export default function DashboardLayout() {
         { to: '/dashboard/laporan-tahfizh', label: 'Laporan Mutabaah' },
       ],
     },
-    {
-      key: 'keuangan',
-      label: 'Keuangan',
-      icon: FaMoneyBillWave,
-      submenus: [
-        { to: '/dashboard/students', label: 'SPP & Tagihan' },
-        { to: '/dashboard/laporan-siswa', label: 'Laporan Keuangan' },
-      ],
-    },
+    // {
+    //   key: 'keuangan',
+    //   label: 'Keuangan',
+    //   icon: FaMoneyBillWave,
+    //   submenus: [
+    //     { to: '/dashboard/students', label: 'SPP & Tagihan' },
+    //     { to: '/dashboard/laporan-siswa', label: 'Laporan Keuangan' },
+    //   ],
+    // },
     {
       key: 'laporan',
       label: 'Laporan',
@@ -130,6 +155,7 @@ export default function DashboardLayout() {
       label: 'Pengaturan',
       icon: FaCog,
       submenus: [
+        { to: '/dashboard/profil-akun', label: 'Profil & Akun' },
         { to: '/dashboard/pengaturan', label: 'Profil Sekolah' },
         { to: '/dashboard/notifications', label: 'Notifikasi & User' },
       ],
@@ -155,9 +181,8 @@ export default function DashboardLayout() {
 
       {/* Sidebar Navigation */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[240px] flex-col justify-between border-r border-emerald-900/40 bg-[#064e3b] p-3 text-white transition-transform duration-300 md:static md:translate-x-0 ${
-          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 flex w-[240px] flex-col justify-between border-r border-emerald-900/40 bg-[#064e3b] p-3 text-white transition-transform duration-300 md:static md:translate-x-0 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+          }`}
       >
         <div className="space-y-4">
           {/* Header Brand */}
@@ -167,7 +192,7 @@ export default function DashboardLayout() {
                 <FaQuran className="text-lg" />
               </div>
               <div>
-                <h1 className="text-sm font-bold tracking-tight text-white leading-tight">Dar El-Iman</h1>
+                <h1 className="text-sm font-bold tracking-tight text-white leading-tight">{namaSekolah}</h1>
                 <p className="text-[10px] font-medium text-emerald-200/80 uppercase tracking-widest">Sistem Manajemen Sekolah</p>
               </div>
             </div>
@@ -191,11 +216,10 @@ export default function DashboardLayout() {
                     key={item.key}
                     to={item.to}
                     onClick={() => setMobileMenuOpen(false)}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition ${
-                      isActive
-                        ? 'bg-emerald-600 text-white font-semibold shadow-sm'
-                        : 'text-emerald-100/90 hover:bg-emerald-800/60 hover:text-white'
-                    }`}
+                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition ${isActive
+                      ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                      : 'text-emerald-100/90 hover:bg-emerald-800/60 hover:text-white'
+                      }`}
                   >
                     <Icon className="text-sm" />
                     <span>{item.label}</span>
@@ -211,11 +235,10 @@ export default function DashboardLayout() {
                   <button
                     type="button"
                     onClick={() => toggleSection(item.key)}
-                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-xs font-medium transition ${
-                      hasActiveChild || isOpen
-                        ? 'text-white font-semibold'
-                        : 'text-emerald-100/90 hover:bg-emerald-800/60 hover:text-white'
-                    }`}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-xs font-medium transition ${hasActiveChild || isOpen
+                      ? 'text-white font-semibold'
+                      : 'text-emerald-100/90 hover:bg-emerald-800/60 hover:text-white'
+                      }`}
                   >
                     <div className="flex items-center gap-3">
                       <Icon className="text-sm" />
@@ -233,11 +256,10 @@ export default function DashboardLayout() {
                             key={sub.label}
                             to={sub.to}
                             onClick={() => setMobileMenuOpen(false)}
-                            className={`block rounded-md px-2.5 py-1.5 transition text-xs ${
-                              active
-                                ? 'bg-emerald-600 text-white font-semibold shadow-sm'
-                                : 'text-emerald-200/90 hover:bg-emerald-800/40 hover:text-white'
-                            }`}
+                            className={`block rounded-md px-2.5 py-1.5 transition text-xs ${active
+                              ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                              : 'text-emerald-200/90 hover:bg-emerald-800/40 hover:text-white'
+                              }`}
                           >
                             {sub.label}
                           </NavLink>
@@ -251,16 +273,36 @@ export default function DashboardLayout() {
           </nav>
         </div>
 
-        {/* Profile Card Footer */}
+        {/* Profile Card Footer
         <div className="mt-4 border-t border-emerald-700/50 pt-3">
           <div className="flex items-center gap-2.5 px-1 py-1">
-            <div className="h-9 w-9 overflow-hidden rounded-full border border-emerald-400/50 bg-emerald-800 flex items-center justify-center">
-              <FaUserCircle className="text-2xl text-emerald-200" />
+            <div
+              onClick={() => navigate('/dashboard/profil-akun')}
+              title="Lihat Profil User"
+              className="h-9 w-9 overflow-hidden rounded-full border border-emerald-400/50 bg-emerald-800 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-emerald-300 transition"
+            >
+              {user?.avatar ? (
+                <img src={user.avatar} alt="Foto Profil" className="h-full w-full object-cover" />
+              ) : (
+                <FaUserCircle className="text-2xl text-emerald-200" />
+              )}
             </div>
-            <div className="min-w-0 flex-1">
+            <div
+              onClick={() => navigate('/dashboard/profil-akun')}
+              title="Lihat Profil User"
+              className="min-w-0 flex-1 cursor-pointer hover:opacity-90 transition"
+            >
               <p className="truncate text-xs font-semibold text-white">{namaTampil}</p>
               <p className="truncate text-[10px] text-emerald-200/80">{roleTampil}</p>
             </div>
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard/profil-akun')}
+              title="Lihat Profil"
+              className="rounded-lg p-1.5 text-emerald-200 hover:bg-emerald-800 hover:text-white transition"
+            >
+              <FaUserCircle className="text-xs" />
+            </button>
             <button
               type="button"
               onClick={logout}
@@ -270,7 +312,7 @@ export default function DashboardLayout() {
               <FaSignOutAlt className="text-xs" />
             </button>
           </div>
-        </div>
+        </div> */}
       </aside>
 
       {/* Main Content Area */}
@@ -297,6 +339,7 @@ export default function DashboardLayout() {
               <span>{tanggalTampil}</span>
             </div>
 
+            {/* Notification Bell */}
             <div className="relative">
               <button
                 type="button"
@@ -307,6 +350,73 @@ export default function DashboardLayout() {
                   3
                 </span>
               </button>
+            </div>
+
+            {/* Profile Avatar Dropdown */}
+            <div className="relative" ref={profileDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:border-emerald-300 transition-all shadow-xs"
+              >
+                <div className="w-7 h-7 rounded-full bg-emerald-800 text-amber-300 flex items-center justify-center">
+                  <FaUserCircle className="text-base" />
+                </div>
+                <div className="hidden sm:block text-left">
+                  <p className="text-xs font-bold text-slate-800 leading-none">{namaTampil}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{roleTampil}</p>
+                </div>
+                <FaChevronDown className="text-[9px] text-slate-400" />
+              </button>
+
+              {/* Dropdown Menu */}
+              {profileDropdownOpen && (
+                <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden z-50">
+                  {/* Header */}
+                  <div className="px-4 py-3 bg-emerald-50 border-b border-emerald-100">
+                    <p className="text-xs font-bold text-emerald-900">{namaTampil}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                      {user?.email || 'admin@dareliman.sch.id'}
+                    </p>
+                  </div>
+
+                  {/* Menu Items */}
+                  <div className="p-1.5 space-y-0.5">
+                    <button
+                      onClick={() => { navigate('/dashboard/profil-akun'); setProfileDropdownOpen(false) }}
+                      className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition-colors"
+                    >
+                      <FaUserCircle className="text-emerald-700 text-sm" />
+                      <span>Profil & Akun</span>
+                    </button>
+                    <button
+                      onClick={() => { navigate('/dashboard/profil-akun?tab=ganti-password'); setProfileDropdownOpen(false) }}
+                      className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition-colors"
+                    >
+                      <FaCog className="text-slate-500 text-sm" />
+                      <span>Ganti Password</span>
+                    </button>
+                    <button
+                      onClick={() => { navigate('/dashboard/profil-akun?tab=session-login'); setProfileDropdownOpen(false) }}
+                      className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 transition-colors"
+                    >
+                      <FaChevronRight className="text-slate-500 text-sm" />
+                      <span>Session Login</span>
+                    </button>
+                  </div>
+
+                  {/* Divider + Logout */}
+                  <div className="border-t border-slate-100 p-1.5">
+                    <button
+                      onClick={() => { setProfileDropdownOpen(false); logout() }}
+                      className="w-full text-left flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      <FaSignOutAlt className="text-sm" />
+                      <span>Keluar dari Sistem</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>

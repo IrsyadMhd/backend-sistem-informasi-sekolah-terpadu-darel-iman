@@ -4,9 +4,10 @@ const KUNCI_PENGATURAN = 'pengaturan_dashboard'
 
 const defaultPengaturan = {
   namaDashboard: 'Dashboard Monitoring Kepala Sekolah',
-  namaSekolah: 'SDIT DAR EL-IMAN',
-  logoTeks: 'SDIT',
+  namaSekolah: 'YAYASAN DAR EL - IMAN',
+  logoTeks: 'YDE',
   logoUrl: '',
+  faviconUrl: '',
   alamatFooter: 'Jl. Pendidikan No. 1, Kota Padang',
 }
 

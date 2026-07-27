@@ -3,20 +3,33 @@
 namespace Database\Seeders;
 
 use App\Models\User;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
 {
     /**
      * Seed the application's database.
+     * Order specified:
+     * 1. Role & Permission
+     * 2. Unit
+     * 3. Guru
+     * 4. Pegawai
+     * 5. OrangTua
+     * 6. Siswa
+     * 7. Mapel
      */
     public function run(): void
     {
         $this->call([
             RolePermissionSeeder::class,
-            DataDummySiswaSeeder::class,
+            MasterJenisUnitPendidikanSeeder::class,
             DataDummyUnitPendidikanSeeder::class,
+            TeacherSeeder::class,
+            MasterJabatanSeeder::class,
+            DataDummyPegawaiSeeder::class,
+            ParentSeeder::class,
+            DataDummySiswaSeeder::class,
+            SubjectSeeder::class,
         ]);
 
         $superAdmin = User::query()->firstOrCreate([

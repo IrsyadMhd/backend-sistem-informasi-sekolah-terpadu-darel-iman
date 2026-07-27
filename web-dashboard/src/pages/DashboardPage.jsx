@@ -222,13 +222,27 @@ export default function DashboardPage() {
   if (errorRingkasan) return <section className="panel"><h3>Gagal memuat data dashboard</h3><p>Pastikan sudah login dan token tersimpan pada localStorage.</p></section>
 
   return (
-    <section className="content-grid dashboard-utama-grid">
-      <div className="panel unit-banner wide">
-        <div>
-          <p className="topbar-label">Dashboard Unit</p>
-          <h3>{profilUnit.jenjang}</h3>
+    <section className="content-grid dashboard-utama-grid space-y-6">
+      {/* Header Banner Emerald persis Gambar UI/UX */}
+      <div className="bg-[#054e3b] rounded-[24px] p-7 text-white shadow-lg border border-emerald-800/40 col-span-full">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <span className="bg-[#086a52] text-emerald-200 text-[11px] font-extrabold px-3.5 py-1 rounded-full uppercase tracking-wider">
+              PEMANTAUAN TERPADU
+            </span>
+            <h1 className="text-3xl md:text-4xl font-black mt-2 tracking-tight">
+              Dashboard {profilUnit.jenjang}
+            </h1>
+            <p className="text-emerald-100/90 text-sm mt-1">
+              Ringkasan statistik operasional unit {activeUnit} di lingkungan Dar El-Iman
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="bg-[#086a52] text-white font-extrabold px-4 py-2 rounded-full border border-emerald-500/30 text-xs shadow-sm">
+              Unit Aktif: {activeUnit}
+            </span>
+          </div>
         </div>
-        <span className="panel-filter-chip">Unit {activeUnit}</span>
       </div>
 
       <div className="stats-grid">
