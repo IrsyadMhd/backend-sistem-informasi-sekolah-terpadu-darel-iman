@@ -82,4 +82,39 @@ class Student extends Model
     {
         return $query->where('unit_id', $unitId);
     }
+
+    // === Relasi Baru (SAFE REFACTOR — backward compatible) ===
+
+    /**
+     * Relasi many-to-many ke orang tua (via tabel pivot student_parents baru).
+     * students.parent_id lama tetap ada untuk backward compat.
+     */
+    public function parentsPivot()
+    {
+        return $this->belongsToMany(
+            ParentModel::class,
+            'student_parents',
+            'student_id',
+            'parent_id'
+        )->withPivot(['relationship_type', 'is_primary'])->withTimestamps();
+    }
+
+    /** Nilai raport siswa */
+    public function grades()
+    {
+        return $this->hasMany(StudentGrade::class, 'student_id');
+    }
+
+    /** Jadwal kelas siswa (via kelas) */
+    public function schedules()
+    {
+        return $this->hasManyThrough(
+            ClassSchedule::class,
+            Kelas::class,
+            'id',        // kelas.id
+            'kelas_id',  // class_schedules.kelas_id
+            'class_id',  // students.class_id
+            'id'         // kelas.id
+        );
+    }
 }
