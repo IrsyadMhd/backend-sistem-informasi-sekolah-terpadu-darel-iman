@@ -75,4 +75,30 @@ class Employee extends Model
     {
         return $this->hasMany(EmployeeTeaching::class, 'employee_id');
     }
+
+    // === Relasi Baru (SAFE REFACTOR — backward compatible) ===
+
+    /** Divisi pegawai (dari tabel divisions baru) */
+    public function division()
+    {
+        return $this->belongsTo(Division::class, 'division_id');
+    }
+
+    /** Jadwal mengajar pegawai */
+    public function schedules()
+    {
+        return $this->hasMany(ClassSchedule::class, 'employee_id');
+    }
+
+    /** Bridge ke tabel teachers lama (jika ada entri yang di-match) */
+    public function teacherBridge()
+    {
+        return $this->hasOne(Teacher::class, 'employee_id');
+    }
+
+    /** Nilai yang diinput oleh pegawai/guru (sebagai pembuat) */
+    public function grades()
+    {
+        return $this->hasMany(StudentGrade::class, 'created_by', 'user_id');
+    }
 }
