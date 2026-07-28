@@ -5,14 +5,18 @@ use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\ClassController;
 use App\Http\Controllers\Api\V1\DashboardPemantauanController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\DivisionController;
 use App\Http\Controllers\Api\V1\EducationUnitController;
 use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\FeaturePlaceholderController;
+use App\Http\Controllers\Api\V1\GradeController;
 use App\Http\Controllers\Api\V1\HakAksesController;
 use App\Http\Controllers\Api\V1\JabatanController;
 use App\Http\Controllers\Api\V1\JenisUnitPendidikanController;
 use App\Http\Controllers\Api\V1\KelasController;
+use App\Http\Controllers\Api\V1\MasterKurikulumController;
 use App\Http\Controllers\Api\V1\ModulSemesterController;
+use App\Http\Controllers\Api\V1\ScheduleController;
 use App\Http\Controllers\Api\V1\StudentController;
 use App\Http\Controllers\Api\V1\SubjectController;
 use App\Http\Controllers\Api\V1\TahfizhController;
@@ -132,6 +136,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/modul-semester/{id}/duplicate', [ModulSemesterController::class, 'duplicate']);
         Route::post('/modul-semester/{id}/toggle-status', [ModulSemesterController::class, 'toggleStatus']);
         Route::apiResource('modul-semester', ModulSemesterController::class);
+
+        // Master Kurikulum
+        Route::get('/kurikulum/dropdown', [MasterKurikulumController::class, 'dropdown']);
+        Route::get('/kurikulum/stats', [MasterKurikulumController::class, 'stats']);
+        Route::get('/kurikulum/export', [MasterKurikulumController::class, 'export']);
+        Route::post('/kurikulum/import', [MasterKurikulumController::class, 'import']);
+        Route::post('/kurikulum/{id}/restore', [MasterKurikulumController::class, 'restore']);
+        Route::apiResource('kurikulum', MasterKurikulumController::class);
     });
 
     // Rute Master Hak Akses (Role & Permission — Spatie)
@@ -170,4 +182,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/exams', fn () => app(FeaturePlaceholderController::class)('exams'));
     Route::get('/alumni', fn () => app(FeaturePlaceholderController::class)('alumni'));
     Route::get('/notifications', fn () => app(FeaturePlaceholderController::class)('notifications'));
+
+    // =========================================================================
+    // SAFE REFACTOR — Routes Baru (tidak mengubah routes di atas)
+    // =========================================================================
+
+    // Master Divisi
+    Route::get('/divisions/dropdown', [DivisionController::class, 'dropdown']);
+    Route::apiResource('divisions', DivisionController::class)->except(['create', 'edit']);
+
+    // Jadwal Pelajaran
+    Route::apiResource('schedules', ScheduleController::class)->except(['create', 'edit']);
+
+    // Nilai Siswa / Raport
+    Route::get('/grades/rekap', [GradeController::class, 'rekap']);
+    Route::apiResource('grades', GradeController::class)->except(['create', 'edit', 'destroy']);
 });

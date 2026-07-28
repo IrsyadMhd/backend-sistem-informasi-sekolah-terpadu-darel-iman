@@ -29,4 +29,28 @@ class EducationUnit extends Model
             'metadata' => 'array',
         ];
     }
+
+    // === Relasi Baru (SAFE REFACTOR — backward compatible) ===
+
+    /**
+     * Jenis unit pendidikan (FK via jenis_unit_id yang ditambah Migration 01).
+     * Relasi ini sudah ada di JenisUnitPendidikan model (hasMany),
+     * sekarang ditambahkan sisi belongsTo untuk kelengkapan.
+     */
+    public function jenisUnit()
+    {
+        return $this->belongsTo(JenisUnitPendidikan::class, 'jenis_unit_id', 'uuid');
+    }
+
+    /** Pegawai di unit ini */
+    public function employees()
+    {
+        return $this->hasMany(Employee::class, 'unit_id');
+    }
+
+    /** Kelas (rombel) di unit ini */
+    public function kelas()
+    {
+        return $this->hasMany(Kelas::class, 'unit_pendidikan_id');
+    }
 }

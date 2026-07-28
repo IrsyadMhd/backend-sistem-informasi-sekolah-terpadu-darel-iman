@@ -27,6 +27,7 @@ const MasterHakAksesPage = lazy(() => import('../pages/MasterHakAksesPage'))
 const MasterJenisUnitPendidikanPage = lazy(() => import('../pages/MasterJenisUnitPendidikanPage'))
 const MasterTahunAjaranPage = lazy(() => import('../pages/MasterTahunAjaranPage'))
 const MasterModulSemesterPage = lazy(() => import('../pages/MasterModulSemesterPage'))
+const MasterKurikulumPage = lazy(() => import('../pages/MasterKurikulumPage'))
 const StudentCrudPage = lazy(() => import('../pages/StudentCrudPage'))
 const MultiRoleDashboardPage = lazy(() => import('../pages/MultiRoleDashboardPage'))
 import RouteErrorElement from '../components/common/RouteErrorElement'
@@ -257,6 +258,14 @@ export const router = createBrowserRouter([
             element: (
               <BungkusLazy>
                 <MasterModulSemesterPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-kurikulum',
+            element: (
+              <BungkusLazy>
+                <MasterKurikulumPage />
               </BungkusLazy>
             ),
           },

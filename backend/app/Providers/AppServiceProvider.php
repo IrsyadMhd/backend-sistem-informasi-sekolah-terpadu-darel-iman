@@ -28,6 +28,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(\App\Repositories\Contracts\SubjectRepositoryInterface::class, \App\Repositories\Eloquent\SubjectRepository::class);
         $this->app->bind(\App\Repositories\Contracts\TahunAjaranRepositoryInterface::class, \App\Repositories\Eloquent\TahunAjaranRepository::class);
         $this->app->bind(\App\Repositories\Contracts\ModulSemesterRepositoryInterface::class, \App\Repositories\Eloquent\ModulSemesterRepository::class);
+        $this->app->bind(\App\Repositories\Contracts\MasterKurikulumRepositoryInterface::class, \App\Repositories\Eloquent\MasterKurikulumRepository::class);
     }
 
     /**

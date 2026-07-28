@@ -141,6 +141,7 @@ export default function DashboardLayout() {
         { to: '/dashboard/students/unit-pendidikan', label: 'Unit Pendidikan' },
         { to: '/dashboard/master-jenis-unit', label: 'Jenis Unit' },
         { to: '/dashboard/master-tahun-ajaran', label: 'Tahun Ajaran' },
+        { to: '/dashboard/master-kurikulum', label: 'Master Kurikulum' },
         { to: '/dashboard/master-jabatan', label: 'Jabatan' },
         { to: '/dashboard/employees', label: 'Pegawai' },
         { to: '/dashboard/students', label: 'Siswa' },
@@ -153,7 +154,7 @@ export default function DashboardLayout() {
       submenus: [
         { to: '/dashboard/master-tahun-ajaran', label: 'Tahun Ajaran' },
         { to: '/dashboard/master-modul-semester', label: 'Semester' },
-        { to: '/dashboard/laporan-akademik', label: 'Kurikulum' },
+        { to: '/dashboard/master-kurikulum', label: 'Kurikulum' },
         { to: '/dashboard/students/rombel', label: 'Kelas & Rombel' },
         { to: '/dashboard/academic', label: 'Mata Pelajaran' },
       ],

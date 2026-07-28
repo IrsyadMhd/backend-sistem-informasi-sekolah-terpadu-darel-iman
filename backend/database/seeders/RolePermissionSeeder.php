@@ -65,6 +65,13 @@ class RolePermissionSeeder extends Seeder
             'kesiswaan.catatan_siswa',
 
             // Pembelajaran & Kurikulum
+            'pembelajaran.kurikulum.view',
+            'pembelajaran.kurikulum.create',
+            'pembelajaran.kurikulum.edit',
+            'pembelajaran.kurikulum.delete',
+            'pembelajaran.kurikulum.restore',
+            'pembelajaran.kurikulum.export',
+            'pembelajaran.kurikulum.import',
             'pembelajaran.materi',
             'pembelajaran.kisi_kisi_ujian',
             'pembelajaran.bank_soal',
