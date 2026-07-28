@@ -30,6 +30,7 @@ class DatabaseSeeder extends Seeder
             ParentSeeder::class,
             DataDummySiswaSeeder::class,
             SubjectSeeder::class,
+            ModulSemesterSeeder::class,
         ]);
 
         $superAdmin = User::query()->firstOrCreate([

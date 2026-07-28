@@ -42,7 +42,6 @@ class Position extends Model
         'urutan',
         'warna',
         'ikon',
-        'deskripsi',
         'description',
         'is_active',
         'tampil_struktur',
@@ -85,6 +84,16 @@ class Position extends Model
     public function getLevelLabelAttribute(): string
     {
         return static::LEVEL_JABATAN_MAP[$this->level_jabatan] ?? "Level {$this->level_jabatan}";
+    }
+
+    public function getDeskripsiAttribute(): ?string
+    {
+        return $this->attributes['description'] ?? null;
+    }
+
+    public function setDeskripsiAttribute(?string $value): void
+    {
+        $this->attributes['description'] = $value;
     }
 
     // Relations

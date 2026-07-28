@@ -3,8 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Employee;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -266,4 +268,147 @@ class HakAksesController extends Controller
             ],
         ]);
     }
+
+    // ─────────────────────────────────────────────────
+    // PEGAWAI HAK AKSES (MENARIK DATA PEGAWAI)
+    // ─────────────────────────────────────────────────
+
+    /**
+     * Daftar pegawai beserta role & permission yang dimiliki (menarik data pegawai).
+     */
+    public function indexPegawaiHakAkses(Request $request): JsonResponse
+    {
+        $search = $request->get('search', '');
+        $unitId = $request->get('unit_id', '');
+        $jabatanId = $request->get('jabatan_id', '');
+
+        $query = Employee::with(['unit', 'position', 'user', 'user.roles', 'user.permissions', 'role'])
+            ->orderBy('nama_lengkap');
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('nama_lengkap', 'ilike', "%{$search}%")
+                  ->orWhere('niy', 'ilike', "%{$search}%")
+                  ->orWhere('nik', 'ilike', "%{$search}%")
+                  ->orWhere('email', 'ilike', "%{$search}%");
+            });
+        }
+
+        if ($unitId) {
+            $query->where('unit_id', $unitId);
+        }
+
+        if ($jabatanId) {
+            $query->where('jabatan_id', $jabatanId);
+        }
+
+        $perPage = (int) $request->get('per_page', 15);
+        $pegawai = $query->paginate($perPage);
+
+        $mappedData = collect($pegawai->items())->map(function ($emp) {
+            $user = $emp->user;
+            $roles = $user ? $user->roles->pluck('name') : collect([]);
+            if ($roles->isEmpty() && $emp->role) {
+                $roles = collect([$emp->role->name]);
+            }
+
+            $directPermissions = $user ? $user->permissions->pluck('name') : collect([]);
+            $allPermissions = $user ? $user->getAllPermissions()->pluck('name') : collect([]);
+
+            return [
+                'id'                 => $emp->id,
+                'niy'                => $emp->niy,
+                'nik'                => $emp->nik,
+                'nama_lengkap'       => $emp->nama_lengkap,
+                'email'              => $emp->email,
+                'no_hp'              => $emp->no_hp,
+                'unit'               => $emp->unit ? [
+                    'id'   => $emp->unit->id,
+                    'nama' => $emp->unit->nama_unit ?? $emp->unit->name ?? '-',
+                ] : null,
+                'position'           => $emp->position ? [
+                    'id'   => $emp->position->id,
+                    'nama' => $emp->position->name ?? $emp->position->nama_jabatan ?? '-',
+                ] : null,
+                'user_id'            => $emp->user_id,
+                'has_user'           => (bool) $user,
+                'user_email'         => $user ? $user->email : null,
+                'roles'              => $roles,
+                'primary_role'       => $roles->first() ?? 'Belum Ada Role',
+                'direct_permissions' => $directPermissions,
+                'all_permissions'    => $allPermissions,
+                'status_pegawai'     => $emp->status_pegawai,
+                'status'             => $emp->status,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data'    => $mappedData,
+            'meta'    => [
+                'current_page' => $pegawai->currentPage(),
+                'last_page'    => $pegawai->lastPage(),
+                'per_page'     => $pegawai->perPage(),
+                'total'        => $pegawai->total(),
+            ],
+        ]);
+    }
+
+    /**
+     * Penetapan / Ubah Role & Permission Pegawai (serta auto-create akun user jika belum ada).
+     */
+    public function assignPegawaiRole(Request $request, string $employeeId): JsonResponse
+    {
+        $validated = $request->validate([
+            'role_name'     => ['required', 'string', 'exists:roles,name'],
+            'permissions'   => ['nullable', 'array'],
+            'permissions.*' => ['string', 'exists:permissions,name'],
+            'password'      => ['nullable', 'string', 'min:6'],
+        ]);
+
+        $employee = Employee::findOrFail($employeeId);
+
+        try {
+            DB::transaction(function () use ($employee, $validated) {
+                // Tentukan atau buat akun User jika belum terhubung
+                $user = $employee->user;
+                if (!$user) {
+                    $email = $employee->email ?: strtolower($employee->niy ?: $employee->id) . '@sims.local';
+                    $user = User::create([
+                        'name'      => $employee->nama_lengkap,
+                        'email'     => $email,
+                        'password'  => bcrypt($validated['password'] ?? '12345678'),
+                        'phone'     => $employee->no_hp,
+                        'is_active' => true,
+                    ]);
+
+                    $employee->user_id = $user->id;
+                }
+
+                $role = Role::where('name', $validated['role_name'])->first();
+                if ($role) {
+                    $employee->role_id = $role->id;
+                }
+                $employee->save();
+
+                // Sync Spatie role & direct permissions di User
+                $user->syncRoles([$validated['role_name']]);
+
+                if (isset($validated['permissions'])) {
+                    $user->syncPermissions($validated['permissions']);
+                }
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => "Hak akses pegawai '{$employee->nama_lengkap}' berhasil diperbarui.",
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal memperbarui hak akses pegawai: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
 }
+

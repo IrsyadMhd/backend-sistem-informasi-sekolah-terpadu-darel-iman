@@ -126,8 +126,7 @@ class JabatanService
                 'urutan'              => $data['urutan'] ?? 0,
                 'warna'               => $data['warna'] ?? '#3B82F6',
                 'ikon'                => $data['ikon'] ?? 'UserCheck',
-                'deskripsi'           => $data['deskripsi'] ?? null,
-                'description'         => $data['deskripsi'] ?? null,
+                'description'         => $data['deskripsi'] ?? $data['description'] ?? null,
                 'is_active'           => $isActive,
                 'tampil_struktur'     => $data['tampil_struktur'] ?? true,
                 'boleh_login'         => $data['boleh_login'] ?? false,
@@ -192,8 +191,9 @@ class JabatanService
                 $payload['ikon'] = $data['ikon'];
             }
             if (array_key_exists('deskripsi', $data)) {
-                $payload['deskripsi'] = $data['deskripsi'];
                 $payload['description'] = $data['deskripsi'];
+            } elseif (array_key_exists('description', $data)) {
+                $payload['description'] = $data['description'];
             }
             if (array_key_exists('status', $data)) {
                 $payload['is_active'] = ($data['status'] === 'Aktif');

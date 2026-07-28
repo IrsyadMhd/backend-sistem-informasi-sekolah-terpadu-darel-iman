@@ -1,13 +1,23 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web-dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <meta name="theme-color" content="#0E5C44" />
+    <meta name="description" content="Sistem Manajemen Sekolah Terpadu berbasis Web Dashboard - Enterprise Islamic Education SaaS Dashboard" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>SIMS Terpadu - Yayasan Dar El-Iman</title>
   </head>
-  <body>
+  <body class="bg-[#F8FAFC] text-[#0F172A] antialiased dark:bg-[#0F172A] dark:text-slate-100">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch((err) => console.log('SW reg error:', err));
+        });
+      }
+    </script>
   </body>
 </html>

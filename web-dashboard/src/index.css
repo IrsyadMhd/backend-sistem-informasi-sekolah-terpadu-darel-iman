@@ -1,31 +1,45 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Sora:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap');
 @import 'tailwindcss';
 
-:root {
-  --green-900: #0c4a32;
-  --green-700: #166534;
-  --green-500: #1f8d63;
-  --gold-500: #d08b2f;
-  --cream-100: #f7f2e9;
-  --cream-200: #f2e8da;
-  --slate-200: #e5ddd0;
-  --slate-700: #43504a;
-  --slate-900: #1b2b25;
-}
+@custom-variant dark (&:where(.dark, .dark *));
 
-* {
-  box-sizing: border-box;
+:root {
+  --primary-sims: #0E5C44;
+  --secondary-sims: #1E8E5A;
+  --accent-sims: #3FBF75;
+  --bg-light: #F7F9FC;
+  --card-light: #FFFFFF;
+  --bg-dark: #0F172A;
+  --surface-dark: #111827;
+  --card-dark: #1B2433;
+  --radius-master: 18px;
+  --shadow-soft-xl: 0 10px 30px -5px rgba(14, 92, 68, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
 }
 
 body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-light);
+  color: #0F172A;
   margin: 0;
-  font-family: 'Nunito Sans', sans-serif;
-  color: var(--slate-900);
-  background:
-    radial-gradient(circle at 16% 12%, rgba(38, 145, 98, 0.18), transparent 42%),
-    radial-gradient(circle at 82% 92%, rgba(208, 139, 47, 0.2), transparent 40%),
-    repeating-linear-gradient(0deg, transparent 0, transparent 31px, rgba(22, 101, 52, 0.03) 31px, rgba(22, 101, 52, 0.03) 32px),
-    var(--cream-100);
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark body {
+  background-color: var(--bg-dark);
+  color: #F8FAFC;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.dark .glass-card {
+  background: rgba(15, 23, 42, 0.85);
+  border-color: rgba(30, 41, 59, 0.8);
 }
 
 #root {
@@ -1988,3 +2002,123 @@ th {
     min-width: 980px;
   }
 }
+
+/* ==========================================================================
+   MASTER UI LOCK - ENTERPRISE SAAS UTILITIES & ANIMATIONS
+   ========================================================================== */
+
+@keyframes masterModalFadeScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes masterDropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes masterNotificationSlide {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes masterShimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Master Button Micro-interactions */
+.btn-master {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-master:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 0 20px rgba(14, 92, 68, 0.35);
+}
+
+.btn-master:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Master Card Aesthetics */
+.card-master {
+  background-color: #FFFFFF;
+  border-radius: 18px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: var(--shadow-soft-xl);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .card-master {
+  background-color: #1B2433;
+  border-color: rgba(30, 41, 59, 0.8);
+}
+
+.card-master:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 14px 35px -5px rgba(14, 92, 68, 0.12);
+  border-color: rgba(63, 191, 117, 0.4);
+}
+
+/* Menu Active Left Border Indicator */
+.nav-menu-item-active {
+  position: relative;
+  background-color: rgba(255, 255, 255, 0.16) !important;
+  color: #FFFFFF !important;
+}
+
+.nav-menu-item-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12%;
+  bottom: 12%;
+  width: 4px;
+  background-color: #3FBF75;
+  border-radius: 0 4px 4px 0;
+  box-shadow: 0 0 12px #3FBF75;
+}
+
+/* Skeleton Loading Shimmer */
+.skeleton-pulse {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: masterShimmer 1.5s infinite;
+}
+
+.dark .skeleton-pulse {
+  background: linear-gradient(90deg, #111827 25%, #1f2937 50%, #111827 75%);
+  background-size: 200% 100%;
+}
+
+/* Sticky Header Table */
+.sticky-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Traits\HasUuidPrimaryKey;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Attendance extends Model
@@ -14,69 +15,130 @@ class Attendance extends Model
     protected $table = 'attendances';
 
     protected $fillable = [
+        'tipe_presensi',
+        'student_id',
+        'employee_id',
+        'class_id',
+        'unit_pendidikan_id',
         'academic_year_id',
         'semester_id',
         'month',
         'attendance_date',
-        'student_id',
-        'class_id',
         'check_in_time',
         'check_out_time',
         'status',
         'attendance_method',
+        'location',
+        'latitude',
+        'longitude',
+        'attachment_path',
+        'keterangan',
         'metadata',
+        'created_by',
+        'updated_by',
     ];
+
+    protected $appends = ['status_label', 'status_badge_color'];
 
     protected function casts(): array
     {
         return [
-            'attendance_date' => 'date',
+            'attendance_date' => 'date:Y-m-d',
             'check_in_time' => 'datetime',
             'check_out_time' => 'datetime',
             'month' => 'integer',
+            'latitude' => 'float',
+            'longitude' => 'float',
             'metadata' => 'array',
         ];
     }
 
     // Relationships
-    public function student()
+    public function student(): BelongsTo
     {
         return $this->belongsTo(Student::class, 'student_id');
     }
 
-    public function schoolClass()
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'employee_id');
+    }
+
+    public function schoolClass(): BelongsTo
     {
         return $this->belongsTo(SchoolClass::class, 'class_id');
     }
 
-    public function academicYear()
+    public function educationUnit(): BelongsTo
     {
-        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
-    }
-
-    public function semester()
-    {
-        return $this->belongsTo(Semester::class, 'semester_id');
+        return $this->belongsTo(EducationUnit::class, 'unit_pendidikan_id');
     }
 
     // Scopes
-    public function scopePresent($query)
+    public function scopeHadir($query)
     {
-        return $query->where('status', 'HADIR');
+        return $query->whereIn('status', ['HADIR', 'present']);
     }
 
-    public function scopeAbsent($query)
+    public function scopeTerlambat($query)
     {
-        return $query->where('status', 'ALPA');
+        return $query->where('status', 'TERLAMBAT');
     }
 
-    public function scopeByDate($query, string $date)
+    public function scopeIzin($query)
     {
-        return $query->where('attendance_date', $date);
+        return $query->where('status', 'IZIN');
+    }
+
+    public function scopeSakit($query)
+    {
+        return $query->where('status', 'SAKIT');
+    }
+
+    public function scopeAlpha($query)
+    {
+        return $query->whereIn('status', ['ALPHA', 'absent']);
+    }
+
+    public function scopeHariIni($query)
+    {
+        return $query->whereDate('attendance_date', now()->toDateString());
     }
 
     public function scopeByClass($query, string $classId)
     {
         return $query->where('class_id', $classId);
+    }
+
+    public function scopeByUnit($query, string $unitId)
+    {
+        return $query->where('unit_pendidikan_id', $unitId);
+    }
+
+    // Accessors
+    public function getStatusLabelAttribute(): string
+    {
+        return match (strtoupper($this->status ?? '')) {
+            'HADIR', 'PRESENT' => 'Hadir Tepat Waktu',
+            'TERLAMBAT' => 'Hadir Terlambat',
+            'SAKIT' => 'Sakit (Surat Dokter)',
+            'IZIN' => 'Izin (Keterangan)',
+            'ALPHA', 'ABSENT' => 'Tanpa Keterangan (Alpha)',
+            'DINAS_LUAR' => 'Dinas Luar',
+            default => $this->status ?? 'Belum Absen',
+        };
+    }
+
+    public function getStatusBadgeColorAttribute(): string
+    {
+        return match (strtoupper($this->status ?? '')) {
+            'HADIR', 'PRESENT' => 'success',
+            'TERLAMBAT' => 'warning',
+            'SAKIT' => 'info',
+            'IZIN' => 'secondary',
+            'ALPHA', 'ABSENT' => 'danger',
+            'DINAS_LUAR' => 'primary',
+            default => 'default',
+        };
     }
 }

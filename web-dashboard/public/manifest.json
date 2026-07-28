@@ -1,0 +1,16 @@
+{
+  "short_name": "SIMS Terpadu",
+  "name": "Sistem Manajemen Sekolah Terpadu - Dar El-Iman",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": "/dashboard",
+  "background_color": "#F8FAFC",
+  "theme_color": "#0E5C44",
+  "display": "standalone",
+  "orientation": "portrait"
+}

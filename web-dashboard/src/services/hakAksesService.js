@@ -60,4 +60,18 @@ export const hakAksesService = {
     const { data } = await api.get('/hak-akses/stats')
     return data?.data || {}
   },
+
+  // ─────────────────────────────────────────────────
+  // PEGAWAI HAK AKSES (MENARIK DATA PEGAWAI)
+  // ─────────────────────────────────────────────────
+
+  getPegawaiHakAkses: async (params = {}) => {
+    const { data } = await api.get('/hak-akses/pegawai', { params })
+    return data
+  },
+
+  assignPegawaiRole: async ({ employeeId, payload }) => {
+    const { data } = await api.post(`/hak-akses/pegawai/${employeeId}/assign-role`, payload)
+    return data
+  },
 }

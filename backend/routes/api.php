@@ -12,9 +12,11 @@ use App\Http\Controllers\Api\V1\HakAksesController;
 use App\Http\Controllers\Api\V1\JabatanController;
 use App\Http\Controllers\Api\V1\JenisUnitPendidikanController;
 use App\Http\Controllers\Api\V1\KelasController;
+use App\Http\Controllers\Api\V1\ModulSemesterController;
 use App\Http\Controllers\Api\V1\StudentController;
 use App\Http\Controllers\Api\V1\SubjectController;
 use App\Http\Controllers\Api\V1\TahfizhController;
+use App\Http\Controllers\Api\V1\TahunAjaranController;
 use App\Http\Controllers\Api\V1\TeacherController;
 use Illuminate\Support\Facades\Route;
 
@@ -113,6 +115,23 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/subjects/stats', [SubjectController::class, 'stats']);
         Route::post('/subjects/{id}/restore', [SubjectController::class, 'restore']);
         Route::apiResource('subjects', SubjectController::class);
+
+        // Tahun Ajaran (Academic Year)
+        Route::get('/tahun-ajaran/dropdown', [TahunAjaranController::class, 'dropdown']);
+        Route::get('/tahun-ajaran/stats', [TahunAjaranController::class, 'stats']);
+        Route::get('/tahun-ajaran/export', [TahunAjaranController::class, 'export']);
+        Route::post('/tahun-ajaran/import', [TahunAjaranController::class, 'import']);
+        Route::post('/tahun-ajaran/{id}/set-aktif', [TahunAjaranController::class, 'setAktif']);
+        Route::post('/tahun-ajaran/{id}/restore', [TahunAjaranController::class, 'restore']);
+        Route::apiResource('tahun-ajaran', TahunAjaranController::class);
+
+        // Master Modul Semester
+        Route::get('/modul-semester/options', [ModulSemesterController::class, 'options']);
+        Route::get('/modul-semester/stats', [ModulSemesterController::class, 'stats']);
+        Route::post('/modul-semester/{id}/restore', [ModulSemesterController::class, 'restore']);
+        Route::post('/modul-semester/{id}/duplicate', [ModulSemesterController::class, 'duplicate']);
+        Route::post('/modul-semester/{id}/toggle-status', [ModulSemesterController::class, 'toggleStatus']);
+        Route::apiResource('modul-semester', ModulSemesterController::class);
     });
 
     // Rute Master Hak Akses (Role & Permission — Spatie)
@@ -130,11 +149,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/permissions', [HakAksesController::class, 'indexPermissions']);
         Route::post('/permissions', [HakAksesController::class, 'storePermission']);
         Route::delete('/permissions/{id}', [HakAksesController::class, 'destroyPermission']);
+
+        // Pegawai Hak Akses (Menarik Data Pegawai)
+        Route::get('/pegawai', [HakAksesController::class, 'indexPegawaiHakAkses']);
+        Route::post('/pegawai/{id}/assign-role', [HakAksesController::class, 'assignPegawaiRole']);
     });
 
+    Route::get('/attendance/stats', [AttendanceController::class, 'stats']);
     Route::post('/attendance/checkin', [AttendanceController::class, 'absenMasuk']);
     Route::post('/attendance/checkout', [AttendanceController::class, 'absenPulang']);
     Route::get('/attendance/report', [AttendanceController::class, 'rekapKehadiran']);
+    Route::apiResource('attendance', AttendanceController::class);
 
     Route::post('/tahfizh/store', [TahfizhController::class, 'inputSetoran']);
     Route::get('/tahfizh/report', [TahfizhController::class, 'rekapTahfizh']);

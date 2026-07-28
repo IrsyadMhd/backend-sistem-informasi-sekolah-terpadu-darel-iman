@@ -25,6 +25,8 @@ const MasterKelasPage = lazy(() => import('../pages/MasterKelasPage'))
 const MasterJabatanPage = lazy(() => import('../pages/MasterJabatanPage'))
 const MasterHakAksesPage = lazy(() => import('../pages/MasterHakAksesPage'))
 const MasterJenisUnitPendidikanPage = lazy(() => import('../pages/MasterJenisUnitPendidikanPage'))
+const MasterTahunAjaranPage = lazy(() => import('../pages/MasterTahunAjaranPage'))
+const MasterModulSemesterPage = lazy(() => import('../pages/MasterModulSemesterPage'))
 const StudentCrudPage = lazy(() => import('../pages/StudentCrudPage'))
 const MultiRoleDashboardPage = lazy(() => import('../pages/MultiRoleDashboardPage'))
 import RouteErrorElement from '../components/common/RouteErrorElement'
@@ -211,6 +213,14 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'master-tahun-ajaran',
+            element: (
+              <BungkusLazy>
+                <MasterTahunAjaranPage />
+              </BungkusLazy>
+            ),
+          },
+          {
             path: 'hak-akses',
             element: (
               <BungkusLazy>
@@ -239,6 +249,14 @@ export const router = createBrowserRouter([
             element: (
               <BungkusLazy>
                 <AcademicPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-modul-semester',
+            element: (
+              <BungkusLazy>
+                <MasterModulSemesterPage />
               </BungkusLazy>
             ),
           },
