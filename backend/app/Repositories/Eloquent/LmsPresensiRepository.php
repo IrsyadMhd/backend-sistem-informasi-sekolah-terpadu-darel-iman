@@ -190,31 +190,56 @@ class LmsPresensiRepository implements LmsPresensiRepositoryInterface
     public function getOptions(): array
     {
         $schedules = ClassSchedule::query()
-            ->with(['subject:id,name,code', 'kelas:id,nama_kelas,kode_kelas', 'employee:id,full_name,nip'])
-            ->where('is_active', true)
+            ->with([
+                'subject:id,name,code',
+                'kelas:id,nama_kelas,kode_kelas',
+                'schoolClass:id,nama_kelas,name',
+                'employee:id,full_name,nip',
+                'teacher:id,full_name,name',
+            ])
+            ->where(function ($q) {
+                $q->where('is_active', true)
+                  ->orWhere('is_active', 1)
+                  ->orWhereNull('is_active');
+            })
             ->get()
             ->map(function ($s) {
+                $subjectName = $s->subject->name ?? $s->subject->nama ?? 'Mata Pelajaran';
+                $kelasName   = $s->kelas->nama_kelas ?? $s->schoolClass->nama_kelas ?? $s->schoolClass->name ?? 'Kelas';
+                $teacherName = $s->employee->full_name ?? $s->teacher->full_name ?? $s->teacher->name ?? 'Guru';
+                $dayName     = $s->nama_hari ?? ($s->day_of_week ? "Hari {$s->day_of_week}" : '');
+                $timeStart   = $s->time_start ? substr($s->time_start, 0, 5) : '';
+                $timeEnd     = $s->time_end ? substr($s->time_end, 0, 5) : '';
+                $timeStr     = ($timeStart && $timeEnd) ? " ({$timeStart}-{$timeEnd})" : '';
+
+                $label = sprintf(
+                    '%s | %s | %s%s',
+                    $dayName ?: 'Jadwal',
+                    $subjectName,
+                    $kelasName,
+                    $timeStr
+                );
+
                 return [
-                    'id' => $s->id,
-                    'nama_jadwal' => sprintf(
-                        '%s - %s (%s, %s-%s)',
-                        $s->subject->name ?? 'Mata Pelajaran',
-                        $s->kelas->nama_kelas ?? 'Kelas',
-                        $s->nama_hari,
-                        substr($s->time_start, 0, 5),
-                        substr($s->time_end, 0, 5)
-                    ),
-                    'kelas_id' => $s->kelas_id,
-                    'class_id' => $s->class_id,
-                    'subject_id' => $s->subject_id,
-                    'teacher_name' => $s->employee->full_name ?? 'Guru',
-                    'day_name' => $s->nama_hari,
+                    'id'           => $s->id,
+                    'label'        => $label,
+                    'nama_jadwal'  => $label,
+                    'name'         => $label,
+                    'kelas_id'     => $s->kelas_id ?? $s->class_id,
+                    'class_id'     => $s->class_id ?? $s->kelas_id,
+                    'subject_id'   => $s->subject_id,
+                    'teacher_name' => $teacherName,
+                    'day_name'     => $dayName,
                 ];
             });
 
         $students = Student::query()
             ->select('id', 'full_name', 'nis', 'nisn', 'class_id')
-            ->where('is_active', true)
+            ->where(function ($q) {
+                $q->where('is_active', true)
+                  ->orWhere('is_active', 1)
+                  ->orWhereNull('is_active');
+            })
             ->orderBy('full_name')
             ->get();
 

@@ -127,24 +127,101 @@ class LmsKisiKisiService
 
     public function opsi(?string $mataPelajaranId = null, ?string $cpId = null): array
     {
-        $subjects = Subject::select('id', 'name', 'code')->orderBy('name')->get();
+        $subjects = Subject::where('status', true)
+            ->orWhereNull('status')
+            ->orderBy('nama_mapel')
+            ->orderBy('name')
+            ->get()
+            ->map(function ($item) {
+                $name = $item->nama_mapel ?? $item->name ?? 'Mata Pelajaran';
+                $code = $item->kode_mapel ?? $item->code ?? '';
+                return [
+                    'id' => $item->id,
+                    'name' => $name,
+                    'nama' => $name,
+                    'nama_mapel' => $name,
+                    'code' => $code,
+                    'kode' => $code,
+                    'kode_mapel' => $code,
+                    'label' => $code ? "{$code} - {$name}" : $name,
+                ];
+            })
+            ->values();
+
         $kurikulumList = MasterKurikulum::select('id', 'nama_kurikulum', 'kode_kurikulum')->get();
         $kelasList = Kelas::select('id', 'nama_kelas', 'tingkat')->get();
-        $semesters = Semester::select('id', 'nama_semester', 'tipe_semester')->get();
-        $tahunAjaranList = AcademicYear::select('id', 'name', 'status')->get();
+        $semesters = Semester::select('id', 'name', 'sequence')
+            ->get()
+            ->map(fn (Semester $semester) => [
+                'id' => $semester->id,
+                'name' => $semester->name,
+                'nama' => $semester->name,
+                'nama_semester' => $semester->nama_semester,
+                'tipe_semester' => $semester->tipe_semester,
+            ])
+            ->values();
+        $tahunAjaranList = AcademicYear::select('id', 'name', 'is_active')
+            ->get()
+            ->map(fn (AcademicYear $tahunAjaran) => [
+                'id' => $tahunAjaran->id,
+                'name' => $tahunAjaran->name,
+                'status' => $tahunAjaran->is_active,
+                'is_active' => $tahunAjaran->is_active,
+            ])
+            ->values();
         $gurus = Employee::select('id', 'nama_lengkap', 'niy', 'nik')->limit(100)->get();
 
-        $cpQuery = CapaianPembelajaran::select('id', 'kode_cp', 'nama_cp', 'mata_pelajaran_id', 'fase');
-        if ($mataPelajaranId) {
+        $cpQuery = CapaianPembelajaran::query()
+            ->where(function ($q) {
+                $q->where('status', true)->orWhereNull('status');
+            });
+
+        if (!empty($mataPelajaranId) && $mataPelajaranId !== '' && $mataPelajaranId !== 'null') {
             $cpQuery->where('mata_pelajaran_id', $mataPelajaranId);
         }
-        $cps = $cpQuery->get();
 
-        $tpQuery = TujuanPembelajaran::select('id', 'cp_id', 'kode_tp', 'nama_tp', 'deskripsi');
-        if ($cpId) {
+        $cps = $cpQuery->get()
+            ->map(function ($item) {
+                $nama = $item->nama_cp ?? $item->deskripsi ?? 'Capaian Pembelajaran';
+                $kode = $item->kode_cp ?? '';
+                return [
+                    'id' => $item->id,
+                    'mata_pelajaran_id' => $item->mata_pelajaran_id,
+                    'kode_cp' => $kode,
+                    'nama_cp' => $nama,
+                    'deskripsi' => $item->deskripsi ?? $nama,
+                    'fase' => $item->fase ?? null,
+                    'label' => $kode ? "{$kode} - {$nama}" : $nama,
+                ];
+            })
+            ->values();
+
+        $tpQuery = TujuanPembelajaran::query()
+            ->where(function ($q) {
+                $q->where('status', true)->orWhereNull('status');
+            });
+
+        if (!empty($cpId) && $cpId !== '' && $cpId !== 'null') {
             $tpQuery->where('cp_id', $cpId);
+        } elseif (!empty($mataPelajaranId) && $mataPelajaranId !== '' && $mataPelajaranId !== 'null') {
+            $validCpIds = CapaianPembelajaran::where('mata_pelajaran_id', $mataPelajaranId)->pluck('id');
+            $tpQuery->whereIn('cp_id', $validCpIds);
         }
-        $tps = $tpQuery->get();
+
+        $tps = $tpQuery->get()
+            ->map(function ($item) {
+                $nama = $item->nama_tp ?? $item->deskripsi ?? 'Tujuan Pembelajaran';
+                $kode = $item->kode_tp ?? '';
+                return [
+                    'id' => $item->id,
+                    'cp_id' => $item->cp_id,
+                    'kode_tp' => $kode,
+                    'nama_tp' => $nama,
+                    'deskripsi' => $item->deskripsi ?? $nama,
+                    'label' => $kode ? "{$kode} - {$nama}" : $nama,
+                ];
+            })
+            ->values();
 
         return [
             'subjects' => $subjects,

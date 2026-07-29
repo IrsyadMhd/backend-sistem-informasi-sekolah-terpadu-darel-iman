@@ -284,7 +284,15 @@ class LmsRaporRepository implements LmsRaporRepositoryInterface
         return [
             'students' => Student::select('id', 'name', 'nisn', 'nis', 'kelas_id')->orderBy('name')->get(),
             'kelases' => Kelas::select('id', 'nama_kelas', 'tingkat')->orderBy('nama_kelas')->get(),
-            'semesters' => Semester::select('id', 'nama', 'is_active')->get(),
+            'semesters' => Semester::select('id', 'name', 'is_active')
+                ->get()
+                ->map(fn (Semester $semester) => [
+                    'id' => $semester->id,
+                    'name' => $semester->name,
+                    'nama' => $semester->name,
+                    'is_active' => $semester->is_active,
+                ])
+                ->values(),
             'tahun_ajarans' => AcademicYear::select('id', 'year', 'is_active')->get(),
             'employees' => Employee::select('id', 'nama_lengkap', 'niy', 'nik')->orderBy('nama_lengkap')->get(),
         ];

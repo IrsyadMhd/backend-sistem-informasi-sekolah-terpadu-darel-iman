@@ -98,9 +98,15 @@ export default function LmsPresensiPage() {
   const loadInitialOptions = async () => {
     try {
       const resOptions = await lmsPresensiService.getOptions()
-      if (resOptions.success) {
-        setOptions(resOptions.data)
-      }
+      const dataPayload = resOptions?.data?.data || resOptions?.data || resOptions || {}
+      setOptions((prev) => ({
+        ...prev,
+        schedules: Array.isArray(dataPayload.schedules) ? dataPayload.schedules : [],
+        students: Array.isArray(dataPayload.students) ? dataPayload.students : [],
+        statuses: Array.isArray(dataPayload.statuses) && dataPayload.statuses.length > 0
+          ? dataPayload.statuses
+          : prev.statuses,
+      }))
     } catch (err) {
       console.error('Gagal memuat opsi:', err)
     }
@@ -611,11 +617,15 @@ export default function LmsPresensiPage() {
                   className="w-full px-3 py-1.5 rounded-xl text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-[#0E5C44]"
                 >
                   <option value="">Semua Jadwal Pelajaran</option>
-                  {options.schedules.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nama_jadwal}
-                    </option>
-                  ))}
+                  {options.schedules.length === 0 ? (
+                    <option value="" disabled>Belum ada jadwal pelajaran aktif</option>
+                  ) : (
+                    options.schedules.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nama_jadwal || s.label || s.name || 'Jadwal'}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -818,11 +828,15 @@ export default function LmsPresensiPage() {
                   className="w-full px-3.5 py-2 rounded-xl text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-[#0E5C44]"
                 >
                   <option value="">-- Pilih Jadwal Pelajaran --</option>
-                  {options.schedules.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nama_jadwal}
-                    </option>
-                  ))}
+                  {options.schedules.length === 0 ? (
+                    <option value="" disabled>Belum ada jadwal pelajaran aktif</option>
+                  ) : (
+                    options.schedules.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nama_jadwal || s.label || s.name || 'Jadwal'}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -1002,11 +1016,15 @@ export default function LmsPresensiPage() {
                   className="w-full px-3.5 py-2 rounded-xl text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 focus:ring-[#0E5C44]"
                 >
                   <option value="">-- Pilih Jadwal --</option>
-                  {options.schedules.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nama_jadwal}
-                    </option>
-                  ))}
+                  {options.schedules.length === 0 ? (
+                    <option value="" disabled>Belum ada jadwal pelajaran aktif</option>
+                  ) : (
+                    options.schedules.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nama_jadwal || s.label || s.name || 'Jadwal'}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 

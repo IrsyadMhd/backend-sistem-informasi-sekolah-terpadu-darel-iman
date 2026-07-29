@@ -38,6 +38,19 @@ class Semester extends Model
         ];
     }
 
+    /**
+     * Alias kompatibilitas untuk modul LMS yang masih memakai nama field lama.
+     */
+    public function getNamaSemesterAttribute(): ?string
+    {
+        return $this->name;
+    }
+
+    public function getTipeSemesterAttribute(): string
+    {
+        return $this->sequence === 2 ? 'Genap' : 'Ganjil';
+    }
+
     protected static function booted(): void
     {
         static::creating(function (Semester $semester) {

@@ -20,7 +20,7 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
             'student:id,nis,nisn,full_name',
             'subject:id,name,code',
             'kelas:id,nama_kelas',
-            'semester:id,nama_semester',
+            'semester:id,name',
             'academicYear:id,name',
         ]);
 

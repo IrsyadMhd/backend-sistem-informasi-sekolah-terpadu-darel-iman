@@ -23,11 +23,26 @@ import {
 } from 'lucide-react'
 import { lmsKisiKisiService } from '../services/lmsKisiKisiService'
 
+const normalizeArray = (value) => {
+  if (Array.isArray(value)) return value
+  if (Array.isArray(value?.data)) return value.data
+  return []
+}
+
+const getSubjectLabel = (subject) =>
+  subject?.label ||
+  subject?.nama_mapel ||
+  subject?.nama ||
+  subject?.name ||
+  subject?.kode_mapel ||
+  'Mata Pelajaran'
+
 export default function LmsKisiKisiPage() {
   const [dataList, setDataList] = useState([])
   const [loading, setLoading] = useState(true)
   const [pagination, setPagination] = useState({ currentPage: 1, lastPage: 1, total: 0 })
   const [stats, setStats] = useState({ total: 0, aktif: 0, nonaktif: 0, total_soal_target: 0, uh: 0, pts: 0, pas: 0 })
+  const [loadingOptions, setLoadingOptions] = useState(false)
   const [options, setOptions] = useState({
     subjects: [],
     kurikulum: [],
@@ -124,24 +139,146 @@ export default function LmsKisiKisiPage() {
   }
 
   const fetchOptions = async (mapelId = null, cpId = null) => {
+    setLoadingOptions(true)
     try {
-      const response = await lmsKisiKisiService.getOptions({ mata_pelajaran_id: mapelId, cp_id: cpId })
-      if (response && response.data) {
-        setOptions(response.data)
-      }
+      const params = {}
+      if (mapelId) params.mata_pelajaran_id = mapelId
+      if (cpId) params.cp_id = cpId
+
+      const response = await lmsKisiKisiService.getOptions(params)
+      const resData =
+        response?.data?.data ??
+        response?.data ??
+        response ??
+        {}
+
+      const subjects = normalizeArray(
+        resData.subjects ??
+        resData.mata_pelajaran ??
+        resData.mata_pelajarans
+      )
+
+      const cpOptions = normalizeArray(
+        resData.capaian_pembelajaran ??
+        resData.cp ??
+        resData.learning_outcomes
+      )
+
+      const tpOptions = normalizeArray(
+        resData.tujuan_pembelajaran ??
+        resData.tp ??
+        resData.learning_objectives
+      )
+
+      setOptions((prev) => ({
+        ...prev,
+
+        subjects:
+          resData.subjects !== undefined ||
+          resData.mata_pelajaran !== undefined ||
+          resData.mata_pelajarans !== undefined
+            ? subjects
+            : prev.subjects,
+
+        kurikulum:
+          resData.kurikulum !== undefined
+            ? normalizeArray(resData.kurikulum)
+            : prev.kurikulum,
+
+        kelas:
+          resData.kelas !== undefined
+            ? normalizeArray(resData.kelas)
+            : prev.kelas,
+
+        semesters:
+          resData.semesters !== undefined
+            ? normalizeArray(resData.semesters)
+            : prev.semesters,
+
+        tahun_ajaran:
+          resData.tahun_ajaran !== undefined
+            ? normalizeArray(resData.tahun_ajaran)
+            : prev.tahun_ajaran,
+
+        guru:
+          resData.guru !== undefined
+            ? normalizeArray(resData.guru)
+            : prev.guru,
+
+        capaian_pembelajaran:
+          resData.capaian_pembelajaran !== undefined ||
+          resData.cp !== undefined ||
+          resData.learning_outcomes !== undefined
+            ? cpOptions
+            : prev.capaian_pembelajaran,
+
+        tujuan_pembelajaran:
+          resData.tujuan_pembelajaran !== undefined ||
+          resData.tp !== undefined ||
+          resData.learning_objectives !== undefined
+            ? tpOptions
+            : prev.tujuan_pembelajaran,
+
+        jenis_ujian_options:
+          resData.jenis_ujian_options !== undefined
+            ? normalizeArray(resData.jenis_ujian_options)
+            : prev.jenis_ujian_options,
+
+        level_kognitif_options:
+          resData.level_kognitif_options !== undefined
+            ? normalizeArray(resData.level_kognitif_options)
+            : prev.level_kognitif_options,
+      }))
     } catch (error) {
-      console.error('Gagal mengambil opsi dropdown:', error)
+      console.error(
+        'Gagal mengambil opsi dropdown Kisi-kisi:',
+        error?.response?.status,
+        error?.response?.data ?? error
+      )
+      showNotification(
+        error?.response?.data?.message ||
+          'Gagal memuat data pilihan Kisi-kisi Ujian.',
+        'error'
+      )
+    } finally {
+      setLoadingOptions(false)
     }
   }
 
-  const handleMataPelajaranChange = (mapelId) => {
-    setFormData((prev) => ({ ...prev, mata_pelajaran_id: mapelId, cp_id: '', tp_id: '' }))
-    fetchOptions(mapelId, null)
+  const handleMataPelajaranChange = async (mapelId) => {
+    setFormData((prev) => ({
+      ...prev,
+      mata_pelajaran_id: mapelId,
+      cp_id: '',
+      tp_id: '',
+    }))
+
+    setOptions((prev) => ({
+      ...prev,
+      capaian_pembelajaran: [],
+      tujuan_pembelajaran: [],
+    }))
+
+    if (!mapelId) return
+
+    await fetchOptions(mapelId, null)
   }
 
-  const handleCpChange = (cpId) => {
-    setFormData((prev) => ({ ...prev, cp_id: cpId, tp_id: '' }))
-    fetchOptions(formData.mata_pelajaran_id, cpId)
+  const handleCpChange = async (cpId) => {
+    setFormData((prev) => ({
+      ...prev,
+      cp_id: cpId,
+      tp_id: '',
+    }))
+
+    setOptions((prev) => ({
+      ...prev,
+      tujuan_pembelajaran: [],
+    }))
+
+    if (!cpId) return
+
+    await fetchOptions(formData.mata_pelajaran_id, cpId)
   }
 
   const handleOpenModal = (item = null) => {
@@ -165,14 +302,12 @@ export default function LmsKisiKisiPage() {
         distribusi_bobot: item.distribusi_bobot || { pg: 60, isian: 20, esai: 20 },
         status: item.status !== undefined ? item.status : true,
       })
-      if (item.mata_pelajaran_id) {
-        fetchOptions(item.mata_pelajaran_id, item.cp_id)
-      }
+      fetchOptions(item.mata_pelajaran_id || null, item.cp_id || null)
     } else {
       setEditingItem(null)
       setFormData({
         judul_kisi: '',
-        mata_pelajaran_id: options.subjects[0]?.id || '',
+        mata_pelajaran_id: '',
         cp_id: '',
         tp_id: '',
         kurikulum_id: options.kurikulum[0]?.id || '',
@@ -188,6 +323,7 @@ export default function LmsKisiKisiPage() {
         distribusi_bobot: { pg: 60, isian: 20, esai: 20 },
         status: true,
       })
+      fetchOptions(null, null)
     }
     setShowModal(true)
   }
@@ -361,7 +497,7 @@ export default function LmsKisiKisiPage() {
             <option value="">Semua Mata Pelajaran</option>
             {options.subjects.map((sub) => (
               <option key={sub.id} value={sub.id}>
-                {sub.name}
+                {getSubjectLabel(sub)}
               </option>
             ))}
           </select>
@@ -584,11 +720,15 @@ export default function LmsKisiKisiPage() {
                     className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-[#0E5C44]"
                   >
                     <option value="">-- Pilih Mata Pelajaran --</option>
-                    {options.subjects.map((sub) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name}
-                      </option>
-                    ))}
+                    {options.subjects && options.subjects.length > 0 ? (
+                      options.subjects.map((sub) => (
+                        <option key={sub.id} value={sub.id}>
+                          {getSubjectLabel(sub)}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>Belum ada mata pelajaran aktif</option>
+                    )}
                   </select>
                 </div>
 
@@ -618,15 +758,29 @@ export default function LmsKisiKisiPage() {
                   </label>
                   <select
                     value={formData.cp_id}
+                    disabled={!formData.mata_pelajaran_id}
                     onChange={(e) => handleCpChange(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-[#0E5C44]"
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-[#0E5C44] disabled:opacity-60"
                   >
-                    <option value="">-- Pilih CP (Opsional) --</option>
-                    {options.capaian_pembelajaran.map((cp) => (
-                      <option key={cp.id} value={cp.id}>
-                        {cp.kode_cp ? `[${cp.kode_cp}] ${cp.nama_cp}` : cp.nama_cp}
-                      </option>
-                    ))}
+                    {!formData.mata_pelajaran_id ? (
+                      <option value="">Pilih mata pelajaran terlebih dahulu</option>
+                    ) : loadingOptions ? (
+                      <option value="">Memuat capaian pembelajaran...</option>
+                    ) : options.capaian_pembelajaran && options.capaian_pembelajaran.length > 0 ? (
+                      <>
+                        <option value="">-- Pilih CP (Opsional) --</option>
+                        {options.capaian_pembelajaran.map((cp) => {
+                          const label = cp.label || (cp.kode_cp ? `[${cp.kode_cp}] ${cp.nama_cp || cp.deskripsi}` : cp.nama_cp || cp.deskripsi)
+                          return (
+                            <option key={cp.id} value={cp.id}>
+                              {label}
+                            </option>
+                          )
+                        })}
+                      </>
+                    ) : (
+                      <option value="">Belum ada CP untuk mata pelajaran ini</option>
+                    )}
                   </select>
                 </div>
 
@@ -636,15 +790,29 @@ export default function LmsKisiKisiPage() {
                   </label>
                   <select
                     value={formData.tp_id}
+                    disabled={!formData.cp_id}
                     onChange={(e) => setFormData({ ...formData, tp_id: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-[#0E5C44]"
+                    className="w-full px-4 py-2.5 bg-gray-50 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-[#0E5C44] disabled:opacity-60"
                   >
-                    <option value="">-- Pilih TP (Opsional) --</option>
-                    {options.tujuan_pembelajaran.map((tp) => (
-                      <option key={tp.id} value={tp.id}>
-                        {tp.kode_tp ? `[${tp.kode_tp}] ${tp.nama_tp || tp.deskripsi}` : tp.nama_tp || tp.deskripsi}
-                      </option>
-                    ))}
+                    {!formData.cp_id ? (
+                      <option value="">Pilih CP terlebih dahulu</option>
+                    ) : loadingOptions ? (
+                      <option value="">Memuat tujuan pembelajaran...</option>
+                    ) : options.tujuan_pembelajaran && options.tujuan_pembelajaran.length > 0 ? (
+                      <>
+                        <option value="">-- Pilih TP (Opsional) --</option>
+                        {options.tujuan_pembelajaran.map((tp) => {
+                          const label = tp.label || (tp.kode_tp ? `[${tp.kode_tp}] ${tp.nama_tp || tp.deskripsi}` : tp.nama_tp || tp.deskripsi)
+                          return (
+                            <option key={tp.id} value={tp.id}>
+                              {label}
+                            </option>
+                          )
+                        })}
+                      </>
+                    ) : (
+                      <option value="">Belum ada TP untuk CP ini</option>
+                    )}
                   </select>
                 </div>
               </div>

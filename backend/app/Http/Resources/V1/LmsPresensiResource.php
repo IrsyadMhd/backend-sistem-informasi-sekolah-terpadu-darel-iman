@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Resources/V1;
+namespace App\Http\Resources\V1;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -26,26 +26,33 @@ class LmsPresensiResource extends JsonResource
 
             'jadwal' => $this->when($this->relationLoaded('jadwalPelajaran'), function () use ($jadwal) {
                 if (!$jadwal) return null;
+                $kelasObj = $jadwal->relationLoaded('kelas') && $jadwal->kelas 
+                    ? $jadwal->kelas 
+                    : ($jadwal->relationLoaded('schoolClass') ? $jadwal->schoolClass : null);
+                $teacherObj = $jadwal->relationLoaded('employee') && $jadwal->employee 
+                    ? $jadwal->employee 
+                    : ($jadwal->relationLoaded('teacher') ? $jadwal->teacher : null);
+
                 return [
                     'id'           => $jadwal->id,
                     'day_of_week'  => $jadwal->day_of_week,
                     'day_name'     => $jadwal->nama_hari,
-                    'time_start'   => substr($jadwal->time_start, 0, 5),
-                    'time_end'     => substr($jadwal->time_end, 0, 5),
+                    'time_start'   => $jadwal->time_start ? substr($jadwal->time_start, 0, 5) : null,
+                    'time_end'     => $jadwal->time_end ? substr($jadwal->time_end, 0, 5) : null,
                     'subject'      => $jadwal->relationLoaded('subject') && $jadwal->subject ? [
                         'id'   => $jadwal->subject->id,
-                        'code' => $jadwal->subject->code,
-                        'name' => $jadwal->subject->name,
+                        'code' => $jadwal->subject->code ?? '',
+                        'name' => $jadwal->subject->name ?? '',
                     ] : null,
-                    'kelas'        => $jadwal->relationLoaded('kelas') && $jadwal->kelas ? [
-                        'id'         => $jadwal->kelas->id,
-                        'nama_kelas' => $jadwal->kelas->nama_kelas,
-                        'kode_kelas' => $jadwal->kelas->kode_kelas,
+                    'kelas'        => $kelasObj ? [
+                        'id'         => $kelasObj->id,
+                        'nama_kelas' => $kelasObj->nama_kelas ?? $kelasObj->name ?? '',
+                        'kode_kelas' => $kelasObj->kode_kelas ?? '',
                     ] : null,
-                    'teacher'      => $jadwal->relationLoaded('employee') && $jadwal->employee ? [
-                        'id'        => $jadwal->employee->id,
-                        'full_name' => $jadwal->employee->full_name,
-                        'nip'       => $jadwal->employee->nip,
+                    'teacher'      => $teacherObj ? [
+                        'id'        => $teacherObj->id,
+                        'full_name' => $teacherObj->full_name ?? $teacherObj->name ?? '',
+                        'nip'       => $teacherObj->nip ?? '',
                     ] : null,
                 ];
             }),

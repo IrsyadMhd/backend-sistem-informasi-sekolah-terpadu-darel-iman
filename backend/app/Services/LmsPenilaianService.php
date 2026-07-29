@@ -113,7 +113,13 @@ class LmsPenilaianService
     {
         $kelas = Kelas::orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
         $subjects = Subject::orderBy('name', 'asc')->get(['id', 'code', 'name']);
-        $semesters = Semester::get(['id', 'nama_semester']);
+        $semesters = Semester::get(['id', 'name'])
+            ->map(fn (Semester $semester) => [
+                'id' => $semester->id,
+                'name' => $semester->name,
+                'nama_semester' => $semester->nama_semester,
+            ])
+            ->values();
 
         $defaultFormula = [
             'bobot_tugas' => 20.0,

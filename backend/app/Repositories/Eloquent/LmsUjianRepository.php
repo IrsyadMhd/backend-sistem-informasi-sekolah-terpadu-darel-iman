@@ -19,7 +19,7 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
             'kisiKisi:id,judul_kisi,jenis_ujian,mata_pelajaran_id',
             'kisiKisi.subject:id,name,code',
             'kelas:id,nama_kelas',
-            'semester:id,nama_semester',
+            'semester:id,name',
             'guru:id,nama_lengkap',
         ])->withCount('sesi');
 
