@@ -10,7 +10,6 @@ import {
   FaFilter,
   FaCheckCircle,
   FaTimesCircle,
-  FaLayerGroup,
   FaChevronLeft,
   FaChevronRight,
 } from 'react-icons/fa'
@@ -19,6 +18,7 @@ import JenisUnitTable from '../components/jenis-unit/JenisUnitTable'
 import JenisUnitFormModal from '../components/jenis-unit/JenisUnitFormModal'
 import JenisUnitDetailModal from '../components/jenis-unit/JenisUnitDetailModal'
 import JenisUnitImportModal from '../components/jenis-unit/JenisUnitImportModal'
+import { MasterDataPage } from '../components/master-data'
 
 const JENJANG_LIST = [
   'PAUD',
@@ -42,7 +42,7 @@ export default function MasterJenisUnitPendidikanPage() {
   const [selectedJenjangFilter, setSelectedJenjangFilter] = useState('')
   const [denganSampahFilter, setDenganSampahFilter] = useState('')
   const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState(15)
+  const perPage = 15
 
   // Modal States
   const [isFormModalOpen, setIsFormModalOpen] = useState(false)
@@ -299,65 +299,59 @@ export default function MasterJenisUnitPendidikanPage() {
         timer: 2000,
         showConfirmButton: false,
       })
-    } catch (err) {
+    } catch {
       Swal.fire('Error', 'Gagal mengunduh data ekspor.', 'error')
     }
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* HEADER BANNER - ENTERPRISE GREEN STYLING */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-700 p-6 md:p-8 text-white shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+    <MasterDataPage>
+      {/* Header — standar modul Profil */}
+      <div className="ui-enter rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
           {/* Header Left Text */}
           <div>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-700/80 text-emerald-100 border border-emerald-500/30 uppercase tracking-widest mb-3">
-              MASTER DATA SEKOLAH
-            </span>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+            <h1 className="text-2xl font-black tracking-tight text-slate-800">
               Data Jenis Unit Pendidikan
             </h1>
-            <p className="text-emerald-100/90 text-sm mt-1.5 max-w-xl leading-relaxed">
+            <p className="mt-1 max-w-xl text-xs text-slate-500">
               Kelola seluruh data jenis unit pendidikan yang digunakan pada sistem.
             </p>
           </div>
 
           {/* Header Right Action Buttons */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={handleExportExcel}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm backdrop-blur-xs border border-white/20 transition-all shadow-xs"
+              className="ui-button flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-100"
             >
-              <FaFileExcel className="w-4 h-4 text-emerald-300" />
-              📥 Export Excel
+              <FaFileExcel className="text-sm text-emerald-700" />
+              Export Excel
             </button>
 
             <button
               onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm backdrop-blur-xs border border-white/20 transition-all shadow-xs"
+              className="ui-button flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-100"
             >
-              <FaFileImport className="w-4 h-4 text-emerald-300" />
-              📤 Import Excel
+              <FaFileImport className="text-sm text-slate-500" />
+              Import Excel
             </button>
 
             <button
               onClick={handleOpenFormTambah}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-sm transition-all shadow-md hover:shadow-emerald-500/20 active:scale-95"
+              className="ui-button flex items-center gap-2 rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 hover:shadow-lg"
             >
-              <FaPlus className="w-4 h-4" />
-              ➕ Tambah Jenis Unit
+              <FaPlus className="text-sm" />
+              Tambah Jenis Unit
             </button>
           </div>
         </div>
-
-        {/* Decorative background elements */}
-        <div className="absolute -right-12 -bottom-12 w-64 h-64 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
       </div>
 
       {/* DASHBOARD CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* Card 1 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-emerald-100 flex items-center gap-4 hover:shadow-md transition-all">
+        <div className="ui-card ui-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '60ms' }}>
           <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
             <FaSchool className="w-6 h-6" />
           </div>
@@ -369,7 +363,7 @@ export default function MasterJenisUnitPendidikanPage() {
         </div>
 
         {/* Card 2 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-emerald-100 flex items-center gap-4 hover:shadow-md transition-all">
+        <div className="ui-card ui-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '110ms' }}>
           <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
             <FaCheckCircle className="w-6 h-6 text-emerald-500" />
           </div>
@@ -381,7 +375,7 @@ export default function MasterJenisUnitPendidikanPage() {
         </div>
 
         {/* Card 3 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-emerald-100 flex items-center gap-4 hover:shadow-md transition-all">
+        <div className="ui-card ui-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '160ms' }}>
           <div className="p-3.5 rounded-xl bg-amber-50 text-amber-600 border border-amber-100">
             <FaTimesCircle className="w-6 h-6 text-amber-500" />
           </div>
@@ -391,10 +385,21 @@ export default function MasterJenisUnitPendidikanPage() {
             <p className="text-xs font-medium text-amber-600 mt-0.5">Non-aktif / Dinonaktifkan</p>
           </div>
         </div>
+
+        <div className="ui-card ui-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '210ms' }}>
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-3.5 text-blue-600">
+            <FaSchool className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-gray-400">Cakupan Jenjang</p>
+            <h3 className="mt-0.5 text-2xl font-black text-gray-900">{JENJANG_LIST.length}</h3>
+            <p className="mt-0.5 text-xs font-medium text-blue-600">Jenjang pendidikan</p>
+          </div>
+        </div>
       </div>
 
       {/* SEARCH & FILTER BAR */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="ui-enter flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm md:flex-row md:items-center" style={{ animationDelay: '210ms' }}>
         {/* Search Box */}
         <div className="relative flex-1">
           <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -406,7 +411,7 @@ export default function MasterJenisUnitPendidikanPage() {
               setPage(1)
             }}
             placeholder="Cari Nama Jenis Unit... Cari Kode..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-gray-50/80 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white transition-colors"
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-xs font-semibold text-slate-700 shadow-sm transition-all placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
         </div>
 
@@ -424,7 +429,7 @@ export default function MasterJenisUnitPendidikanPage() {
               setSelectedStatusFilter(e.target.value)
               setPage(1)
             }}
-            className="px-3.5 py-2 rounded-xl bg-gray-50/80 border border-gray-200 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Status</option>
             <option value="true">Aktif</option>
@@ -438,7 +443,7 @@ export default function MasterJenisUnitPendidikanPage() {
               setSelectedJenjangFilter(e.target.value)
               setPage(1)
             }}
-            className="px-3.5 py-2 rounded-xl bg-gray-50/80 border border-gray-200 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Jenjang</option>
             {JENJANG_LIST.map((j) => (
@@ -455,7 +460,7 @@ export default function MasterJenisUnitPendidikanPage() {
               setDenganSampahFilter(e.target.value)
               setPage(1)
             }}
-            className="px-3.5 py-2 rounded-xl bg-gray-50/80 border border-gray-200 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Data Aktif</option>
             <option value="true">Termasuk Terhapus</option>
@@ -477,7 +482,7 @@ export default function MasterJenisUnitPendidikanPage() {
 
       {/* PAGINATION FOOTER */}
       {meta.total > 0 && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-gray-600 font-medium">
+        <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 text-xs font-medium text-slate-600 shadow-sm sm:flex-row sm:items-center">
           <div>
             Menampilkan <strong>{meta.from || 0}</strong> - <strong>{meta.to || 0}</strong> dari{' '}
             <strong>{meta.total || 0}</strong> data Jenis Unit
@@ -526,6 +531,6 @@ export default function MasterJenisUnitPendidikanPage() {
         onImport={(rows) => importMutation.mutate(rows)}
         isSubmitting={importMutation.isPending}
       />
-    </div>
+    </MasterDataPage>
   )
 }

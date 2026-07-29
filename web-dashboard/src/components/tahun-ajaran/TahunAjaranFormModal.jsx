@@ -101,8 +101,8 @@ export default function TahunAjaranFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto animate-fade-in">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-4xl overflow-hidden my-6 transition-all">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm">
+      <div className="ui-modal my-6 w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Modal Header Bar (Persis Referensi UI/UX) */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-white px-7 py-5">
           <h2 className="text-xl font-black text-[#0f172a]">

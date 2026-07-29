@@ -72,7 +72,17 @@ export default function JenisUnitFormModal({
         keterangan: initialData.keterangan || '',
       })
     } else {
-      handleReset()
+      setFormData({
+        kode_jenis: '',
+        nama_jenis: '',
+        singkatan: '',
+        jenjang: 'SD',
+        urutan: 1,
+        warna_badge: '#10B981',
+        icon: 'School',
+        status: true,
+        keterangan: '',
+      })
     }
     setErrors({})
   }, [initialData, isOpen])
@@ -126,33 +136,33 @@ export default function JenisUnitFormModal({
   const isEdit = Boolean(initialData)
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-emerald-100 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-xs">
+      <div className="ui-modal w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Header Modal */}
-        <div className="bg-gradient-to-r from-emerald-800 to-emerald-700 p-5 text-white flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-white p-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/10 rounded-lg">
-              <FaSchool className="w-5 h-5 text-emerald-200" />
+            <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700">
+              <FaSchool className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">
+              <h2 className="text-lg font-bold text-slate-800">
                 {isEdit ? 'Edit Jenis Unit Pendidikan' : 'Tambah Jenis Unit Pendidikan'}
               </h2>
-              <p className="text-xs text-emerald-100">
+              <p className="text-xs text-slate-500">
                 Kelola informasi data jenis unit pendidikan terpadu.
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-emerald-100 hover:bg-white/10 hover:text-white transition-colors"
+            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
           >
             <FaTimes className="w-5 h-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-5 text-sm text-gray-700">
+        <form onSubmit={handleSubmit} className="space-y-5 p-6 text-sm text-slate-700">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Kode Jenis */}
             <div>
@@ -166,9 +176,9 @@ export default function JenisUnitFormModal({
                   setFormData({ ...formData, kode_jenis: e.target.value.toUpperCase() })
                 }
                 placeholder="Masukkan Kode Jenis (Contoh: SDIT)"
-                className={`w-full px-3.5 py-2 rounded-lg border ${
+                className={`w-full rounded-xl border px-3.5 py-2.5 shadow-sm ${
                   errors.kode_jenis ? 'border-rose-500 bg-rose-50' : 'border-gray-300'
-                } focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-medium`}
+                } font-medium focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600`}
               />
               {errors.kode_jenis && (
                 <p className="mt-1 text-xs text-rose-500">{errors.kode_jenis}</p>
@@ -185,9 +195,9 @@ export default function JenisUnitFormModal({
                 value={formData.nama_jenis}
                 onChange={(e) => setFormData({ ...formData, nama_jenis: e.target.value })}
                 placeholder="Contoh: Sekolah Dasar Islam Terpadu"
-                className={`w-full px-3.5 py-2 rounded-lg border ${
+                className={`w-full rounded-xl border px-3.5 py-2.5 shadow-sm ${
                   errors.nama_jenis ? 'border-rose-500 bg-rose-50' : 'border-gray-300'
-                } focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-medium`}
+                } font-medium focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600`}
               />
               {errors.nama_jenis && (
                 <p className="mt-1 text-xs text-rose-500">{errors.nama_jenis}</p>
@@ -204,7 +214,7 @@ export default function JenisUnitFormModal({
                 value={formData.singkatan}
                 onChange={(e) => setFormData({ ...formData, singkatan: e.target.value })}
                 placeholder="Contoh: SDIT"
-                className="w-full px-3.5 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
 
@@ -216,7 +226,7 @@ export default function JenisUnitFormModal({
               <select
                 value={formData.jenjang}
                 onChange={(e) => setFormData({ ...formData, jenjang: e.target.value })}
-                className="w-full px-3.5 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-medium bg-white"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 font-medium shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
                 {JENJANG_OPTIONS.map((opt) => (
                   <option key={opt} value={opt}>
@@ -350,7 +360,7 @@ export default function JenisUnitFormModal({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 transition-colors shadow-sm disabled:opacity-50"
+                className="ui-button inline-flex items-center gap-2 rounded-xl bg-emerald-800 px-5 py-2.5 font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 focus:ring-2 focus:ring-emerald-600 focus:ring-offset-1 disabled:opacity-50"
               >
                 <FaSave className="w-4 h-4" />
                 {isSubmitting ? 'Menyimpan...' : 'Simpan'}

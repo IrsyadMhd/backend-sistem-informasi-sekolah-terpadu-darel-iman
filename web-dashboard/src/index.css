@@ -16,6 +16,185 @@
   --shadow-soft-xl: 0 10px 30px -5px rgba(14, 92, 68, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
 }
 
+/* Master Data UI Lock
+ * Satu lapisan visual untuk seluruh halaman master tanpa menyentuh alur data/CRUD.
+ */
+.master-data-page {
+  --master-primary: #0E5C44;
+  --master-secondary: #1E8E5A;
+  --master-accent: #3FBF75;
+  color: #0f172a;
+}
+
+.master-data-page .master-page-header,
+.master-data-page > :first-child,
+.master-data-page .master-hero {
+  min-height: 112px;
+  padding: 32px !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 20px !important;
+  background: #fff !important;
+  color: #0f172a !important;
+  box-shadow: var(--shadow-soft-xl) !important;
+}
+
+.master-data-page .master-page-header h1,
+.master-data-page > :first-child h1,
+.master-data-page .master-hero h1 {
+  margin-top: 0.25rem;
+  color: #0f172a !important;
+  font-size: clamp(1.5rem, 2vw, 1.875rem);
+  line-height: 1.2;
+  font-weight: 700 !important;
+}
+
+.master-data-page .master-page-header button,
+.master-data-page > :first-child button,
+.master-data-page .master-hero button {
+  min-height: 48px;
+  gap: 0.625rem;
+  padding-inline: 1rem;
+  border-radius: 14px !important;
+  border-color: #e5e7eb;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.master-data-page .master-page-header button:hover,
+.master-data-page > :first-child button:hover,
+.master-data-page .master-hero button:hover {
+  transform: translateY(-1px);
+  border-color: #a7d9c0;
+  background-color: #ecfdf5;
+}
+
+.master-data-page .master-page-header button:last-child,
+.master-data-page > :first-child button:last-child,
+.master-data-page .master-hero button:last-child {
+  border-color: var(--master-primary);
+  background: var(--master-primary);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(14, 92, 68, 0.2);
+}
+
+.master-data-page .master-page-header button:last-child:hover,
+.master-data-page > :first-child button:last-child:hover,
+.master-data-page .master-hero button:last-child:hover {
+  background: #094a36;
+}
+
+.master-data-page .ui-card,
+.master-data-page > .grid > div {
+  min-height: 116px;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 18px !important;
+  background: #fff;
+  box-shadow: var(--shadow-soft-xl) !important;
+}
+
+.master-data-page input[type='text'],
+.master-data-page input[type='search'] {
+  min-height: 48px;
+  border-radius: 9999px !important;
+  border-color: #e5e7eb;
+  background: #fff;
+}
+
+.master-data-page select {
+  min-height: 48px;
+  border-radius: 14px !important;
+  border-color: #e5e7eb;
+  background-color: #fff;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.master-data-page select:hover {
+  border-color: #9fd1ba;
+  background-color: #fbfefc;
+}
+
+.master-data-page input:focus,
+.master-data-page select:focus {
+  border-color: var(--master-secondary) !important;
+  box-shadow: 0 0 0 3px rgba(30, 142, 90, 0.14) !important;
+}
+
+.master-data-page table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.master-data-page table thead,
+.master-data-page table thead tr {
+  background: #fff9ed !important;
+}
+
+.master-data-page table thead th {
+  padding: 1rem !important;
+  color: #475569;
+  font-size: 0.6875rem;
+  font-weight: 700 !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.master-data-page table tbody tr {
+  border-bottom: 1px solid #eef1f4;
+  transition: background-color 180ms ease;
+}
+
+.master-data-page table tbody tr:hover {
+  background: #f0fdf6 !important;
+}
+
+.master-data-page table tbody td {
+  padding: 1rem !important;
+}
+
+.master-data-page table td:last-child button {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.master-data-page table td:last-child button:hover {
+  transform: scale(1.07);
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.1);
+}
+
+.master-data-page table td:last-child button:focus-visible {
+  outline: 3px solid rgba(30, 142, 90, 0.25);
+  outline-offset: 2px;
+}
+
+.master-data-page table .bg-slate-100.rounded-full {
+  border: 1px solid #fecaca;
+  background: #fef2f2 !important;
+  color: #dc2626 !important;
+}
+
+@media (max-width: 767px) {
+  .master-data-page .master-page-header,
+  .master-data-page > :first-child,
+  .master-data-page .master-hero {
+    padding: 24px !important;
+  }
+
+  .master-data-page .master-page-header button,
+  .master-data-page > :first-child button,
+  .master-data-page .master-hero button {
+    flex: 1 1 140px;
+    justify-content: center;
+  }
+}
+
 body {
   font-family: 'Inter', sans-serif;
   background-color: var(--bg-light);
@@ -2121,4 +2300,155 @@ th {
   z-index: 10;
   backdrop-filter: blur(8px);
 }
+/* Pengaturan situs dinamis */
+.site-shell .site-sidebar-light {
+  color: #334155;
+  border-color: #e2e8f0;
+}
 
+.site-shell .site-sidebar-light h1,
+.site-shell .site-sidebar-light p,
+.site-shell .site-sidebar-light button,
+.site-shell .site-sidebar-light a {
+  color: #334155;
+}
+
+.site-shell.template-compact main {
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+.site-shell.template-compact main > * {
+  --template-gap: 1rem;
+}
+
+.site-shell.template-comfortable main {
+  max-width: 90rem;
+}
+
+/* Unit Pendidikan — motion yang halus dan tetap ramah aksesibilitas */
+@keyframes educationEnter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes educationModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes educationBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.edu-enter {
+  opacity: 0;
+  animation: educationEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.edu-row {
+  opacity: 0;
+  animation: educationEnter 0.35s ease-out forwards;
+}
+
+.edu-card {
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.edu-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(16, 185, 129, 0.28);
+  box-shadow: 0 12px 24px -18px rgba(15, 23, 42, 0.5);
+}
+
+.edu-button:active {
+  transform: scale(0.97);
+}
+
+.edu-backdrop {
+  animation: educationBackdropIn 0.2s ease-out both;
+}
+
+.edu-modal {
+  animation: educationModalIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.edu-step {
+  animation: educationEnter 0.28s ease-out both;
+}
+
+/* Alias generik untuk modul baru; gunakan sesuai UI_UX_GUIDELINES.md */
+.ui-enter {
+  opacity: 0;
+  animation: educationEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.ui-row {
+  opacity: 0;
+  animation: educationEnter 0.35s ease-out forwards;
+}
+
+.ui-card {
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.ui-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(16, 185, 129, 0.28);
+  box-shadow: 0 12px 24px -18px rgba(15, 23, 42, 0.5);
+}
+
+.ui-button:active {
+  transform: scale(0.97);
+}
+
+.ui-backdrop {
+  animation: educationBackdropIn 0.2s ease-out both;
+}
+
+.ui-modal {
+  animation: educationModalIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edu-enter,
+  .edu-row,
+  .edu-backdrop,
+  .edu-modal,
+  .edu-step,
+  .ui-enter,
+  .ui-row,
+  .ui-backdrop,
+  .ui-modal {
+    opacity: 1;
+    animation: none;
+    transform: none;
+  }
+
+  .edu-card,
+  .edu-button,
+  .ui-card,
+  .ui-button {
+    transition: none;
+  }
+
+  .edu-card:hover,
+  .edu-button:active,
+  .ui-card:hover,
+  .ui-button:active {
+    transform: none;
+  }
+}

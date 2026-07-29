@@ -1,5 +1,5 @@
 import React from 'react'
-import { FaTimes, FaSchool, FaInfoCircle, FaCalendarAlt, FaUser } from 'react-icons/fa'
+import { FaTimes, FaSchool, FaCalendarAlt, FaUser } from 'react-icons/fa'
 import { renderJenisUnitIcon } from './JenisUnitTable'
 
 export default function JenisUnitDetailModal({ isOpen, onClose, data }) {
@@ -8,22 +8,22 @@ export default function JenisUnitDetailModal({ isOpen, onClose, data }) {
   const badgeColor = data.warna_badge || '#10B981'
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-emerald-100 w-full max-w-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-xs">
+      <div className="ui-modal w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Header Modal */}
-        <div className="bg-gradient-to-r from-emerald-800 to-emerald-700 p-5 text-white flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-white p-5">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/10 rounded-lg">
-              <FaSchool className="w-5 h-5 text-emerald-200" />
+            <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700">
+              <FaSchool className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">Detail Jenis Unit Pendidikan</h2>
-              <p className="text-xs text-emerald-100">Informasi lengkap secara read-only.</p>
+              <h2 className="text-lg font-bold text-slate-800">Detail Jenis Unit Pendidikan</h2>
+              <p className="text-xs text-slate-500">Informasi lengkap secara read-only.</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg text-emerald-100 hover:bg-white/10 hover:text-white transition-colors"
+            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
           >
             <FaTimes className="w-5 h-5" />
           </button>
@@ -122,10 +122,10 @@ export default function JenisUnitDetailModal({ isOpen, onClose, data }) {
         </div>
 
         {/* Modal Footer */}
-        <div className="bg-gray-50 p-4 border-t border-gray-100 text-right">
+        <div className="border-t border-slate-100 bg-white p-4 text-right">
           <button
             onClick={onClose}
-            className="px-5 py-2 bg-gray-700 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-colors"
+            className="ui-button rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900"
           >
             Tutup
           </button>

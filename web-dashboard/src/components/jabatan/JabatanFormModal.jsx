@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { FaTimes, FaUpload, FaCheckCircle, FaBriefcase, FaUserCheck, FaCrown, FaShieldAlt } from 'react-icons/fa'
+import { FaTimes, FaCheckCircle } from 'react-icons/fa'
 
 // Validation Schema using Zod
 const jabatanSchema = z.object({
@@ -89,7 +89,6 @@ export default function JabatanFormModal({
     watch,
     reset,
     trigger,
-    getValues,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(jabatanSchema),
@@ -177,17 +176,19 @@ export default function JabatanFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-4xl overflow-hidden my-6 transition-all">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-xs" role="dialog" aria-modal="true" aria-labelledby="form-jabatan-title">
+      <div className="ui-modal my-6 w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Modal Header Bar (Persis Gambar Referensi UI/UX) */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-white px-7 py-5">
-          <h2 className="text-xl font-black text-[#0f172a]">
+          <h2 id="form-jabatan-title" className="text-xl font-black text-slate-800">
             {isEdit ? 'Edit Master Data Jabatan' : 'Tambah Master Data Jabatan'}
           </h2>
           <button
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            title="Tutup formulir jabatan"
+            aria-label="Tutup formulir jabatan"
           >
             <FaTimes className="w-4 h-4" />
           </button>
@@ -333,7 +334,7 @@ export default function JabatanFormModal({
                         ))}
                       </select>
                       {(options.unit_sekolah || []).length === 0 && (
-                        <p className="mt-1 text-[11px] text-amber-500 font-medium">⚠ Belum ada data unit pendidikan. Tambahkan di menu Unit Pendidikan.</p>
+                        <p className="mt-1 text-[11px] font-medium text-amber-700">Belum ada data unit pendidikan. Tambahkan di menu Unit Pendidikan.</p>
                       )}
                     </div>
 
@@ -354,7 +355,7 @@ export default function JabatanFormModal({
                         ))}
                       </select>
                       {(options.atasan_langsung || []).length === 0 && (
-                        <p className="mt-1 text-[11px] text-amber-500 font-medium">⚠ Belum ada data pegawai aktif. Tambahkan di menu Kepegawaian.</p>
+                        <p className="mt-1 text-[11px] font-medium text-amber-700">Belum ada data pegawai aktif. Tambahkan di menu Kepegawaian.</p>
                       )}
                     </div>
 

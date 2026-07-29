@@ -23,9 +23,7 @@ import {
   Sun,
   Moon,
   CalendarCheck,
-  Wallet,
   HelpCircle,
-  Target,
 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { authService } from '../services/authService'
@@ -43,9 +41,10 @@ export default function DashboardLayout() {
   const activeUnit = useUnitStore((state) => state.activeUnit)
   const setActiveUnit = useUnitStore((state) => state.setActiveUnit)
   const pengaturan = usePengaturanStore((state) => state.pengaturan)
-  const namaSekolah = pengaturan?.namaSekolah || 'YAYASAN DAR EL - IMAN'
+  const muatPengaturan = usePengaturanStore((state) => state.muatPengaturan)
+  const namaSekolah = pengaturan?.school_name || 'YAYASAN DAR EL - IMAN'
 
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(Boolean(pengaturan?.sidebar_collapsed))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [openSection, setOpenSection] = useState('master-data')
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false)
@@ -60,6 +59,25 @@ export default function DashboardLayout() {
     return false // Default to Light Mode
   })
 
+  useEffect(() => {
+    muatPengaturan()
+  }, [muatPengaturan])
+
+  useEffect(() => {
+    document.title = pengaturan.application_name || 'Sistem Manajemen Sekolah'
+    let favicon = document.querySelector("link[rel~='icon']")
+    if (!favicon) {
+      favicon = document.createElement('link')
+      favicon.rel = 'icon'
+      document.head.appendChild(favicon)
+    }
+    favicon.href = pengaturan.favicon_url || '/favicon.ico'
+  }, [pengaturan.application_name, pengaturan.favicon_url])
+
+  useEffect(() => {
+    setCollapsed(Boolean(pengaturan.sidebar_collapsed))
+  }, [pengaturan.sidebar_collapsed])
+
   const profileDropdownRef = useRef(null)
   const unitDropdownRef = useRef(null)
   const themeDropdownRef = useRef(null)
@@ -69,10 +87,12 @@ export default function DashboardLayout() {
     if (isDarkMode) {
       document.documentElement.classList.add('dark')
       document.body.classList.add('dark')
+      document.documentElement.style.colorScheme = 'dark'
       localStorage.setItem('theme', 'dark')
     } else {
       document.documentElement.classList.remove('dark')
       document.body.classList.remove('dark')
+      document.documentElement.style.colorScheme = 'light'
       localStorage.setItem('theme', 'light')
     }
   }, [isDarkMode])
@@ -214,7 +234,7 @@ export default function DashboardLayout() {
       submenus: [
         { to: '/dashboard/pengaturan', label: 'Profil Sekolah' },
         { to: '/dashboard/hak-akses', label: 'Hak Akses' },
-        { to: '/dashboard/pengaturan?tab=unit', label: 'Pengaturan Unit' },
+        // { to: '/dashboard/pengaturan?tab=unit', label: 'Pengaturan Unit' },
       ],
     },
   ]
@@ -233,7 +253,16 @@ export default function DashboardLayout() {
   ]
 
   return (
-    <div className="min-h-screen bg-slate-50/80 text-slate-800 flex flex-col font-sans antialiased dark:bg-slate-950 dark:text-slate-100">
+    <div
+      className={`site-shell min-h-screen text-slate-800 flex flex-col font-sans antialiased dark:bg-slate-950 dark:text-slate-100 template-${pengaturan.template}`}
+      style={{
+        '--site-sidebar': pengaturan.sidebar_color,
+        '--site-accent': pengaturan.sidebar_accent_color,
+        '--site-body': pengaturan.body_color,
+        '--site-header': pengaturan.header_color,
+        backgroundColor: isDarkMode ? '#0F172A' : pengaturan.body_color,
+      }}
+    >
       {/* Mobile Overlay */}
       {mobileMenuOpen && (
         <div
@@ -242,25 +271,30 @@ export default function DashboardLayout() {
         />
       )}
 
-      <div className="flex flex-1 min-h-screen">
+      <div className={`flex flex-1 min-h-screen ${pengaturan.sidebar_position === 'right' ? 'md:flex-row-reverse' : ''}`}>
         {/* Left Sidebar (Sticky & Collapsible) */}
         <aside
-          className={`fixed inset-y-0 left-0 z-50 flex flex-col justify-between border-r border-[#1E8E5A]/20 bg-gradient-to-b from-[#0E5C44] via-[#0b4d39] to-[#083a2b] text-slate-100 transition-all duration-300 ease-in-out md:sticky md:top-0 md:h-screen ${collapsed ? 'w-20' : 'w-64'
-            } ${mobileMenuOpen ? 'translate-x-0 w-64' : '-translate-x-full md:translate-x-0'}`}
+          className={`site-sidebar fixed inset-y-0 z-50 flex flex-col justify-between border-white/10 text-slate-100 transition-all duration-300 ease-in-out md:sticky md:top-0 md:h-screen ${pengaturan.sidebar_position === 'right' ? 'right-0 border-l' : 'left-0 border-r'} ${pengaturan.sidebar_style === 'light' ? 'site-sidebar-light' : ''} ${collapsed ? 'w-20' : 'w-64'
+            } ${mobileMenuOpen ? 'translate-x-0 w-64' : pengaturan.sidebar_position === 'right' ? 'translate-x-full md:translate-x-0' : '-translate-x-full md:translate-x-0'}`}
+          style={{
+            background: pengaturan.sidebar_style === 'gradient'
+              ? `linear-gradient(180deg, ${pengaturan.sidebar_color}, color-mix(in srgb, ${pengaturan.sidebar_color} 72%, #000))`
+              : pengaturan.sidebar_style === 'light' ? '#FFFFFF' : pengaturan.sidebar_color,
+          }}
         >
           {/* Header Sidebar: Logo & Collapsible Toggle */}
           <div className="p-4 border-b border-white/10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 overflow-hidden">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#3FBF75] to-[#1E8E5A] text-white shadow-md">
-                  <Sparkles className="h-5 w-5 stroke-[2]" />
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-2xl text-white shadow-md" style={{ backgroundColor: pengaturan.sidebar_accent_color }}>
+                  {pengaturan.logo_url ? <img src={pengaturan.logo_url} alt="Logo" className="h-full w-full bg-white object-contain p-1" /> : <span className="text-[10px] font-black">{pengaturan.logo_text || <Sparkles className="h-5 w-5" />}</span>}
                 </div>
                 {!collapsed && (
                   <div className="min-w-0">
                     <h1 className="text-xs font-black tracking-wider text-white uppercase truncate font-sans">
                       {namaSekolah}
                     </h1>
-                    <p className="text-[10px] font-bold text-[#3FBF75] tracking-widest">SEKOLAH TERPADU</p>
+                    <p className="text-[10px] font-bold tracking-widest" style={{ color: pengaturan.sidebar_accent_color }}>{pengaturan.application_name}</p>
                   </div>
                 )}
               </div>
@@ -365,7 +399,7 @@ export default function DashboardLayout() {
           </nav>
 
           {/* User Status Bar & Help Link at Sidebar Bottom */}
-          <div className="p-3.5 border-t border-white/10 bg-[#083a2b]/80 space-y-2.5">
+          <div className="p-3.5 border-t border-white/10 bg-black/10 space-y-2.5">
             <div className="flex items-center gap-3">
               <div className="relative">
                 <div className="h-8 w-8 shrink-0 rounded-full bg-gradient-to-tr from-[#0E5C44] to-[#3FBF75] text-white flex items-center justify-center font-bold text-xs shadow-md border border-white/20">
@@ -389,6 +423,9 @@ export default function DashboardLayout() {
             </div>
 
             {!collapsed && (
+              <p className="truncate px-2 text-[9px] text-white/55">{pengaturan.footer_text}</p>
+            )}
+            {!collapsed && (
               <button
                 type="button"
                 onClick={() => navigate('/dashboard/pengaturan')}
@@ -404,7 +441,18 @@ export default function DashboardLayout() {
         {/* Main Workspace Area */}
         <div className="flex-1 flex flex-col min-w-0">
           {/* Topbar Navbar (Sticky Header) */}
-          <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 md:px-8 backdrop-blur-md shadow-2xs dark:border-slate-800/80 dark:bg-slate-900/90">
+          <header
+            className={`${pengaturan.header_sticky ? 'sticky top-0' : 'relative'} z-30 flex h-16 items-center justify-between border-b border-slate-200/80 px-4 md:px-8 backdrop-blur-md shadow-2xs transition-colors duration-200 dark:border-slate-800/80`}
+            style={{
+              backgroundColor: isDarkMode
+                ? 'rgba(17, 24, 39, 0.94)'
+                : pengaturan.header_style === 'transparent'
+                  ? 'transparent'
+                  : pengaturan.header_style === 'solid'
+                    ? pengaturan.header_color
+                    : `${pengaturan.header_color}E6`,
+            }}
+          >
             {/* Left Controls: Mobile Toggle, Unit Switcher Dropdown, Search */}
             <div className="flex items-center gap-3 flex-1 max-w-xl">
               <button
@@ -496,6 +544,9 @@ export default function DashboardLayout() {
                 <button
                   type="button"
                   onClick={() => setThemeMenuOpen(!themeMenuOpen)}
+                  aria-label="Pilih mode tampilan"
+                  aria-haspopup="menu"
+                  aria-expanded={themeMenuOpen}
                   className="flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200 transition-all btn-master"
                   title="Pilih Mode Tampilan"
                 >
@@ -505,13 +556,15 @@ export default function DashboardLayout() {
                 </button>
 
                 {themeMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-48 rounded-[18px] bg-white p-1.5 shadow-2xl border border-slate-200/80 z-50 animate-[masterDropdownSlide_0.2s_ease-out] dark:bg-[#13221f] dark:border-slate-800">
+                  <div role="menu" className="absolute right-0 top-full mt-2 w-48 rounded-[18px] bg-white p-1.5 shadow-2xl border border-slate-200/80 z-50 animate-[masterDropdownSlide_0.2s_ease-out] dark:bg-[#13221f] dark:border-slate-800">
                     <p className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                       Mode Tampilan
                     </p>
 
                     <button
                       type="button"
+                      role="menuitemradio"
+                      aria-checked={!isDarkMode}
                       onClick={() => {
                         setIsDarkMode(false)
                         setThemeMenuOpen(false)
@@ -530,6 +583,8 @@ export default function DashboardLayout() {
 
                     <button
                       type="button"
+                      role="menuitemradio"
+                      aria-checked={isDarkMode}
                       onClick={() => {
                         setIsDarkMode(true)
                         setThemeMenuOpen(false)

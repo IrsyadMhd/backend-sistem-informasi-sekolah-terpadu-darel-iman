@@ -6,11 +6,9 @@ import {
   FaPlus,
   FaSearch,
   FaFileExcel,
-  FaFilePdf,
   FaFileImport,
   FaRedo,
   FaCheckCircle,
-  FaTimesCircle,
   FaSitemap,
   FaLockOpen,
   FaChevronLeft,
@@ -21,6 +19,7 @@ import JabatanTable from '../components/jabatan/JabatanTable'
 import JabatanFormModal from '../components/jabatan/JabatanFormModal'
 import JabatanDetailModal from '../components/jabatan/JabatanDetailModal'
 import JabatanImportModal from '../components/jabatan/JabatanImportModal'
+import { MasterDataPage } from '../components/master-data'
 
 export default function MasterJabatanPage() {
   const queryClient = useQueryClient()
@@ -54,6 +53,8 @@ export default function MasterJabatanPage() {
     data: jabatanData = {},
     isLoading,
     isFetching,
+    isError,
+    refetch,
   } = useQuery({
     queryKey: [
       'jabatan-list',
@@ -296,146 +297,114 @@ export default function MasterJabatanPage() {
     }
   }
 
-  // Export PDF (Cetak Halaman)
-  const handleExportPDF = () => {
-    window.print()
-  }
-
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header Banner (Persis Gambar UI/UX) */}
-      <div className="bg-[#054e3b] rounded-[24px] p-7 text-white shadow-lg border border-emerald-800/40">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <MasterDataPage>
+      <section className="ui-enter rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs">
+        <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
           <div>
-            <span className="bg-[#086a52] text-emerald-200 text-[11px] font-extrabold px-3.5 py-1 rounded-full uppercase tracking-wider">
-              MANAGEMENT JABATAN SEKOLAH
-            </span>
-            <h1 className="text-3xl md:text-4xl font-black mt-2 tracking-tight">
-              Data Master Jabatan
-            </h1>
-            <p className="text-emerald-100/90 text-sm mt-1">
+            <h1 className="text-2xl font-black tracking-tight text-slate-800">Master Jabatan</h1>
+            <p className="mt-1 text-xs text-slate-500">
               Kelola 14 level hirarki jabatan, visibilitas bagan struktur organisasi, dan hak akses login pegawai.
             </p>
           </div>
 
-          {/* Action Buttons Header */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
             <button
               onClick={handleExportExcel}
-              className="bg-[#086a52]/80 hover:bg-[#086a52] text-white font-bold px-4 py-2.5 rounded-xl border border-emerald-500/30 transition flex items-center gap-2 text-xs shadow-sm"
+              className="ui-button inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
             >
-              <FaFileExcel className="text-sm" /> Export Excel
+              <FaFileExcel className="h-4 w-4" /> Ekspor CSV
             </button>
 
             <button
               onClick={() => setIsImportModalOpen(true)}
-              className="bg-[#086a52]/80 hover:bg-[#086a52] text-white font-bold px-4 py-2.5 rounded-xl border border-emerald-500/30 transition flex items-center gap-2 text-xs shadow-sm"
+              className="ui-button inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
             >
-              <FaFileImport className="text-sm" /> Import Excel
+              <FaFileImport className="h-4 w-4" /> Impor Data
             </button>
-
-            {/* <button
-              onClick={handleExportPDF}
-              className="bg-[#086a52]/80 hover:bg-[#086a52] text-white font-bold px-4 py-2.5 rounded-xl border border-emerald-500/30 transition flex items-center gap-2 text-xs shadow-sm"
-            >
-              <FaFilePdf className="text-sm" /> Cetak PDF
-            </button> */}
 
             <button
               onClick={handleOpenCreate}
-              className="bg-[#00b981] hover:bg-[#05a373] text-white font-black px-5 py-2.5 rounded-xl transition flex items-center gap-2 text-xs shadow-lg"
+              className="ui-button inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 hover:bg-emerald-900"
             >
-              <FaPlus className="text-sm" /> Tambah Jabatan
+              <FaPlus className="h-4 w-4" /> Tambah Jabatan
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Ringkasan 4 Kartu Statistik (Persis Gambar UI/UX) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#dcfce7] text-[#15803d] flex items-center justify-center text-xl font-bold shrink-0">
-            <FaBriefcase />
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Ringkasan jabatan">
+        <div className="ui-card flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+            <FaBriefcase className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold mb-1">Total Master Jabatan</p>
-            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {statistik.total_jabatan ?? 0}
-            </h3>
-            <span className="text-xs text-[#16a34a] font-bold">Terdaftar di sistem</span>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Total Jabatan</p>
+            <p className="mt-0.5 text-2xl font-black text-slate-800">{statistik.total_jabatan ?? 0}</p>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">Terdaftar di sistem</p>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#dbeafe] text-[#1d4ed8] flex items-center justify-center text-xl font-bold shrink-0">
-            <FaCheckCircle />
+        <div className="ui-card flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+            <FaCheckCircle className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold mb-1">Status Aktif</p>
-            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {statistik.aktif ?? 0}
-            </h3>
-            <span className="text-xs text-[#2563eb] font-bold">Beroperasi secara penuh</span>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Jabatan Aktif</p>
+            <p className="mt-0.5 text-2xl font-black text-slate-800">{statistik.aktif ?? 0}</p>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">Beroperasi saat ini</p>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#f3e8ff] text-[#7e22ce] flex items-center justify-center text-xl font-bold shrink-0">
-            <FaSitemap />
+        <div className="ui-card flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+            <FaSitemap className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold mb-1">Bagan Struktur</p>
-            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {statistik.tampil_struktur ?? 0}
-            </h3>
-            <span className="text-xs text-[#9333ea] font-bold">Tampil di organisasi</span>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Bagan Struktur</p>
+            <p className="mt-0.5 text-2xl font-black text-slate-800">{statistik.tampil_struktur ?? 0}</p>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">Tampil di organisasi</p>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-[#fef9c3] text-[#ca8a04] flex items-center justify-center text-xl font-bold shrink-0">
-            <FaLockOpen />
+        <div className="ui-card flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+            <FaLockOpen className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs text-slate-500 font-bold mb-1">Hak Akses Login</p>
-            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {statistik.boleh_login ?? 0}
-            </h3>
-            <span className="text-xs text-[#d97706] font-bold">Pengguna Sistem</span>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Akses Login</p>
+            <p className="mt-0.5 text-2xl font-black text-slate-800">{statistik.boleh_login ?? 0}</p>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">Dapat memakai sistem</p>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Filter Bar (Persis Gambar UI/UX Pill Input & Pill Selects) */}
-      <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-3 rounded-[24px] border border-slate-200/90 shadow-sm gap-3">
-        {/* Search Input Pill */}
-        <div className="relative w-full sm:w-1/2 md:w-[40%]">
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" aria-label="Pencarian dan filter">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="relative lg:col-span-2">
           <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
+          <label htmlFor="cari-jabatan" className="sr-only">Cari jabatan</label>
           <input
+            id="cari-jabatan"
             type="text"
-            placeholder="Cari nama unit, kode, atau jabatan..."
+            placeholder="Cari nama atau kode jabatan..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value)
               setPage(1)
             }}
-            className="w-full rounded-full border border-slate-200/90 bg-[#f8fafc] pl-10 pr-4 py-2.5 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all"
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3.5 text-sm text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
         </div>
 
-        {/* Filter Dropdowns Pill */}
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0 scrollbar-hide">
-          <div className="flex items-center gap-1.5 text-slate-500 shrink-0 mr-1">
-            <span className="text-xs font-extrabold text-slate-600">Filter:</span>
-          </div>
-
           <select
+            aria-label="Filter level jabatan"
             value={selectedLevelFilter}
             onChange={(e) => {
               setSelectedLevelFilter(e.target.value)
               setPage(1)
             }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Level (1-14)</option>
             {(options.level_jabatan || []).map((lvl) => (
@@ -446,12 +415,13 @@ export default function MasterJabatanPage() {
           </select>
 
           <select
+            aria-label="Filter unit sekolah"
             value={selectedUnitFilter}
             onChange={(e) => {
               setSelectedUnitFilter(e.target.value)
               setPage(1)
             }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Unit Sekolah</option>
             {(options.unit_sekolah || []).map((unit) => (
@@ -462,21 +432,19 @@ export default function MasterJabatanPage() {
           </select>
 
           <select
+            aria-label="Filter status jabatan"
             value={selectedStatusFilter}
             onChange={(e) => {
               setSelectedStatusFilter(e.target.value)
               setPage(1)
             }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Status</option>
             <option value="Aktif">Status Aktif</option>
             <option value="Nonaktif">Status Nonaktif</option>
           </select>
-        </div>
-
-        {/* Filter Trash Toggle */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500 w-full col-span-full">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 md:col-span-2 lg:col-span-4">
           <div className="flex items-center space-x-4">
             <label className="flex items-center space-x-1.5 cursor-pointer">
               <input
@@ -486,7 +454,7 @@ export default function MasterJabatanPage() {
                   setDenganSampahFilter(e.target.checked ? 'ya' : '')
                   setPage(1)
                 }}
-                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                className="rounded border-slate-300 text-emerald-800 focus:ring-emerald-600"
               />
               <span>Tampilkan Data Terhapus (Soft Deleted)</span>
             </label>
@@ -502,28 +470,38 @@ export default function MasterJabatanPage() {
                 setDenganSampahFilter('')
                 setPage(1)
               }}
-              className="text-xs font-semibold text-rose-600 hover:text-rose-700 flex items-center space-x-1"
+              className="ui-button flex items-center space-x-1 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-800"
             >
               <FaRedo className="w-3 h-3" />
               <span>Reset Filter</span>
             </button>
           )}
         </div>
-      </div>
+        </div>
+      </section>
 
-      {/* Main Table */}
-      <JabatanTable
-        data={daftarJabatan}
-        isLoading={isLoading || isFetching}
-        onDetail={handleOpenDetail}
-        onEdit={handleOpenEdit}
-        onDelete={handleDelete}
-        onRestore={handleRestore}
-      />
+      {isError ? (
+        <section className="rounded-2xl border border-rose-200 bg-white p-10 text-center shadow-sm">
+          <p className="text-sm font-bold text-slate-800">Data jabatan gagal dimuat.</p>
+          <p className="mt-1 text-xs text-slate-500">Periksa koneksi, lalu coba muat ulang.</p>
+          <button onClick={() => refetch()} className="ui-button mt-4 rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white hover:bg-emerald-900">
+            Coba Lagi
+          </button>
+        </section>
+      ) : (
+        <JabatanTable
+          data={daftarJabatan}
+          isLoading={isLoading || isFetching}
+          onDetail={handleOpenDetail}
+          onEdit={handleOpenEdit}
+          onDelete={handleDelete}
+          onRestore={handleRestore}
+        />
+      )}
 
       {/* Pagination Controls */}
       {meta.total > 0 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
+        <div className="flex flex-col items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 text-xs text-slate-600 shadow-sm sm:flex-row">
           <div>
             Menampilkan <strong>{meta.from || 0}</strong> - <strong>{meta.to || 0}</strong> dari total{' '}
             <strong>{meta.total || 0}</strong> data jabatan
@@ -538,7 +516,8 @@ export default function MasterJabatanPage() {
                   setPerPage(Number(e.target.value))
                   setPage(1)
                 }}
-                className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 font-semibold"
+                aria-label="Jumlah data per halaman"
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600"
               >
                 <option value={10}>10</option>
                 <option value={15}>15</option>
@@ -551,7 +530,9 @@ export default function MasterJabatanPage() {
               <button
                 disabled={page <= 1}
                 onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors"
+                className="ui-button rounded-lg border border-slate-200 p-2 hover:bg-slate-100 disabled:opacity-40"
+                title="Halaman sebelumnya"
+                aria-label="Halaman sebelumnya"
               >
                 <FaChevronLeft className="w-3.5 h-3.5" />
               </button>
@@ -561,7 +542,9 @@ export default function MasterJabatanPage() {
               <button
                 disabled={page >= (meta.last_page || 1)}
                 onClick={() => setPage((prev) => prev + 1)}
-                className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 transition-colors"
+                className="ui-button rounded-lg border border-slate-200 p-2 hover:bg-slate-100 disabled:opacity-40"
+                title="Halaman berikutnya"
+                aria-label="Halaman berikutnya"
               >
                 <FaChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -598,6 +581,6 @@ export default function MasterJabatanPage() {
         onImport={(rows) => importMutation.mutate(rows)}
         isSubmitting={importMutation.isPending}
       />
-    </div>
+    </MasterDataPage>
   )
 }

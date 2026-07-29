@@ -1,12 +1,12 @@
 import React from 'react'
-import { FaTimes, FaCalendarAlt, FaStar } from 'react-icons/fa'
+import { FaTimes, FaStar } from 'react-icons/fa'
 
 export default function TahunAjaranDetailModal({ isOpen, onClose, data }) {
   if (!isOpen || !data) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto animate-fade-in">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden my-6 transition-all">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm">
+      <div className="ui-modal my-6 w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-slate-100 bg-white px-7 py-5">
           <h2 className="text-xl font-black text-[#0f172a]">
@@ -90,7 +90,7 @@ export default function TahunAjaranDetailModal({ isOpen, onClose, data }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-[#046c4e] hover:bg-[#03543d] px-6 py-2.5 text-xs font-bold text-white shadow-md transition-colors"
+            className="ui-button rounded-xl bg-emerald-800 px-6 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900"
           >
             Tutup Detail
           </button>

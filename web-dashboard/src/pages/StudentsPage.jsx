@@ -26,6 +26,7 @@ import CetakKartuSiswaModal from '../components/siswa/CetakKartuSiswaModal'
 import StudentFormModal from '../components/siswa/StudentFormModal'
 import { useDaftarKelas } from '../hooks/useReferenceData'
 import { useAksiSiswa, useDaftarSiswa } from '../hooks/useStudents'
+import { MasterDataPage } from '../components/master-data'
 
 const initialForm = () => ({
   id: null,
@@ -509,16 +510,16 @@ export default function StudentsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <MasterDataPage>
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-emerald-800 to-teal-700 rounded-2xl p-6 text-white shadow-lg">
+      <div className="master-hero rounded-2xl bg-white p-6 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <span className="bg-emerald-600/50 text-emerald-100 text-xs font-semibold px-3 py-1 rounded-full uppercase tracking-wider">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
               Master Data Sekolah
             </span>
             <h1 className="text-2xl md:text-3xl font-bold mt-2">Data Siswa</h1>
-            <p className="text-emerald-100 text-sm mt-1">
+            <p className="mt-1 text-sm text-slate-500">
               Kelola seluruh data siswa di semua unit pendidikan Dar El-Iman
             </p>
           </div>
@@ -1178,6 +1179,6 @@ export default function StudentsPage() {
           </div>
         </div>
       )}
-    </div>
+    </MasterDataPage>
   )
 }

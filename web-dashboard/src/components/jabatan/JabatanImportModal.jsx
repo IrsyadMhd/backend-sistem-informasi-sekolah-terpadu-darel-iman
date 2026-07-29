@@ -90,8 +90,8 @@ export default function JabatanImportModal({ isOpen, onClose, onImport, isSubmit
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-xl overflow-hidden my-8 transform transition-all">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-xs" role="dialog" aria-modal="true" aria-labelledby="impor-jabatan-title">
+      <div className="ui-modal my-8 w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Header Bar */}
         <div className="flex items-center justify-between px-7 py-5 border-b border-slate-100 bg-white">
           <div className="flex items-center space-x-3">
@@ -99,8 +99,8 @@ export default function JabatanImportModal({ isOpen, onClose, onImport, isSubmit
               <FaFileImport className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xl font-black text-[#0f172a]">
-                Impor Master Data Jabatan
+              <h3 id="impor-jabatan-title" className="text-xl font-black text-slate-800">
+                Impor Data Jabatan
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Unggah file JSON atau CSV berisi daftar jabatan batch.
@@ -111,6 +111,8 @@ export default function JabatanImportModal({ isOpen, onClose, onImport, isSubmit
             type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            title="Tutup impor jabatan"
+            aria-label="Tutup impor jabatan"
           >
             <FaTimes className="w-4 h-4" />
           </button>
@@ -127,7 +129,7 @@ export default function JabatanImportModal({ isOpen, onClose, onImport, isSubmit
             <button
               type="button"
               onClick={handleDownloadTemplate}
-              className="inline-flex items-center space-x-1.5 px-3.5 py-2 text-xs font-bold text-[#054e3b] bg-white border border-[#054e3b]/30 rounded-xl hover:bg-emerald-50 transition-colors shadow-sm"
+              className="ui-button inline-flex items-center space-x-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-100"
             >
               <FaDownload className="w-3.5 h-3.5" />
               <span>Unduh Template</span>
@@ -172,14 +174,14 @@ export default function JabatanImportModal({ isOpen, onClose, onImport, isSubmit
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors"
+              className="ui-button rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
             >
               Batal
             </button>
             <button
               type="submit"
               disabled={isSubmitting || parsedData.length === 0}
-              className="inline-flex items-center space-x-2 rounded-xl bg-[#046c4e] hover:bg-[#03543d] px-6 py-2.5 text-xs font-bold text-white shadow-md disabled:opacity-50 transition-colors"
+              className="ui-button inline-flex items-center space-x-2 rounded-xl bg-emerald-800 px-6 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 hover:bg-emerald-900 disabled:opacity-50"
             >
               <FaFileImport className="w-3.5 h-3.5" />
               <span>{isSubmitting ? 'Memproses Impor...' : 'Proses Impor Data'}</span>

@@ -7,8 +7,8 @@ export default function JabatanDetailModal({ isOpen, onClose, jabatan = null }) 
   const badgeWarna = jabatan.warna || '#3B82F6'
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden my-8 transform transition-all">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-xs" role="dialog" aria-modal="true" aria-labelledby="detail-jabatan-title">
+      <div className="ui-modal my-8 w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Header Bar (Persis UI UX Referensi) */}
         <div className="flex items-center justify-between px-7 py-5 border-b border-slate-100 bg-white">
           <div className="flex items-center space-x-3">
@@ -19,7 +19,7 @@ export default function JabatanDetailModal({ isOpen, onClose, jabatan = null }) 
               <FaBriefcase className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-xl font-black text-[#0f172a] flex items-center space-x-2">
+              <h3 id="detail-jabatan-title" className="flex items-center space-x-2 text-xl font-black text-slate-800">
                 <span>{jabatan.nama_jabatan || jabatan.name}</span>
                 <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
                   {jabatan.kode_jabatan || jabatan.code}
@@ -31,8 +31,11 @@ export default function JabatanDetailModal({ isOpen, onClose, jabatan = null }) 
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+            title="Tutup detail jabatan"
+            aria-label="Tutup detail jabatan"
           >
             <FaTimes className="w-4 h-4" />
           </button>
@@ -185,8 +188,9 @@ export default function JabatanDetailModal({ isOpen, onClose, jabatan = null }) 
         {/* Footer Bar */}
         <div className="px-7 py-4 border-t border-slate-100 bg-white flex justify-end">
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-xl bg-[#054e3b] hover:bg-[#03382b] px-6 py-2.5 text-xs font-bold text-white shadow-md transition-colors"
+            className="ui-button rounded-xl bg-emerald-800 px-6 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 hover:bg-emerald-900"
           >
             Tutup
           </button>

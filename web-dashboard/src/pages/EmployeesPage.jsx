@@ -34,6 +34,7 @@ import {
   FaQrcode,
   FaPrint,
 } from 'react-icons/fa'
+import { MasterDataPage } from '../components/master-data'
 import { employeeService } from '../services/employeeService'
 import { educationUnitService } from '../services/educationUnitService'
 
@@ -953,16 +954,16 @@ export default function EmployeesPage() {
   }
 
   return (
-    <div className="space-y-6 pb-12">
+    <MasterDataPage>
       {/* 1. Header Banner */}
-      <div className="bg-gradient-to-r from-emerald-800 to-teal-700 rounded-2xl p-6 text-white shadow-lg">
+      <div className="master-hero rounded-2xl bg-white p-6 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <span className="bg-emerald-600/50 text-emerald-100 text-xs font-semibold px-3 py-1 rounded-full uppercase tracking-wider">
+            <span className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
               Modul Manajemen SDM & Kepegawaian
             </span>
             <h1 className="text-2xl md:text-3xl font-bold mt-2">Data Pegawai & Tenaga Pendidik</h1>
-            <p className="text-emerald-100 text-sm mt-1">
+            <p className="mt-1 text-sm text-slate-500">
               Kelola master data Guru, Kepala Sekolah, Tata Usaha, Operator, hingga Pimpinan Yayasan
             </p>
           </div>
@@ -2285,6 +2286,6 @@ export default function EmployeesPage() {
           </div>
         </div>
       )}
-    </div>
+    </MasterDataPage>
   )
 }

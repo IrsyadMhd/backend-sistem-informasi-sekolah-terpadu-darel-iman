@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { FaTimes, FaFileImport, FaUpload, FaDownload, FaCheck, FaExclamationTriangle } from 'react-icons/fa'
+import { FaTimes, FaFileImport, FaUpload, FaDownload, FaExclamationTriangle } from 'react-icons/fa'
 
 export default function TahunAjaranImportModal({
   isOpen,
@@ -7,7 +7,6 @@ export default function TahunAjaranImportModal({
   onImport,
   isSubmitting = false,
 }) {
-  const [fileContent, setFileContent] = useState(null)
   const [previewRows, setPreviewRows] = useState([])
   const [fileName, setFileName] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
@@ -32,7 +31,6 @@ export default function TahunAjaranImportModal({
           return
         }
 
-        const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase())
         const rows = []
 
         for (let i = 1; i < lines.length; i++) {
@@ -53,7 +51,7 @@ export default function TahunAjaranImportModal({
         } else {
           setPreviewRows(rows)
         }
-      } catch (err) {
+      } catch {
         setErrorMsg('Gagal membaca isi file CSV.')
       }
     }
@@ -79,24 +77,24 @@ export default function TahunAjaranImportModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-xs animate-fade-in">
-      <div className="bg-white rounded-3xl shadow-2xl border border-emerald-100 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="ui-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+      <div className="ui-modal flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* HEADER */}
-        <div className="bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-700 px-6 py-5 text-white flex items-center justify-between">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-white px-6 py-5">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-emerald-700/80 border border-emerald-500/40 text-emerald-100">
+            <div className="rounded-xl bg-emerald-50 p-2.5 text-emerald-700">
               <FaFileImport className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-extrabold tracking-tight">Impor Data Tahun Ajaran</h3>
-              <p className="text-xs text-emerald-100/80 mt-0.5">
+              <h3 className="text-lg font-extrabold tracking-tight text-slate-800">Impor Data Tahun Ajaran</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
                 Unggah file CSV/Excel untuk impor masal data tahun ajaran
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95"
+            className="rounded-xl p-2 text-slate-400 transition-all hover:bg-slate-100 hover:text-slate-700"
           >
             <FaTimes className="w-4 h-4" />
           </button>

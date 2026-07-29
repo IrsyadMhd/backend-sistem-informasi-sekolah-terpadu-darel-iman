@@ -20,18 +20,35 @@ export default function JabatanTable({
 }) {
   if (isLoading) {
     return (
-      <div className="w-full p-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent mb-3"></div>
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Memuat data master jabatan...</p>
+      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm" aria-busy="true" aria-label="Memuat data jabatan">
+        <div className="grid grid-cols-4 gap-5 bg-slate-50/80 px-5 py-4">
+          {[1, 2, 3, 4].map((item) => <div key={item} className="h-3 animate-pulse rounded bg-slate-200" />)}
+        </div>
+        <div className="space-y-0 divide-y divide-slate-100">
+          {[1, 2, 3, 4, 5].map((item) => (
+            <div key={item} className="grid grid-cols-4 items-center gap-5 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="h-11 w-11 animate-pulse rounded-xl bg-slate-100" />
+                <div className="h-3 w-28 animate-pulse rounded bg-slate-100" />
+              </div>
+              <div className="h-3 animate-pulse rounded bg-slate-100" />
+              <div className="h-3 animate-pulse rounded bg-slate-100" />
+              <div className="h-8 w-28 justify-self-end animate-pulse rounded-lg bg-slate-100" />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
 
   if (!data || data.length === 0) {
     return (
-      <div className="w-full p-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-        <p className="text-base font-semibold text-slate-700 dark:text-slate-300">Tidak ada data jabatan ditemukan</p>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+      <div className="w-full rounded-2xl border border-slate-200/80 bg-white p-12 text-center shadow-sm">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+          <FaSitemap className="h-6 w-6" />
+        </div>
+        <p className="mt-4 text-sm font-bold text-slate-800">Jabatan tidak ditemukan</p>
+        <p className="mt-1 text-xs text-slate-500">
           Coba sesuaikan kata kunci pencarian atau kriteria filter yang diterapkan.
         </p>
       </div>
@@ -39,10 +56,10 @@ export default function JabatanTable({
   }
 
   return (
-    <div className="w-full overflow-x-auto rounded-[20px] border border-slate-200/90 bg-white shadow-sm">
+    <div className="w-full overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-sm">
       <table className="w-full text-left border-collapse text-slate-800">
         <thead>
-          <tr className="bg-[#f4efe6] border-b border-slate-200/90 text-xs font-black uppercase tracking-wider text-slate-700">
+          <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
             <th className="py-3.5 px-4 w-12 text-center">NO</th>
             <th className="py-3.5 px-4">KODE & NAMA JABATAN</th>
             <th className="py-3.5 px-4">LEVEL & UNIT SEKOLAH</th>
@@ -53,17 +70,16 @@ export default function JabatanTable({
             <th className="py-3.5 px-4 text-center w-36">AKSI</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-sm">
+        <tbody className="divide-y divide-slate-100 text-sm">
           {data.map((item, index) => {
             const isTrashed = item.terhapus
-            const badgeWarna = item.warna || '#3B82F6'
-
             return (
               <tr
                 key={item.id}
-                className={`transition-colors hover:bg-slate-50/60 dark:hover:bg-slate-800/40 ${
-                  isTrashed ? 'bg-rose-50/40 dark:bg-rose-950/10 opacity-75' : ''
+                className={`ui-row transition-colors hover:bg-emerald-50/40 ${
+                  isTrashed ? 'bg-rose-50/40 opacity-75' : ''
                 }`}
+                style={{ animationDelay: `${Math.min(index * 35, 280)}ms` }}
               >
                 {/* No & Urutan */}
                 <td className="py-3.5 px-4 text-center font-medium text-slate-500 text-xs">
@@ -73,13 +89,11 @@ export default function JabatanTable({
                 {/* Kode & Nama Jabatan */}
                 <td className="py-3.5 px-4">
                   <div className="flex items-center space-x-3">
-                    <span
-                      className="w-3 h-3 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: badgeWarna }}
-                      title={`Kode Warna: ${badgeWarna}`}
-                    />
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+                      <FaSitemap className="h-4 w-4" />
+                    </span>
                     <div>
-                      <div className="font-bold text-slate-900 dark:text-slate-100 flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 font-bold text-slate-800">
                         <span>{item.nama_jabatan || item.name}</span>
                         {isTrashed && (
                           <span className="px-1.5 py-0.5 text-[10px] font-semibold bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-400 rounded">
@@ -87,7 +101,7 @@ export default function JabatanTable({
                           </span>
                         )}
                       </div>
-                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                      <span className="font-mono text-xs text-slate-500">
                         {item.kode_jabatan || item.code}
                       </span>
                     </div>
@@ -102,7 +116,7 @@ export default function JabatanTable({
                     </span>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       {item.unit_sekolah ? (
-                        <span className="font-medium text-blue-600 dark:text-blue-400">
+                        <span className="font-medium text-slate-700">
                           {item.unit_sekolah.nama} ({item.unit_sekolah.kode})
                         </span>
                       ) : (
@@ -188,8 +202,9 @@ export default function JabatanTable({
                   <div className="flex items-center justify-center gap-1.5">
                     <button
                       onClick={() => onDetail(item)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-[#eff6ff] text-[#2563eb] hover:bg-blue-100 transition-colors"
-                      title="Lihat Detail Jabatan"
+                      className="ui-button flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                      title={`Lihat detail ${item.nama_jabatan || item.name}`}
+                      aria-label={`Lihat detail ${item.nama_jabatan || item.name}`}
                     >
                       <FaEye className="w-3.5 h-3.5" />
                     </button>
@@ -198,15 +213,17 @@ export default function JabatanTable({
                       <>
                         <button
                           onClick={() => onEdit(item)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 bg-[#fffbe6] text-[#d97706] hover:bg-amber-100 transition-colors"
-                          title="Edit Jabatan"
+                          className="ui-button flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                          title={`Edit ${item.nama_jabatan || item.name}`}
+                          aria-label={`Edit ${item.nama_jabatan || item.name}`}
                         >
                           <FaEdit className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => onDelete(item)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-[#fef2f2] text-[#dc2626] hover:bg-red-100 transition-colors"
-                          title="Hapus Jabatan"
+                          className="ui-button flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                          title={`Hapus ${item.nama_jabatan || item.name}`}
+                          aria-label={`Hapus ${item.nama_jabatan || item.name}`}
                         >
                           <FaTrash className="w-3.5 h-3.5" />
                         </button>
@@ -214,8 +231,9 @@ export default function JabatanTable({
                     ) : (
                       <button
                         onClick={() => onRestore(item)}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors"
-                        title="Pulihkan Jabatan"
+                        className="ui-button flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                        title={`Pulihkan ${item.nama_jabatan || item.name}`}
+                        aria-label={`Pulihkan ${item.nama_jabatan || item.name}`}
                       >
                         <FaRedo className="w-3.5 h-3.5" />
                       </button>

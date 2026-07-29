@@ -38,7 +38,10 @@ use App\Http\Controllers\Api\V1\TeacherController;
 use App\Http\Controllers\Api\V1\TujuanPembelajaranController;
 use App\Http\Controllers\Api\V1\CapaianPembelajaranController;
 use App\Http\Controllers\Api\V1\LmsRaporController;
+use App\Http\Controllers\Api\V1\SiteSettingController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/site-settings', [SiteSettingController::class, 'show']);
 
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
@@ -50,6 +53,7 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/site-settings', [SiteSettingController::class, 'update']);
     Route::get('/dashboard', [DashboardPemantauanController::class, 'ringkasan']);
     Route::get('/dashboard-v1', DashboardController::class);
 
@@ -351,4 +355,3 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('rapor', LmsRaporController::class);
     });
 });
-

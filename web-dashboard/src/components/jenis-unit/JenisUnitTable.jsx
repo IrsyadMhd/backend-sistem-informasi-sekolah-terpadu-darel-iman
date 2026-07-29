@@ -25,6 +25,7 @@ const ICON_MAP = {
   Home: FaHome,
 }
 
+// eslint-disable-next-line react/only-export-components -- helper ikon dipakai bersama modal terkait.
 export function renderJenisUnitIcon(iconName, className = 'w-4 h-4') {
   const IconComp = ICON_MAP[iconName] || FaSchool
   return <IconComp className={className} />
@@ -42,7 +43,7 @@ export default function JenisUnitTable({
 }) {
   if (isLoading) {
     return (
-      <div className="p-8 text-center bg-white rounded-xl shadow-sm border border-emerald-100">
+      <div className="ui-enter rounded-2xl border border-slate-200/80 bg-white p-12 text-center shadow-sm">
         <div className="inline-block animate-spin rounded-full h-8 w-8 border-4 border-emerald-500 border-t-transparent"></div>
         <p className="mt-3 text-sm font-medium text-emerald-700">Memuat data Jenis Unit Pendidikan...</p>
       </div>
@@ -51,7 +52,7 @@ export default function JenisUnitTable({
 
   if (data.length === 0) {
     return (
-      <div className="p-12 text-center bg-white rounded-xl shadow-sm border border-emerald-100">
+      <div className="ui-enter rounded-2xl border border-slate-200/80 bg-white p-12 text-center shadow-sm">
         <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-500">
           <FaSchool className="w-8 h-8" />
         </div>
@@ -62,11 +63,11 @@ export default function JenisUnitTable({
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden">
+    <div className="ui-enter overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm" style={{ animationDelay: '250ms' }}>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm border-collapse">
           <thead>
-            <tr className="bg-emerald-800 text-white font-semibold uppercase text-xs tracking-wider">
+            <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
               <th className="py-3.5 px-4 text-center w-12">NO</th>
               <th className="py-3.5 px-4">KODE JENIS</th>
               <th className="py-3.5 px-4">NAMA JENIS UNIT</th>
@@ -89,9 +90,10 @@ export default function JenisUnitTable({
               return (
                 <tr
                   key={item.id || item.uuid}
-                  className={`hover:bg-emerald-50/50 transition-colors ${
+                  className={`ui-row hover:bg-emerald-50/40 transition-colors ${
                     item.is_deleted ? 'bg-red-50/40 opacity-75' : ''
                   }`}
+                  style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}
                 >
                   <td className="py-3.5 px-4 text-center font-medium text-gray-500">{rowNo}</td>
                   <td className="py-3.5 px-4 font-bold text-emerald-800 tracking-wide">
@@ -140,8 +142,8 @@ export default function JenisUnitTable({
                     <div className="flex items-center justify-center gap-1.5">
                       <button
                         onClick={() => onDetail && onDetail(item)}
-                        className="p-1.5 rounded-lg bg-sky-50 text-sky-600 hover:bg-sky-100 hover:text-sky-700 transition-colors"
-                        title="👁 Detail"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-200 bg-sky-50 text-sky-600 transition-colors hover:bg-sky-100 hover:text-sky-700"
+                        title="Detail"
                       >
                         <FaEye className="w-4 h-4" />
                       </button>
@@ -149,15 +151,15 @@ export default function JenisUnitTable({
                         <>
                           <button
                             onClick={() => onEdit && onEdit(item)}
-                            className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 hover:text-amber-700 transition-colors"
-                            title="✏ Edit"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 text-amber-600 transition-colors hover:bg-amber-100 hover:text-amber-700"
+                            title="Edit"
                           >
                             <FaEdit className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => onDelete && onDelete(item)}
-                            className="p-1.5 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 transition-colors"
-                            title="🗑 Hapus"
+                            className="flex h-8 w-8 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-600 transition-colors hover:bg-rose-100 hover:text-rose-700"
+                            title="Hapus"
                           >
                             <FaTrash className="w-4 h-4" />
                           </button>

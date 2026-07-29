@@ -8,7 +8,6 @@ import {
   FaFileExcel,
   FaFileImport,
   FaFilter,
-  FaCheckCircle,
   FaTimesCircle,
   FaStar,
   FaChevronLeft,
@@ -19,6 +18,7 @@ import TahunAjaranTable from '../components/tahun-ajaran/TahunAjaranTable'
 import TahunAjaranFormModal from '../components/tahun-ajaran/TahunAjaranFormModal'
 import TahunAjaranDetailModal from '../components/tahun-ajaran/TahunAjaranDetailModal'
 import TahunAjaranImportModal from '../components/tahun-ajaran/TahunAjaranImportModal'
+import { MasterDataPage } from '../components/master-data'
 
 export default function MasterTahunAjaranPage() {
   const queryClient = useQueryClient()
@@ -28,7 +28,7 @@ export default function MasterTahunAjaranPage() {
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('')
   const [denganSampahFilter, setDenganSampahFilter] = useState('')
   const [page, setPage] = useState(1)
-  const [perPage, setPerPage] = useState(15)
+  const perPage = 15
 
   // Modal States
   const [isFormModalOpen, setIsFormModalOpen] = useState(false)
@@ -298,104 +298,116 @@ export default function MasterTahunAjaranPage() {
         timer: 2000,
         showConfirmButton: false,
       })
-    } catch (err) {
+    } catch {
       Swal.fire('Error', 'Gagal mengunduh data ekspor.', 'error')
     }
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* HEADER BANNER - ENTERPRISE GREEN STYLING */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-900 via-emerald-800 to-emerald-700 p-6 md:p-8 text-white shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+    <MasterDataPage>
+      {/* Header dan urutan aksi mengikuti UI_UX_GUIDELINES.md */}
+      <section className="ui-enter rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs">
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
           {/* Header Left Text */}
           <div>
-            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-700/80 text-emerald-100 border border-emerald-500/30 uppercase tracking-widest mb-3">
-              MASTER DATA AKADEMIK
-            </span>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
+            <h1 className="text-2xl font-black tracking-tight text-slate-800">
               Data Master Tahun Ajaran
             </h1>
-            <p className="text-emerald-100/90 text-sm mt-1.5 max-w-xl leading-relaxed">
+            <p className="mt-1 max-w-xl text-xs text-slate-500">
               Kelola seluruh periode tahun ajaran dan tetapkan periode aktif sekolah.
             </p>
           </div>
 
           {/* Header Right Action Buttons */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
             <button
               onClick={handleExportExcel}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm backdrop-blur-xs border border-white/20 transition-all shadow-xs"
+              className="ui-button inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-100"
             >
-              <FaFileExcel className="w-4 h-4 text-emerald-300" />
-              📥 Export Excel
+              <FaFileExcel className="h-4 w-4 text-emerald-700" />
+              Ekspor
             </button>
 
             <button
               onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-sm backdrop-blur-xs border border-white/20 transition-all shadow-xs"
+              className="ui-button inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-100"
             >
-              <FaFileImport className="w-4 h-4 text-emerald-300" />
-              📤 Import Excel
+              <FaFileImport className="h-4 w-4 text-slate-500" />
+              Impor
             </button>
 
             <button
               onClick={handleOpenFormTambah}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-sm transition-all shadow-md hover:shadow-emerald-500/20 active:scale-95"
+              className="ui-button col-span-2 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 hover:shadow-lg sm:ml-1"
             >
               <FaPlus className="w-4 h-4" />
-              ➕ Tambah Tahun Ajaran
+              Tambah Tahun Ajaran
             </button>
           </div>
         </div>
-
-        {/* Decorative background elements */}
-        <div className="absolute -right-12 -bottom-12 w-64 h-64 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
-      </div>
+      </section>
 
       {/* DASHBOARD CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Ringkasan tahun ajaran">
         {/* Card 1 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-emerald-100 flex items-center gap-4 hover:shadow-md transition-all">
-          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
-            <FaCalendarAlt className="w-6 h-6" />
+        <div className="ui-card ui-enter flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm" style={{ animationDelay: '60ms' }}>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+            <FaCalendarAlt className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Total Tahun Ajaran</p>
-            <h3 className="text-2xl font-black text-gray-900 mt-0.5">{stats.total ?? 0}</h3>
-            <p className="text-xs font-medium text-emerald-600 mt-0.5">Terdaftar di sistem</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Total Tahun Ajaran</p>
+            <h3 className="mt-0.5 text-2xl font-black text-slate-800">{stats.total ?? 0}</h3>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">Terdaftar di sistem</p>
           </div>
         </div>
 
         {/* Card 2 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-emerald-100 flex items-center gap-4 hover:shadow-md transition-all">
-          <div className="p-3.5 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100">
-            <FaStar className="w-6 h-6 text-amber-500" />
+        <div className="ui-card ui-enter flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm" style={{ animationDelay: '110ms' }}>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 text-emerald-800">
+            <FaStar className="h-6 w-6 text-amber-500" />
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Periode Aktif Utama</p>
-            <h3 className="text-2xl font-black text-gray-900 mt-0.5">{stats.aktif ?? 0}</h3>
-            <p className="text-xs font-medium text-emerald-600 mt-0.5">Berjalan saat ini</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Periode Aktif Utama</p>
+            <h3 className="mt-0.5 text-2xl font-black text-slate-800">{stats.aktif ?? 0}</h3>
+            <p className="mt-0.5 text-xs font-medium text-emerald-700">Berjalan saat ini</p>
           </div>
         </div>
 
         {/* Card 3 */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-emerald-100 flex items-center gap-4 hover:shadow-md transition-all">
-          <div className="p-3.5 rounded-xl bg-slate-50 text-slate-600 border border-slate-200">
-            <FaTimesCircle className="w-6 h-6 text-slate-400" />
+        <div className="ui-card ui-enter flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm" style={{ animationDelay: '160ms' }}>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-500">
+            <FaTimesCircle className="h-6 w-6" />
           </div>
           <div>
-            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Arsip / Non-Aktif</p>
-            <h3 className="text-2xl font-black text-gray-900 mt-0.5">{stats.tidak_aktif ?? 0}</h3>
-            <p className="text-xs font-medium text-slate-500 mt-0.5">Periode lampau / mendatang</p>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Arsip / Nonaktif</p>
+            <h3 className="mt-0.5 text-2xl font-black text-slate-800">{stats.tidak_aktif ?? 0}</h3>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">Periode lampau atau mendatang</p>
           </div>
         </div>
-      </div>
+
+        <div className="ui-card ui-enter flex min-h-28 items-center gap-5 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-sm" style={{ animationDelay: '210ms' }}>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600">
+            <FaCalendarAlt className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-slate-500">Periode Tersimpan</p>
+            <h3 className="mt-0.5 text-2xl font-black text-slate-800">{stats.total ?? 0}</h3>
+            <p className="mt-0.5 text-xs font-medium text-blue-600">Riwayat akademik</p>
+          </div>
+        </div>
+      </section>
 
       {/* SEARCH & FILTER BAR */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <section className="ui-enter rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '210ms' }}>
+        <div className="mb-4 flex items-center gap-2 text-xs font-bold text-slate-700">
+          <FaFilter className="h-3.5 w-3.5 text-emerald-800" />
+          Pencarian & Filter Data
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_200px_200px]">
         {/* Search Box */}
-        <div className="relative flex-1">
+        <label>
+          <span className="mb-1.5 block text-xs font-semibold text-slate-700">Cari tahun ajaran</span>
+          <span className="relative block">
           <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
           <input
             type="text"
@@ -405,45 +417,46 @@ export default function MasterTahunAjaranPage() {
               setPage(1)
             }}
             placeholder="Cari Nama Tahun Ajaran (misal: 2025/2026)..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-gray-50/80 border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white transition-colors"
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-sm text-slate-800 shadow-sm transition-all placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
-        </div>
+          </span>
+        </label>
 
         {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="flex items-center gap-1.5 font-bold text-gray-600">
-            <FaFilter className="w-3.5 h-3.5 text-emerald-600" />
-            Filter:
-          </span>
-
           {/* Filter Status */}
+          <label>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-700">Status periode</span>
           <select
             value={selectedStatusFilter}
             onChange={(e) => {
               setSelectedStatusFilter(e.target.value)
               setPage(1)
             }}
-            className="px-3.5 py-2 rounded-xl bg-gray-50/80 border border-gray-200 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Status</option>
             <option value="true">Aktif Utama</option>
             <option value="false">Tidak Aktif</option>
           </select>
+          </label>
 
           {/* Filter Trash */}
+          <label>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-700">Cakupan data</span>
           <select
             value={denganSampahFilter}
             onChange={(e) => {
               setDenganSampahFilter(e.target.value)
               setPage(1)
             }}
-            className="px-3.5 py-2 rounded-xl bg-gray-50/80 border border-gray-200 font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Data Aktif</option>
             <option value="true">Termasuk Terhapus</option>
           </select>
+          </label>
         </div>
-      </div>
+      </section>
 
       {/* TABLE DATA */}
       <TahunAjaranTable
@@ -460,7 +473,7 @@ export default function MasterTahunAjaranPage() {
 
       {/* PAGINATION FOOTER */}
       {meta.total > 0 && (
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs text-gray-600 font-medium">
+        <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-4 text-xs font-medium text-slate-600 shadow-sm sm:flex-row sm:items-center">
           <div>
             Menampilkan <strong>{meta.from || 0}</strong> - <strong>{meta.to || 0}</strong> dari{' '}
             <strong>{meta.total || 0}</strong> data Tahun Ajaran
@@ -472,7 +485,7 @@ export default function MasterTahunAjaranPage() {
               disabled={page <= 1}
               className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-emerald-50 disabled:opacity-40 disabled:hover:bg-transparent transition-colors inline-flex items-center gap-1"
             >
-              <FaChevronLeft className="w-3 h-3" /> Prev
+              <FaChevronLeft className="w-3 h-3" /> Sebelumnya
             </button>
             <span className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 font-bold border border-emerald-200">
               {meta.current_page || 1} / {meta.last_page || 1}
@@ -482,7 +495,7 @@ export default function MasterTahunAjaranPage() {
               disabled={page >= (meta.last_page || 1)}
               className="px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-emerald-50 disabled:opacity-40 disabled:hover:bg-transparent transition-colors inline-flex items-center gap-1"
             >
-              Next <FaChevronRight className="w-3 h-3" />
+              Berikutnya <FaChevronRight className="w-3 h-3" />
             </button>
           </div>
         </div>
@@ -509,6 +522,6 @@ export default function MasterTahunAjaranPage() {
         onImport={(rows) => importMutation.mutate(rows)}
         isSubmitting={importMutation.isPending}
       />
-    </div>
+    </MasterDataPage>
   )
 }

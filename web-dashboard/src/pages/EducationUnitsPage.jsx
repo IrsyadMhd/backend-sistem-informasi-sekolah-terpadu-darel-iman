@@ -21,12 +21,10 @@ import {
   FaUserGraduate,
   FaChalkboardTeacher,
   FaSchool,
-  FaCalendarAlt,
-  FaPhoneAlt,
-  FaEnvelope,
   FaMapMarkerAlt,
 } from 'react-icons/fa'
 import { educationUnitService } from '../services/educationUnitService'
+import { MasterDataPage } from '../components/master-data'
 
 const UNIT_TYPES = ['TKIT', 'TAUD', 'SDIT', 'MIT', 'SMPIT', 'SMAIT', 'PONPES', 'Mahad']
 
@@ -196,7 +194,7 @@ export default function EducationUnitsPage() {
     last_page: data?.last_page || 1,
   }
 
-  const items = useMemo(() => rawList.map(parseFromApi), [rawList])
+  const items = useMemo(() => (data?.data || []).map(parseFromApi), [data?.data])
 
   // Extract unique cities & provinces for filters
   const cityOptions = useMemo(() => {
@@ -367,12 +365,6 @@ export default function EducationUnitsPage() {
     }
   }
 
-  const toggleUnitStatus = (unit) => {
-    const updatedForm = { ...unit, is_active: !unit.is_active }
-    const payload = makePayload(updatedForm)
-    updateMutation.mutate({ id: unit.id, payload })
-  }
-
   // Export Excel Dummy Handler
   const handleExportExcel = () => {
     Swal.fire({
@@ -385,35 +377,32 @@ export default function EducationUnitsPage() {
   }
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header Banner persis gambar UI/UX */}
-      <div className="bg-[#054e3b] rounded-[24px] p-7 text-white shadow-lg border border-emerald-800/40">
+    <MasterDataPage>
+      {/* Header — mengikuti pola modul Profil */}
+      <div className="edu-enter flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs md:flex-row md:items-center">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <span className="bg-[#086a52] text-emerald-200 text-[11px] font-extrabold px-3.5 py-1 rounded-full uppercase tracking-wider">
-              MASTER DATA SEKOLAH
-            </span>
-            <h1 className="text-3xl md:text-4xl font-black mt-2 tracking-tight">Data Unit Pendidikan</h1>
-            <p className="text-emerald-100/90 text-sm mt-1">
+            <h1 className="text-2xl font-black tracking-tight text-slate-800">Data Unit Pendidikan</h1>
+            <p className="mt-1 text-xs text-slate-500">
               Kelola seluruh unit pendidikan di lingkungan Dar El-Iman
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={handleExportExcel}
-              className="bg-[#086a52]/80 hover:bg-[#086a52] text-white font-bold px-4 py-2.5 rounded-xl border border-emerald-500/30 transition flex items-center gap-2 text-xs shadow-sm"
+              className="edu-button flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-100"
             >
-              <FaFileExcel className="text-sm" /> Export Excel
+              <FaFileExcel className="text-sm text-emerald-700" /> Export Excel
             </button>
             <button
               onClick={() => setShowImportModal(true)}
-              className="bg-[#086a52]/80 hover:bg-[#086a52] text-white font-bold px-4 py-2.5 rounded-xl border border-emerald-500/30 transition flex items-center gap-2 text-xs shadow-sm"
+              className="edu-button flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-100"
             >
-              <FaFileImport className="text-sm" /> Import Excel
+              <FaFileImport className="text-sm text-slate-500" /> Import Excel
             </button>
             <button
               onClick={openAddModal}
-              className="bg-[#00b981] hover:bg-[#05a373] text-white font-black px-5 py-2.5 rounded-xl transition flex items-center gap-2 text-xs shadow-lg"
+              className="edu-button flex items-center gap-2 rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 hover:shadow-lg"
             >
               <FaPlus className="text-sm" /> Tambah Unit
             </button>
@@ -422,8 +411,8 @@ export default function EducationUnitsPage() {
       </div>
 
       {/* Quick Summary Cards (4 Kartu persis Gambar UI/UX) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="edu-card edu-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '60ms' }}>
           <div className="w-12 h-12 rounded-2xl bg-[#dcfce7] text-[#15803d] flex items-center justify-center text-xl font-bold shrink-0">
             <FaBuilding />
           </div>
@@ -434,7 +423,7 @@ export default function EducationUnitsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
+        <div className="edu-card edu-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '110ms' }}>
           <div className="w-12 h-12 rounded-2xl bg-[#dbeafe] text-[#1d4ed8] flex items-center justify-center text-xl font-bold shrink-0">
             <FaSchool />
           </div>
@@ -447,7 +436,7 @@ export default function EducationUnitsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
+        <div className="edu-card edu-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '160ms' }}>
           <div className="w-12 h-12 rounded-2xl bg-[#f3e8ff] text-[#7e22ce] flex items-center justify-center text-xl font-bold shrink-0">
             <FaChalkboardTeacher />
           </div>
@@ -460,7 +449,7 @@ export default function EducationUnitsPage() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-[20px] border border-slate-200/90 shadow-sm flex items-center gap-4">
+        <div className="edu-card edu-enter flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" style={{ animationDelay: '210ms' }}>
           <div className="w-12 h-12 rounded-2xl bg-[#fef9c3] text-[#ca8a04] flex items-center justify-center text-xl font-bold shrink-0">
             <FaCheckCircle />
           </div>
@@ -474,8 +463,8 @@ export default function EducationUnitsPage() {
         </div>
       </div>
 
-      {/* Filter Bar persis Gambar UI/UX */}
-      <div className="flex flex-col sm:flex-row items-center justify-between bg-white p-3 rounded-[24px] border border-slate-200/90 shadow-sm gap-3">
+      {/* Filter Bar */}
+      <div className="edu-enter flex flex-col items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:flex-row" style={{ animationDelay: '240ms' }}>
         {/* Search Input Pill */}
         <div className="relative w-full sm:w-1/2 md:w-[42%]">
           <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
@@ -484,7 +473,7 @@ export default function EducationUnitsPage() {
             placeholder="Cari nama unit, NPSN, atau pimpinan..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-            className="w-full rounded-full border border-slate-200/90 bg-[#f8fafc] pl-10 pr-4 py-2.5 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:outline-none transition-all"
+            className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-4 text-xs font-semibold text-slate-700 shadow-sm transition-all placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           />
         </div>
 
@@ -498,7 +487,7 @@ export default function EducationUnitsPage() {
           <select
             value={selectedTypeFilter}
             onChange={(e) => { setSelectedTypeFilter(e.target.value); setPage(1) }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Jenis Unit</option>
             {UNIT_TYPES.map((t) => (
@@ -509,7 +498,7 @@ export default function EducationUnitsPage() {
           <select
             value={selectedCityFilter}
             onChange={(e) => { setSelectedCityFilter(e.target.value); setPage(1) }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Kota</option>
             {cityOptions.map((c) => (
@@ -523,7 +512,7 @@ export default function EducationUnitsPage() {
           <select
             value={selectedProvinceFilter}
             onChange={(e) => { setSelectedProvinceFilter(e.target.value); setPage(1) }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Provinsi</option>
             {provinceOptions.map((p) => (
@@ -535,7 +524,7 @@ export default function EducationUnitsPage() {
           <select
             value={selectedStatusFilter}
             onChange={(e) => { setSelectedStatusFilter(e.target.value); setPage(1) }}
-            className="rounded-full border border-slate-200/90 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 focus:border-emerald-500 focus:outline-none shrink-0"
+            className="shrink-0 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
           >
             <option value="">Semua Status</option>
             <option value="aktif">Status Aktif</option>
@@ -544,11 +533,11 @@ export default function EducationUnitsPage() {
         </div>
       </div>
 
-      {/* Table View persis Gambar UI/UX (Header Warna Cream #f4efe6) */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm">
+      {/* Table View */}
+      <div className="edu-enter overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm" style={{ animationDelay: '280ms' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm text-slate-600">
-            <thead className="bg-[#f4efe6] text-xs font-black uppercase text-slate-700 tracking-wider border-b border-slate-200/90">
+            <thead className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
               <tr>
                 <th className="py-3.5 px-4 w-12 text-center">NO</th>
                 <th className="py-3.5 px-4 w-16 text-center">LOGO</th>
@@ -577,7 +566,7 @@ export default function EducationUnitsPage() {
                 items.map((row, idx) => {
                   const style = getUnitBadgeStyle(row.unit_type)
                   return (
-                    <tr key={row.id || idx} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={row.id || idx} className="edu-row hover:bg-emerald-50/40 transition-colors" style={{ animationDelay: `${Math.min(idx, 8) * 35}ms` }}>
                       <td className="py-4 px-4 text-center text-slate-400 font-bold">{(paginationInfo.from || 1) + idx}</td>
                       <td className="py-4 px-4 text-center">
                         {row.logo_url ? (
@@ -680,8 +669,8 @@ export default function EducationUnitsPage() {
 
       {/* 4. MODAL TAMBAH / EDIT UNIT PENDIDIKAN (Persis Gambar UI/UX Referensi) */}
       {isFormModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-4xl overflow-hidden rounded-[24px] bg-white shadow-2xl transition-all">
+        <div className="edu-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="edu-modal w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
             {/* Modal Header Bar */}
             <div className="flex items-center justify-between border-b border-slate-100 bg-white px-7 py-5">
               <h2 className="text-xl font-black text-slate-900">
@@ -738,7 +727,7 @@ export default function EducationUnitsPage() {
               <div className={isEditMode ? 'lg:col-span-2 p-7 overflow-y-auto max-h-[520px]' : 'lg:col-span-3 p-7 overflow-y-auto max-h-[520px]'}>
                 {/* STEP 1: Informasi Unit */}
                 {currentStep === 1 && (
-                  <div className="space-y-4">
+                  <div key="unit-step-1" className="edu-step space-y-4">
                     <h3 className="text-base font-extrabold text-slate-900 border-b border-slate-100 pb-2.5">
                       Informasi Unit
                     </h3>
@@ -844,7 +833,7 @@ export default function EducationUnitsPage() {
 
                 {/* STEP 2: Alamat */}
                 {currentStep === 2 && (
-                  <div className="space-y-4">
+                  <div key="unit-step-2" className="edu-step space-y-4">
                     <h3 className="text-base font-extrabold text-slate-900 border-b border-slate-100 pb-2.5">Alamat Unit</h3>
 
                     <div>
@@ -896,7 +885,7 @@ export default function EducationUnitsPage() {
 
                 {/* STEP 3: Kepala Sekolah */}
                 {currentStep === 3 && (
-                  <div className="space-y-4">
+                  <div key="unit-step-3" className="edu-step space-y-4">
                     <h3 className="text-base font-extrabold text-slate-900 border-b border-slate-100 pb-2.5">Kepala Sekolah / Pimpinan</h3>
 
                     <div>
@@ -950,7 +939,7 @@ export default function EducationUnitsPage() {
 
                 {/* STEP 4: Konfirmasi */}
                 {currentStep === 4 && (
-                  <div className="space-y-4">
+                  <div key="unit-step-4" className="edu-step space-y-4">
                     <h3 className="text-base font-extrabold text-slate-900 border-b border-slate-100 pb-2.5">Konfirmasi Data</h3>
 
                     <div className="rounded-2xl border border-slate-200/90 bg-[#f8fafc] p-4 space-y-3 text-xs">
@@ -1023,8 +1012,8 @@ export default function EducationUnitsPage() {
 
       {/* 5. MODAL DETAIL UNIT PENDIDIKAN */}
       {detailUnit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="edu-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="edu-modal w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
             {/* Top Action Header */}
             <div className="flex items-center justify-between border-b border-slate-100 px-6 py-3.5 bg-slate-50">
               <button
@@ -1189,8 +1178,8 @@ export default function EducationUnitsPage() {
 
       {/* 6. MODAL KONFIRMASI HAPUS UNIT */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="edu-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="edu-modal w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
             {/* Header / Warning Icon */}
             <div className="p-6 text-center space-y-3 border-b border-slate-100">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-600 text-2xl">
@@ -1261,8 +1250,8 @@ export default function EducationUnitsPage() {
 
       {/* POP UP MODAL: DASHBOARD IMPORT DATA UNIT PENDIDIKAN */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl transition-all">
+        <div className="edu-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="edu-modal w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
             {/* Header Modal */}
             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-6 py-4">
               <div className="flex items-center gap-2.5">
@@ -1385,6 +1374,6 @@ export default function EducationUnitsPage() {
           </div>
         </div>
       )}
-    </div>
+    </MasterDataPage>
   )
 }

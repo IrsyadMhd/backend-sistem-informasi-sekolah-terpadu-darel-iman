@@ -19,7 +19,8 @@ import {
   FaUserCog,
   FaBuilding,
   FaBriefcase,
-  FaIdCard,
+  FaArrowRight,
+  FaLayerGroup,
 } from 'react-icons/fa'
 import { hakAksesService } from '../services/hakAksesService'
 
@@ -73,7 +74,7 @@ function RoleFormModal({ isOpen, onClose, onSubmit, initialData = null, allPermi
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-3xl overflow-hidden my-6">
+      <div className="my-6 w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-7 py-5 border-b border-slate-100">
           <h2 className="text-xl font-black text-[#0f172a]">
@@ -95,7 +96,7 @@ function RoleFormModal({ isOpen, onClose, onSubmit, initialData = null, allPermi
               value={name}
               onChange={(e) => { setName(e.target.value); setError('') }}
               placeholder="Contoh: Kepala Sekolah, Divisi Pendidikan, Tata Usaha, Guru"
-              className="w-full rounded-xl border border-slate-200/90 px-4 py-2.5 text-sm text-[#0f172a] placeholder:text-slate-400 focus:border-[#054e3b] focus:ring-2 focus:ring-[#054e3b]/10 focus:outline-none transition-all bg-white"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-all placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
             />
             {error && <p className="mt-1 text-xs text-rose-500">{error}</p>}
           </div>
@@ -157,7 +158,7 @@ function RoleFormModal({ isOpen, onClose, onSubmit, initialData = null, allPermi
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">
               Batal
             </button>
-            <button type="submit" disabled={isSubmitting} className="rounded-xl bg-[#046c4e] hover:bg-[#03543d] px-6 py-2.5 text-xs font-bold text-white shadow-md disabled:opacity-50 transition-colors flex items-center gap-1.5">
+            <button type="submit" disabled={isSubmitting} className="flex items-center gap-1.5 rounded-xl bg-emerald-800 px-6 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 disabled:opacity-50">
               <FaSave className="w-3.5 h-3.5" />
               <span>{isSubmitting ? 'Menyimpan...' : isEdit ? 'Simpan Perubahan' : 'Tambah Role'}</span>
             </button>
@@ -190,7 +191,7 @@ function PermissionFormModal({ isOpen, onClose, onSubmit, isSubmitting = false }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden my-6">
+      <div className="my-6 w-full max-w-md overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
         <div className="flex items-center justify-between px-7 py-5 border-b border-slate-100">
           <h2 className="text-xl font-black text-[#0f172a]">Tambah Izin Akses Baru</h2>
           <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-400 hover:bg-slate-100 transition-colors">
@@ -208,7 +209,7 @@ function PermissionFormModal({ isOpen, onClose, onSubmit, isSubmitting = false }
               value={name}
               onChange={(e) => { setName(e.target.value); setError('') }}
               placeholder="Contoh: tahfizh.monitoring_target, kesiswaan.kelulusan"
-              className="w-full rounded-xl border border-slate-200/90 px-4 py-2.5 text-sm text-[#0f172a] placeholder:text-slate-400 focus:border-[#054e3b] focus:ring-2 focus:ring-[#054e3b]/10 focus:outline-none transition-all bg-white"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition-all placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
             />
             {error && <p className="mt-1 text-xs text-rose-500">{error}</p>}
             <p className="mt-1.5 text-[11px] text-slate-500">Format: <code className="bg-slate-100 px-1 rounded">modul.aksi</code> — misalnya: <code className="bg-slate-100 px-1 rounded">tahfizh.monitoring_target</code></p>
@@ -218,7 +219,7 @@ function PermissionFormModal({ isOpen, onClose, onSubmit, isSubmitting = false }
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">
               Batal
             </button>
-            <button type="submit" disabled={isSubmitting} className="rounded-xl bg-[#046c4e] hover:bg-[#03543d] px-6 py-2.5 text-xs font-bold text-white shadow-md disabled:opacity-50 transition-colors flex items-center gap-1.5">
+            <button type="submit" disabled={isSubmitting} className="flex items-center gap-1.5 rounded-xl bg-emerald-800 px-6 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 disabled:opacity-50">
               <FaKey className="w-3.5 h-3.5" />
               <span>{isSubmitting ? 'Menyimpan...' : 'Tambah Izin Akses'}</span>
             </button>
@@ -275,8 +276,8 @@ function PegawaiRoleModal({ isOpen, onClose, onSubmit, employee = null, availabl
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-[24px] shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden my-6">
-        <div className="flex items-center justify-between px-7 py-5 border-b border-slate-100 bg-[#f4efe6]">
+      <div className="my-6 w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-white px-7 py-5">
           <div>
             <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
               PENETAPAN HAK AKSES PEGAWAI
@@ -319,7 +320,7 @@ function PegawaiRoleModal({ isOpen, onClose, onSubmit, employee = null, availabl
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Masukkan password awal untuk login..."
-                className="w-full rounded-xl border border-slate-200/90 px-4 py-2.5 text-xs text-[#0f172a] focus:border-[#054e3b] focus:ring-2 focus:ring-[#054e3b]/10 focus:outline-none bg-white"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
               />
             </div>
           )}
@@ -332,7 +333,7 @@ function PegawaiRoleModal({ isOpen, onClose, onSubmit, employee = null, availabl
             <select
               value={roleName}
               onChange={(e) => setRoleName(e.target.value)}
-              className="w-full rounded-xl border border-slate-200/90 px-4 py-2.5 text-xs font-extrabold text-[#0f172a] focus:border-[#054e3b] focus:ring-2 focus:ring-[#054e3b]/10 focus:outline-none bg-white"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
             >
               {availableRoles.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -378,7 +379,7 @@ function PegawaiRoleModal({ isOpen, onClose, onSubmit, employee = null, availabl
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors">
               Batal
             </button>
-            <button type="submit" disabled={isSubmitting} className="rounded-xl bg-[#046c4e] hover:bg-[#03543d] px-6 py-2.5 text-xs font-bold text-white shadow-md disabled:opacity-50 transition-colors flex items-center gap-1.5">
+            <button type="submit" disabled={isSubmitting} className="flex items-center gap-1.5 rounded-xl bg-emerald-800 px-6 py-2.5 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 disabled:opacity-50">
               <FaSave className="w-3.5 h-3.5" />
               <span>{isSubmitting ? 'Menyimpan...' : 'Simpan Hak Akses Pegawai'}</span>
             </button>
@@ -571,109 +572,148 @@ export default function MasterHakAksesPage() {
   const isPermSubmitting = tambahPermMutation.isPending
   const isPegawaiSubmitting = assignPegawaiRoleMutation.isPending
 
+  const tabConfig = {
+    roles: {
+      label: 'Role',
+      description: 'Kelompok akses pengguna',
+      icon: FaShieldAlt,
+      count: stats.total_role ?? 0,
+      search: 'Cari nama role...',
+    },
+    permissions: {
+      label: 'Izin akses',
+      description: 'Aksi yang dapat dilakukan',
+      icon: FaKey,
+      count: stats.total_permission ?? 0,
+      search: 'Cari modul atau izin akses...',
+    },
+    pegawai: {
+      label: 'Akses pegawai',
+      description: 'Role setiap anggota tim',
+      icon: FaUserShield,
+      count: metaPegawai.total ?? '—',
+      search: 'Cari nama, NIY, atau email pegawai...',
+    },
+  }
+
+  const activeTabConfig = tabConfig[activeTab]
+  const ActiveTabIcon = activeTabConfig.icon
+
   return (
     <div className="space-y-6 pb-12">
-      {/* ───── Header Banner Emerald ───── */}
-      <div className="bg-[#054e3b] rounded-[24px] p-7 text-white shadow-lg border border-emerald-800/40">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      {/* ───── Page header ───── */}
+      <section className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white p-6 shadow-xs md:flex-row md:items-center">
           <div>
-            <span className="bg-[#086a52] text-emerald-200 text-[11px] font-extrabold px-3.5 py-1 rounded-full uppercase tracking-wider">
-              MASTER DATA AKSES
-            </span>
-            <h1 className="text-3xl md:text-4xl font-black mt-2 tracking-tight">
-              Manajemen Hak Akses Sistem
+            <h1 className="text-2xl font-black tracking-tight text-slate-800">
+              Manajemen Hak Akses
             </h1>
-            <p className="text-emerald-100/90 text-sm mt-1">
-              Kelola Role pengguna, Izin Akses (Permission), dan Pengaturan Hak Akses Pegawai secara terintegrasi.
+            <p className="mt-1 text-xs text-slate-500">
+              Atur siapa yang dapat melihat dan mengelola setiap bagian sistem sekolah melalui role dan izin yang terstruktur.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
             <button
               onClick={() => { setActiveTab('permissions'); setIsPermModalOpen(true) }}
-              className="flex items-center gap-2 bg-[#086a52] hover:bg-[#065c45] border border-emerald-500/30 text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-sm transition-colors"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-semibold text-slate-700 transition-all hover:bg-slate-100"
             >
-              <FaKey className="w-3.5 h-3.5" />
-              <span>+ Izin Akses</span>
+              <FaKey className="h-3.5 w-3.5 text-slate-500" />
+              <span>Tambah izin</span>
             </button>
             <button
               onClick={() => { setActiveTab('roles'); handleOpenCreateRole() }}
-              className="flex items-center gap-2 bg-[#00b981] hover:bg-[#059669] text-white px-4 py-2.5 rounded-xl text-xs font-bold shadow-md transition-colors"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 text-xs font-semibold text-white shadow-md shadow-emerald-800/20 transition-all hover:bg-emerald-900 hover:shadow-lg"
             >
               <FaPlus className="w-3.5 h-3.5" />
-              <span>+ Tambah Role</span>
+              <span>Tambah role</span>
             </button>
           </div>
-        </div>
-      </div>
+      </section>
 
       {/* ───── Stats Cards ───── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
-          { label: 'Total Role', value: stats.total_role ?? 0, icon: FaShieldAlt, bg: 'bg-[#dcfce7]', color: 'text-[#15803d]', sub: 'Terdaftar di sistem' },
-          { label: 'Total Izin Akses', value: stats.total_permission ?? 0, icon: FaKey, bg: 'bg-[#dbeafe]', color: 'text-[#1d4ed8]', sub: 'Permission aktif' },
-          { label: 'Total Modul', value: stats.total_modul ?? 0, icon: FaLock, bg: 'bg-[#f3e8ff]', color: 'text-[#7e22ce]', sub: 'Area sistem tercakup' },
-          { label: 'Role Tanpa User', value: stats.role_tanpa_user ?? 0, icon: FaUsers, bg: 'bg-[#fef9c3]', color: 'text-[#ca8a04]', sub: 'Belum digunakan' },
+          { label: 'Role aktif', value: stats.total_role ?? 0, icon: FaShieldAlt, tone: 'emerald', sub: 'Kelompok akses' },
+          { label: 'Izin tersedia', value: stats.total_permission ?? 0, icon: FaKey, tone: 'blue', sub: 'Aksi terdaftar' },
+          { label: 'Modul terlindungi', value: stats.total_modul ?? 0, icon: FaLayerGroup, tone: 'violet', sub: 'Area sistem' },
+          { label: 'Belum digunakan', value: stats.role_tanpa_user ?? 0, icon: FaUsers, tone: 'amber', sub: 'Role tanpa pengguna' },
         ].map((card) => (
-          <div key={card.label} className="bg-white border border-slate-200/90 rounded-[20px] p-5 shadow-sm flex items-center gap-4">
-            <div className={`${card.bg} ${card.color} rounded-2xl p-3 shrink-0`}>
+          <div key={card.label} className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
+            <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-xl ${
+              card.tone === 'emerald' ? 'bg-emerald-50 text-emerald-700' :
+              card.tone === 'blue' ? 'bg-blue-50 text-blue-700' :
+              card.tone === 'violet' ? 'bg-violet-50 text-violet-700' :
+              'bg-amber-50 text-amber-700'
+            }`}>
               <card.icon className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold text-slate-500 truncate">{card.label}</p>
-              <p className="text-3xl font-black text-slate-900">{card.value}</p>
-              <p className={`text-[11px] font-bold ${card.color} mt-0.5`}>{card.sub}</p>
-            </div>
+            <p className="text-2xl font-black leading-none text-slate-900 sm:text-3xl">{card.value}</p>
+            <p className="mt-2 truncate text-xs font-extrabold text-slate-700">{card.label}</p>
+            <p className="mt-0.5 truncate text-[11px] text-slate-400">{card.sub}</p>
           </div>
         ))}
-      </div>
+      </section>
 
-      {/* ───── Tab + Search ───── */}
-      <div className="bg-white rounded-[20px] border border-slate-200/90 shadow-sm p-5">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 justify-between">
-          {/* Tab */}
-          <div className="flex gap-1 bg-slate-100 rounded-xl p-1 overflow-x-auto max-w-full">
-            <button
-              onClick={() => setActiveTab('roles')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${activeTab === 'roles' ? 'bg-[#054e3b] text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
-            >
-              <FaShieldAlt className="inline w-3.5 h-3.5 mr-1.5" />
-              Role Akses
-            </button>
-            <button
-              onClick={() => setActiveTab('permissions')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${activeTab === 'permissions' ? 'bg-[#054e3b] text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
-            >
-              <FaKey className="inline w-3.5 h-3.5 mr-1.5" />
-              Izin Akses (Permissions)
-            </button>
-            <button
-              onClick={() => setActiveTab('pegawai')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${activeTab === 'pegawai' ? 'bg-[#054e3b] text-white shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
-            >
-              <FaUserShield className="inline w-3.5 h-3.5 mr-1.5" />
-              Hak Akses Pegawai (Menarik Data Pegawai)
-            </button>
+      {/* ───── Tabs ───── */}
+      <section className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-2 shadow-xs">
+          {Object.entries(tabConfig).map(([key, tab]) => {
+            const TabIcon = tab.icon
+            const isActive = activeTab === key
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => { setActiveTab(key); setSearch(''); setPage(1) }}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-xs font-bold transition-all ${
+                  isActive
+                    ? 'bg-emerald-800 text-white shadow-md shadow-emerald-800/20'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <TabIcon className={`h-4 w-4 ${isActive ? 'text-amber-300' : 'text-slate-400'}`} />
+                <span>{tab.label}</span>
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                  {tab.count}
+                </span>
+              </button>
+            )
+          })}
+      </section>
+
+      {/* ───── Content toolbar ───── */}
+      <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <ActiveTabIcon className="h-4 w-4 text-emerald-700" />
+            <div>
+              <h2 className="text-sm font-bold text-slate-800">{activeTabConfig.label}</h2>
+              <p className="text-[11px] text-slate-400">{activeTabConfig.description}</p>
+            </div>
           </div>
-          {/* Search */}
-          <div className="relative flex-1 max-w-xs">
+          <div className="relative w-full sm:max-w-sm">
             <FaSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs" />
             <input
               type="text"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-              placeholder={activeTab === 'roles' ? 'Cari nama role...' : activeTab === 'permissions' ? 'Cari izin akses...' : 'Cari NIP, nama, atau email pegawai...'}
-              className="w-full rounded-full border border-slate-200 bg-[#f8fafc] pl-9 pr-4 py-2 text-xs font-semibold text-slate-700 placeholder:text-slate-400 focus:border-[#054e3b] focus:outline-none focus:ring-2 focus:ring-[#054e3b]/10 transition-all"
+              placeholder={activeTabConfig.search}
+              aria-label={activeTabConfig.search}
+              className="min-h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-xs font-semibold text-slate-700 shadow-sm outline-none transition-all placeholder:text-slate-400 focus:border-transparent focus:ring-2 focus:ring-emerald-600"
             />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} aria-label="Hapus pencarian" className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <FaTimes className="h-3 w-3" />
+              </button>
+            )}
           </div>
         </div>
-      </div>
+      </section>
 
       {/* ───── TAB: ROLES ───── */}
       {activeTab === 'roles' && (
-        <div className="w-full overflow-x-auto rounded-[20px] border border-slate-200/90 bg-white shadow-sm">
-          <table className="w-full text-left border-collapse text-slate-800">
+        <div className="w-full overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+          <table className="w-full min-w-[780px] border-collapse text-left text-slate-800">
             <thead>
-              <tr className="bg-[#f4efe6] border-b border-slate-200/90 text-xs font-black uppercase tracking-wider text-slate-700">
+              <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
                 <th className="py-3.5 px-4 w-10 text-center">NO</th>
                 <th className="py-3.5 px-4">NAMA ROLE</th>
                 <th className="py-3.5 px-4 text-center">JUMLAH IZIN</th>
@@ -684,11 +724,18 @@ export default function MasterHakAksesPage() {
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {isLoadingRoles ? (
-                <tr><td colSpan={6} className="py-12 text-center text-slate-400 text-xs font-medium">Memuat data role...</td></tr>
+                <tr><td colSpan={6} className="py-16 text-center text-slate-400 text-xs font-medium">Memuat daftar role...</td></tr>
               ) : roles.length === 0 ? (
-                <tr><td colSpan={6} className="py-12 text-center text-slate-400 text-xs font-medium">Belum ada data role.</td></tr>
+                <tr>
+                  <td colSpan={6} className="px-4 py-16 text-center">
+                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700"><FaShieldAlt className="h-5 w-5" /></div>
+                    <p className="mt-3 text-sm font-extrabold text-slate-800">{search ? 'Role tidak ditemukan' : 'Belum ada role'}</p>
+                    <p className="mt-1 text-xs text-slate-400">{search ? 'Coba gunakan kata kunci yang berbeda.' : 'Buat role pertama untuk mulai mengatur akses pengguna.'}</p>
+                    {!search && <button type="button" onClick={handleOpenCreateRole} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#064e3b] px-4 py-2 text-xs font-bold text-white"><FaPlus className="h-3 w-3" />Tambah role</button>}
+                  </td>
+                </tr>
               ) : roles.map((role, idx) => (
-                <tr key={role.id} className="hover:bg-slate-50/80 transition-colors">
+                <tr key={role.id} className="group hover:bg-emerald-50/30 transition-colors">
                   <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-500">{idx + 1}</td>
                   <td className="py-3.5 px-4">
                     <div className="flex items-center gap-2.5">
@@ -697,7 +744,7 @@ export default function MasterHakAksesPage() {
                       </div>
                       <div>
                         <p className="font-extrabold text-slate-900 text-sm">{role.name}</p>
-                        <p className="text-[11px] text-slate-500">{role.guard_name}</p>
+                        <p className="text-[10px] text-slate-400">Guard: {role.guard_name}</p>
                       </div>
                     </div>
                   </td>
@@ -725,6 +772,7 @@ export default function MasterHakAksesPage() {
                           +{role.permissions.length - 4} lainnya
                         </span>
                       )}
+                      {(role.permissions || []).length === 0 && <span className="text-[11px] italic text-slate-400">Belum ada izin</span>}
                     </div>
                   </td>
                   <td className="py-3.5 px-4 text-center">
@@ -754,18 +802,22 @@ export default function MasterHakAksesPage() {
 
       {/* ───── TAB: PERMISSIONS ───── */}
       {activeTab === 'permissions' && (
-        <div className="space-y-4">
+        <div className="grid gap-4 lg:grid-cols-2">
           {isLoadingPerms ? (
-            <div className="bg-white rounded-[20px] border border-slate-200/90 p-12 text-center text-slate-400 text-xs font-medium shadow-sm">Memuat data izin akses...</div>
+            <div className="col-span-full rounded-[22px] border border-slate-200/80 bg-white p-16 text-center text-xs font-medium text-slate-400">Memuat izin akses...</div>
           ) : permissionsGrouped.length === 0 ? (
-            <div className="bg-white rounded-[20px] border border-slate-200/90 p-12 text-center text-slate-400 text-xs font-medium shadow-sm">Belum ada data izin akses.</div>
+            <div className="col-span-full rounded-[22px] border border-slate-200/80 bg-white p-16 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-700"><FaKey className="h-5 w-5" /></div>
+              <p className="mt-3 text-sm font-extrabold text-slate-800">{search ? 'Izin tidak ditemukan' : 'Belum ada izin akses'}</p>
+              <p className="mt-1 text-xs text-slate-400">{search ? 'Periksa kembali kata kunci pencarian.' : 'Tambahkan izin untuk mendefinisikan aksi di setiap modul.'}</p>
+            </div>
           ) : permissionsGrouped.map((group) => (
-            <div key={group.modul} className="bg-white rounded-[20px] border border-slate-200/90 shadow-sm overflow-hidden">
+            <div key={group.modul} className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
               {/* Header Modul */}
-              <div className="flex items-center justify-between px-5 py-3.5 bg-[#f4efe6] border-b border-slate-200/90">
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-4">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-[#054e3b] flex items-center justify-center">
-                    <FaLock className="w-3 h-3 text-white" />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700">
+                    <FaLock className="w-3 h-3" />
                   </div>
                   <span className="text-xs font-black uppercase tracking-wider text-slate-800">{group.modul}</span>
                 </div>
@@ -774,9 +826,9 @@ export default function MasterHakAksesPage() {
                 </span>
               </div>
               {/* Permission List */}
-              <div className="p-4 flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 p-5">
                 {(group.izin || []).map((perm) => (
-                  <div key={perm.id} className="flex items-center gap-1.5 bg-[#f8fafc] border border-slate-200 rounded-xl px-3 py-1.5 group">
+                  <div key={perm.id} className="group flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 transition-colors hover:border-emerald-200 hover:bg-emerald-50/50">
                     <span className="text-xs font-bold text-slate-700">{perm.name}</span>
                     <button
                       onClick={() => handleDeletePerm(perm)}
@@ -796,10 +848,10 @@ export default function MasterHakAksesPage() {
       {/* ───── TAB: HAK AKSES PEGAWAI (MENARIK DATA PEGAWAI) ───── */}
       {activeTab === 'pegawai' && (
         <div className="space-y-4">
-          <div className="w-full overflow-x-auto rounded-[20px] border border-slate-200/90 bg-white shadow-sm">
-            <table className="w-full text-left border-collapse text-slate-800">
+          <div className="w-full overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+            <table className="w-full min-w-[900px] border-collapse text-left text-slate-800">
               <thead>
-                <tr className="bg-[#f4efe6] border-b border-slate-200/90 text-xs font-black uppercase tracking-wider text-slate-700">
+                <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
                   <th className="py-3.5 px-4 w-10 text-center">NO</th>
                   <th className="py-3.5 px-4">DATA PEGAWAI</th>
                   <th className="py-3.5 px-4">JABATAN & UNIT</th>
@@ -812,9 +864,9 @@ export default function MasterHakAksesPage() {
                 {isLoadingPegawai ? (
                   <tr><td colSpan={6} className="py-12 text-center text-slate-400 text-xs font-medium">Memuat data pegawai...</td></tr>
                 ) : listPegawai.length === 0 ? (
-                  <tr><td colSpan={6} className="py-12 text-center text-slate-400 text-xs font-medium">Tidak ada data pegawai yang sesuai.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-16 text-center"><FaUsers className="mx-auto h-6 w-6 text-slate-300" /><p className="mt-3 text-sm font-extrabold text-slate-800">Pegawai tidak ditemukan</p><p className="mt-1 text-xs text-slate-400">Coba gunakan nama, NIY, atau email yang berbeda.</p></td></tr>
                 ) : listPegawai.map((emp, idx) => (
-                  <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={emp.id} className="hover:bg-emerald-50/30 transition-colors">
                     <td className="py-3.5 px-4 text-center text-xs font-bold text-slate-500">
                       {((metaPegawai.current_page || 1) - 1) * (metaPegawai.per_page || 15) + idx + 1}
                     </td>
@@ -858,10 +910,11 @@ export default function MasterHakAksesPage() {
                     <td className="py-3.5 px-4 text-center">
                       <button
                         onClick={() => handleOpenPegawaiModal(emp)}
-                        className="inline-flex items-center gap-1.5 bg-[#054e3b] hover:bg-[#033b2c] text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition-all"
+                        className="inline-flex min-h-9 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-bold text-emerald-800 transition-all hover:border-emerald-700 hover:bg-emerald-700 hover:text-white"
                       >
                         <FaUserCog className="w-3.5 h-3.5" />
-                        <span>Atur Hak Akses</span>
+                        <span>Kelola akses</span>
+                        <FaArrowRight className="h-2.5 w-2.5" />
                       </button>
                     </td>
                   </tr>
