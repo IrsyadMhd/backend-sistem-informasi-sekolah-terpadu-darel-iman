@@ -2,7 +2,8 @@
 
 namespace Database\Seeders;
 
-use App\Models\SchoolClass;
+use App\Models\Kelas;
+use App\Models\ParentModel;
 use App\Models\Student;
 use Carbon\Carbon;
 use Illuminate\Database\Seeder;
@@ -99,12 +100,20 @@ class DataDummySiswaSeeder extends Seeder
             ],
         ];
 
-        $kelasMap = [];
+        $unitPendidikanId = DB::table('education_units')->value('id');
 
         foreach ($daftarKelas as $kelas) {
-            $modelKelas = SchoolClass::query()->updateOrCreate(
-                ['name' => $kelas['name']],
-                $kelas
+            $modelKelas = Kelas::query()->updateOrCreate(
+                ['kode_kelas' => 'K-' . $kelas['level'] . '-' . str_replace(' ', '', $kelas['name'])],
+                [
+                    'unit_pendidikan_id' => $unitPendidikanId ?? (string) \Illuminate\Support\Str::uuid(),
+                    'tahun_ajaran_id' => $tahunAjaranId,
+                    'semester_id' => $semesterId,
+                    'jenjang' => 'SDIT',
+                    'tingkat' => $kelas['level'],
+                    'nama_kelas' => $kelas['name'],
+                    'status' => 'Aktif',
+                ]
             );
 
             $kelasMap[$kelas['name']] = $modelKelas->id;
@@ -208,12 +217,17 @@ class DataDummySiswaSeeder extends Seeder
             ],
         ];
 
-        foreach ($daftarSiswa as $siswa) {
+        $parents = ParentModel::all();
+
+        foreach ($daftarSiswa as $index => $siswa) {
+            $parent = $parents->firstWhere('full_name', $siswa['metadata']['orang_tua']['nama_ayah'] ?? '') 
+                ?? ($parents->isNotEmpty() ? $parents->get($index % $parents->count()) : null);
+
             Student::query()->updateOrCreate(
                 ['nis' => $siswa['nis']],
                 [
                     'user_id' => null,
-                    'parent_id' => null,
+                    'parent_id' => $parent?->id,
                     'class_id' => $kelasMap[$siswa['class_name']] ?? null,
                     'full_name' => $siswa['full_name'],
                     'gender' => $siswa['gender'],

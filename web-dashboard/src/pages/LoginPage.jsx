@@ -67,7 +67,7 @@ export default function LoginPage() {
 
       {/* Footer */}
       <div className="relative z-10 text-center py-4 text-[11px] text-slate-400 border-t border-slate-200/60 bg-white/60">
-        © 2024 {namaSekolah} — Sistem Manajemen Sekolah Islam Terpadu. All rights reserved.
+        © {new Date().getFullYear()} {namaSekolah} — Sistem Manajemen Sekolah Islam Terpadu. All rights reserved. <span className="font-mono text-emerald-700 font-medium ml-1">Ver 1.0.0</span>
       </div>
     </div>
   )

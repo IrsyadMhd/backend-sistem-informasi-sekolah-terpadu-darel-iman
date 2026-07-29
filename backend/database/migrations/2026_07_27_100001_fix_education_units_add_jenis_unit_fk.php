@@ -33,7 +33,7 @@ return new class extends Migration
         // Tambah FK setelah kolom dibuat
         // FK ke master_jenis_unit_pendidikan.uuid (bukan .id bigint)
         // karena model JenisUnitPendidikan menggunakan uuid sebagai identifier publik.
-        if (Schema::hasTable('master_jenis_unit_pendidikan') && Schema::hasColumn('education_units', 'jenis_unit_id')) {
+        if (DB::getDriverName() === 'pgsql' && Schema::hasTable('master_jenis_unit_pendidikan') && Schema::hasColumn('education_units', 'jenis_unit_id')) {
             DB::statement('
                 ALTER TABLE education_units
                 ADD CONSTRAINT fk_edu_units_jenis_unit
@@ -59,10 +59,12 @@ return new class extends Migration
     public function down(): void
     {
         // Hapus FK dulu sebelum hapus kolom
-        DB::statement('
-            ALTER TABLE education_units
-            DROP CONSTRAINT IF EXISTS fk_edu_units_jenis_unit
-        ');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('
+                ALTER TABLE education_units
+                DROP CONSTRAINT IF EXISTS fk_edu_units_jenis_unit
+            ');
+        }
 
         Schema::table('education_units', function (Blueprint $table) {
             $cols = [];

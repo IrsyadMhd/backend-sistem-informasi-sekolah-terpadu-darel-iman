@@ -27,14 +27,13 @@ class ModulSemesterSeeder extends Seeder
             return;
         }
 
-        $modul1 = ModulSemester::create([
+        $dataModul = [
             'tahun_ajaran_id' => $ta->id,
             'semester_id' => $sem->id,
             'unit_pendidikan_id' => $unit?->id,
             'kelas_id' => $kelas->id,
             'mata_pelajaran_id' => $subject->id,
             'guru_id' => $guru->id,
-            'kode_modul' => 'MDS-20261-SDIT-7A-MTK01',
             'nama_modul' => 'Modul Semester 1 Matematika Terpadu Kelas VII',
             'jenjang' => 'SMP',
             'kurikulum' => 'Kurikulum Merdeka',
@@ -62,7 +61,17 @@ class ModulSemesterSeeder extends Seeder
             'bobot_projek' => 25.00,
             'bobot_uts' => 20.00,
             'bobot_uas' => 20.00,
-        ]);
+        ];
+
+        $modul1 = ModulSemester::withTrashed()->where('kode_modul', 'MDS-20261-SDIT-7A-MTK01')->first();
+        if ($modul1) {
+            if ($modul1->trashed()) {
+                $modul1->restore();
+            }
+            $modul1->update($dataModul);
+        } else {
+            $modul1 = ModulSemester::create(array_merge(['kode_modul' => 'MDS-20261-SDIT-7A-MTK01'], $dataModul));
+        }
 
         $materiList = [
             ['minggu' => 1, 'materi' => 'Pengenalan Konsep Aljabar dan Variabel', 'jp' => 2, 'ket' => 'Penjelasan dasar dan latihan'],
@@ -73,15 +82,19 @@ class ModulSemesterSeeder extends Seeder
         ];
 
         foreach ($materiList as $m) {
-            ModulSemesterDetail::create([
-                'modul_semester_id' => $modul1->id,
-                'minggu' => $m['minggu'],
-                'materi' => $m['materi'],
-                'atp' => $modul1->atp,
-                'cp' => $modul1->cp,
-                'jp' => $m['jp'],
-                'keterangan' => $m['ket'],
-            ]);
+            ModulSemesterDetail::updateOrCreate(
+                [
+                    'modul_semester_id' => $modul1->id,
+                    'minggu' => $m['minggu'],
+                ],
+                [
+                    'materi' => $m['materi'],
+                    'atp' => $modul1->atp,
+                    'cp' => $modul1->cp,
+                    'jp' => $m['jp'],
+                    'keterangan' => $m['ket'],
+                ]
+            );
         }
     }
 }

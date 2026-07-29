@@ -10,7 +10,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('memorization_targets', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('academic_year_id');
             $table->uuid('semester_id');
             $table->uuid('class_id');
@@ -29,7 +29,7 @@ return new class extends Migration
         });
 
         Schema::create('memorization_deposits', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('academic_year_id');
             $table->uuid('semester_id');
             $table->uuid('class_id');
@@ -55,7 +55,7 @@ return new class extends Migration
         });
 
         Schema::create('memorization_reports', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('academic_year_id');
             $table->uuid('semester_id');
             $table->uuid('class_id')->nullable();
@@ -76,7 +76,7 @@ return new class extends Migration
         });
 
         Schema::create('mutabaah_details', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('mutabaah_id');
             $table->uuid('academic_year_id');
             $table->uuid('semester_id');
@@ -96,7 +96,7 @@ return new class extends Migration
         });
 
         Schema::create('questions', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('question_bank_id');
             $table->enum('question_type', ['multiple_choice', 'essay']);
             $table->text('question_text');
@@ -112,7 +112,7 @@ return new class extends Migration
         });
 
         Schema::create('exam_results', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('exam_id');
             $table->uuid('student_id');
             $table->decimal('score', 5, 2)->default(0);

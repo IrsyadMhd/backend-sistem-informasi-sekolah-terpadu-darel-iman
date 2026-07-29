@@ -68,6 +68,14 @@ class MasterKurikulum extends Model
     }
 
     /**
+     * Relasi ke Mata Pelajaran (Subjects)
+     */
+    public function subjects()
+    {
+        return $this->hasMany(Subject::class, 'kurikulum_id');
+    }
+
+    /**
      * User Pembuat (Audit Log)
      */
     public function creator(): BelongsTo
@@ -96,11 +104,12 @@ class MasterKurikulum extends Model
      */
     public function scopeFilter($query, array $filters)
     {
-        $query->when($filters['search'] ?? null, function ($q, $search) {
-            $q->where(function ($sub) use ($search) {
-                $sub->where('kode_kurikulum', 'ILIKE', "%{$search}%")
-                    ->orWhere('nama_kurikulum', 'ILIKE', "%{$search}%")
-                    ->orWhere('deskripsi', 'ILIKE', "%{$search}%");
+        $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+        $query->when($filters['search'] ?? null, function ($q, $search) use ($likeOp) {
+            $q->where(function ($sub) use ($search, $likeOp) {
+                $sub->where('kode_kurikulum', $likeOp, "%{$search}%")
+                    ->orWhere('nama_kurikulum', $likeOp, "%{$search}%")
+                    ->orWhere('deskripsi', $likeOp, "%{$search}%");
             });
         });
 

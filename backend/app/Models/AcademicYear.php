@@ -35,6 +35,18 @@ class AcademicYear extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (AcademicYear $year) {
+            if (empty($year->start_date)) {
+                $year->start_date = now()->startOfYear()->toDateString();
+            }
+            if (empty($year->end_date)) {
+                $year->end_date = now()->endOfYear()->toDateString();
+            }
+        });
+    }
+
     /**
      * Relasi ke Semester
      */

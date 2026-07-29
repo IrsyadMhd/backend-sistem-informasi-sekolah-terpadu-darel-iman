@@ -9,11 +9,13 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        }
 
         // 1. Fee Categories (Kategori Biaya / SPP / Uang Pangkal)
         Schema::create('fee_categories', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('code', 50)->unique();
             $table->string('name', 100);
             $table->boolean('is_recurring')->default(true);
@@ -26,7 +28,7 @@ return new class extends Migration
 
         // 2. Student Bills (Tagihan Siswa)
         Schema::create('student_bills', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('student_id');
             $table->uuid('fee_category_id');
             $table->uuid('academic_year_id');
@@ -48,7 +50,7 @@ return new class extends Migration
 
         // 3. Bill Payments (Pembayaran Tagihan / Kwitansi)
         Schema::create('bill_payments', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('bill_id');
             $table->string('invoice_number', 100)->unique();
             $table->string('payment_method', 50)->default('CASH'); // CASH, TRANSFER, MIDTRANS_VA, QRIS
@@ -66,7 +68,7 @@ return new class extends Migration
         // 4. Notifications (Portal Broadcast & Alerting)
         if (!Schema::hasTable('notifications')) {
             Schema::create('notifications', function (Blueprint $table) {
-                $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+                $table->uuid('id')->primary();
                 $table->uuid('user_id');
                 $table->string('type', 50)->default('general');
                 $table->string('title');

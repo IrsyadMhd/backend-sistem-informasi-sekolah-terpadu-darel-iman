@@ -38,6 +38,21 @@ class Semester extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::creating(function (Semester $semester) {
+            if (empty($semester->sequence)) {
+                $semester->sequence = str_contains(strtolower($semester->name ?? ''), 'genap') ? 2 : 1;
+            }
+            if (empty($semester->start_date)) {
+                $semester->start_date = now()->startOfYear()->toDateString();
+            }
+            if (empty($semester->end_date)) {
+                $semester->end_date = now()->endOfYear()->toDateString();
+            }
+        });
+    }
+
     /**
      * Relasi ke Tahun Ajaran
      */

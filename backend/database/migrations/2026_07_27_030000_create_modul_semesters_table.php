@@ -12,10 +12,12 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        }
 
         Schema::create('modul_semesters', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('tahun_ajaran_id')->index();
             $table->uuid('semester_id')->index();
             $table->uuid('unit_pendidikan_id')->nullable()->index();
@@ -87,7 +89,7 @@ return new class extends Migration
         });
 
         Schema::create('modul_semester_details', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('modul_semester_id')->index();
             $table->integer('minggu')->default(1);
             $table->string('materi', 255);

@@ -7,6 +7,7 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (DB::getDriverName() === 'pgsql') {
         DB::statement('
             CREATE TABLE attendances (
                 id UUID NOT NULL DEFAULT gen_random_uuid(),
@@ -153,6 +154,93 @@ return new class extends Migration
         DB::statement('CREATE INDEX notifications_lookup_idx ON notifications (academic_year_id, semester_id, month, notifiable_id, notifiable_type)');
 
         DB::statement("CREATE INDEX notifications_fts_idx ON notifications USING GIN (to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(body,'')))");
+        } else {
+            \Illuminate\Support\Facades\Schema::create('attendances', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->uuid('academic_year_id');
+                $table->uuid('semester_id');
+                $table->smallInteger('month');
+                $table->date('attendance_date');
+                $table->uuid('student_id');
+                $table->uuid('class_id');
+                $table->timestamp('check_in_time')->nullable();
+                $table->timestamp('check_out_time')->nullable();
+                $table->string('status', 20);
+                $table->string('attendance_method', 20);
+                $table->string('location')->nullable();
+                $table->json('metadata')->nullable();
+                $table->softDeletes();
+                $table->timestamps();
+            });
+
+            \Illuminate\Support\Facades\Schema::create('attendance_logs', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->uuid('academic_year_id');
+                $table->uuid('semester_id');
+                $table->smallInteger('month');
+                $table->uuid('attendance_id');
+                $table->uuid('student_id');
+                $table->string('action', 50);
+                $table->timestamp('logged_at');
+                $table->json('metadata')->nullable();
+                $table->softDeletes();
+                $table->timestamps();
+            });
+
+            \Illuminate\Support\Facades\Schema::create('tahfizh_records', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->uuid('academic_year_id');
+                $table->uuid('semester_id');
+                $table->smallInteger('month');
+                $table->date('record_date');
+                $table->uuid('student_id');
+                $table->uuid('class_id');
+                $table->uuid('teacher_id');
+                $table->string('surah_name', 120);
+                $table->integer('ayah_start');
+                $table->integer('ayah_end');
+                $table->integer('line_count')->default(0);
+                $table->text('notes')->nullable();
+                $table->string('status', 20);
+                $table->json('metadata')->nullable();
+                $table->softDeletes();
+                $table->timestamps();
+            });
+
+            \Illuminate\Support\Facades\Schema::create('mutabaah_records', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->uuid('academic_year_id');
+                $table->uuid('semester_id');
+                $table->smallInteger('month');
+                $table->date('record_date');
+                $table->uuid('student_id');
+                $table->uuid('class_id');
+                $table->json('shalat_checklist')->nullable();
+                $table->boolean('sunnah_fasting')->default(false);
+                $table->integer('tilawah_lines')->default(0);
+                $table->text('notes')->nullable();
+                $table->json('metadata')->nullable();
+                $table->softDeletes();
+                $table->timestamps();
+            });
+
+            \Illuminate\Support\Facades\Schema::create('notifications', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->uuid('id')->primary();
+                $table->uuid('academic_year_id');
+                $table->uuid('semester_id');
+                $table->smallInteger('month');
+                $table->uuid('notifiable_id');
+                $table->string('notifiable_type', 150);
+                $table->string('title');
+                $table->text('body');
+                $table->string('channel', 30);
+                $table->timestamp('sent_at')->nullable();
+                $table->timestamp('read_at')->nullable();
+                $table->json('metadata')->nullable();
+                $table->softDeletes();
+                $table->timestamps();
+            });
+        }
     }
 
     public function down(): void

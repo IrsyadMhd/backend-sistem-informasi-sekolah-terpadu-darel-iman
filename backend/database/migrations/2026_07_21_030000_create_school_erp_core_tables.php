@@ -9,10 +9,12 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        }
 
         Schema::create('academic_years', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('name', 32)->unique();
             $table->date('start_date');
             $table->date('end_date');
@@ -23,7 +25,7 @@ return new class extends Migration
         });
 
         Schema::create('semesters', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('academic_year_id');
             $table->string('name', 32);
             $table->tinyInteger('sequence');
@@ -39,7 +41,7 @@ return new class extends Migration
         });
 
         Schema::create('school_settings', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('setting_key')->unique();
             $table->jsonb('setting_value')->nullable();
             $table->text('description')->nullable();
@@ -47,7 +49,7 @@ return new class extends Migration
         });
 
         Schema::create('parents', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('user_id')->nullable()->unique();
             $table->string('full_name');
             $table->string('phone', 32)->nullable()->index();
@@ -62,7 +64,7 @@ return new class extends Migration
         });
 
         Schema::create('teachers', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('user_id')->nullable()->unique();
             $table->string('employee_number', 50)->unique();
             $table->string('full_name');
@@ -77,7 +79,7 @@ return new class extends Migration
         });
 
         Schema::create('classrooms', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('name', 50)->unique();
             $table->smallInteger('capacity')->default(0);
             $table->string('location')->nullable();
@@ -87,7 +89,7 @@ return new class extends Migration
         });
 
         Schema::create('classes', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('academic_year_id');
             $table->uuid('semester_id');
             $table->uuid('classroom_id')->nullable();
@@ -107,7 +109,7 @@ return new class extends Migration
         });
 
         Schema::create('students', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('user_id')->nullable()->unique();
             $table->uuid('parent_id')->nullable();
             $table->uuid('class_id')->nullable();
@@ -128,10 +130,12 @@ return new class extends Migration
             $table->foreign('class_id')->references('id')->on('classes')->nullOnDelete();
         });
 
-        DB::statement("CREATE INDEX students_fts_idx ON students USING GIN (to_tsvector('simple', coalesce(nis,'') || ' ' || coalesce(full_name,'')))");
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement("CREATE INDEX students_fts_idx ON students USING GIN (to_tsvector('simple', coalesce(nis,'') || ' ' || coalesce(full_name,'')))");
+        }
 
         Schema::create('subjects', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('code', 50)->unique();
             $table->string('name');
             $table->text('description')->nullable();
@@ -141,7 +145,7 @@ return new class extends Migration
         });
 
         Schema::create('materials', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('teacher_id');
             $table->uuid('subject_id');
             $table->uuid('class_id');
@@ -159,10 +163,12 @@ return new class extends Migration
             $table->foreign('class_id')->references('id')->on('classes')->restrictOnDelete();
         });
 
-        DB::statement("CREATE INDEX materials_fts_idx ON materials USING GIN (to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(description,'')))");
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement("CREATE INDEX materials_fts_idx ON materials USING GIN (to_tsvector('simple', coalesce(title,'') || ' ' || coalesce(description,'')))");
+        }
 
         Schema::create('assignments', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('teacher_id');
             $table->uuid('subject_id');
             $table->uuid('class_id');
@@ -180,7 +186,7 @@ return new class extends Migration
         });
 
         Schema::create('assignment_submissions', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('assignment_id');
             $table->uuid('student_id');
             $table->text('submission_text')->nullable();
@@ -197,7 +203,7 @@ return new class extends Migration
         });
 
         Schema::create('question_banks', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('teacher_id');
             $table->uuid('subject_id');
             $table->string('title');
@@ -212,7 +218,7 @@ return new class extends Migration
         });
 
         Schema::create('exams', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('subject_id');
             $table->uuid('class_id');
             $table->uuid('question_bank_id')->nullable();
@@ -230,7 +236,7 @@ return new class extends Migration
         });
 
         Schema::create('student_notes', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('student_id');
             $table->uuid('teacher_id');
             $table->text('note');
@@ -244,7 +250,7 @@ return new class extends Migration
         });
 
         Schema::create('achievements', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('student_id');
             $table->enum('achievement_type', ['academic', 'non_academic']);
             $table->string('title');
@@ -259,7 +265,7 @@ return new class extends Migration
         });
 
         Schema::create('graduates', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('student_id')->unique();
             $table->uuid('academic_year_id');
             $table->date('graduation_date');
@@ -272,7 +278,7 @@ return new class extends Migration
         });
 
         Schema::create('alumni', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('graduate_id')->unique();
             $table->string('destination_school')->nullable();
             $table->string('major')->nullable();

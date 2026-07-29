@@ -22,19 +22,9 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             RolePermissionSeeder::class,
-            MasterJenisUnitPendidikanSeeder::class,
-            DataDummyUnitPendidikanSeeder::class,
-            TeacherSeeder::class,
-            MasterJabatanSeeder::class,
-            DataDummyPegawaiSeeder::class,
-            ParentSeeder::class,
-            DataDummySiswaSeeder::class,
-            SubjectSeeder::class,
-            ModulSemesterSeeder::class,
-            MasterKurikulumSeeder::class,
         ]);
 
-        $superAdmin = User::query()->firstOrCreate([
+        $superAdmin = User::query()->updateOrCreate([
             'email' => 'superadmin@school-erp.local',
         ], [
             'name' => 'Super Admin',
@@ -46,5 +36,32 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $superAdmin->assignRole('Super Admin');
+
+        $this->call([
+            MasterJenisUnitPendidikanSeeder::class,
+            DataDummyUnitPendidikanSeeder::class,
+            MasterJabatanSeeder::class,
+            DataDummyPegawaiSeeder::class,
+            TeacherSeeder::class,
+            ParentSeeder::class,
+            DataDummySiswaSeeder::class,
+            MasterKurikulumSeeder::class,
+            SubjectSeeder::class,
+            KelasSeeder::class,
+            ModulSemesterSeeder::class,
+            ModulAjarSeeder::class,
+            LmsReferensiSeeder::class,
+            LmsAktivitasBelajarSeeder::class,
+            LmsMediaSeeder::class,
+            LmsDiskusiSeeder::class,
+            LmsPenugasanSeeder::class,
+            LmsPengumpulanTugasSeeder::class,
+            LmsPresensiSeeder::class,
+            LmsBankSoalSeeder::class,
+            LmsUjianSeeder::class,
+            LmsPenilaianSeeder::class,
+            LmsRaporSeeder::class,
+            AttendanceSeeder::class,
+        ]);
     }
 }

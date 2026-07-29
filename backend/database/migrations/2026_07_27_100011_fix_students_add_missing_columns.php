@@ -52,37 +52,41 @@ return new class extends Migration
             }
         });
 
-        // Unique index untuk nisn (hanya untuk nilai yang tidak NULL)
-        $existingIdx = DB::select("
-            SELECT 1 FROM pg_indexes
-            WHERE tablename = 'students'
-              AND indexname = 'students_nisn_unique_partial'
-        ");
-        if (empty($existingIdx)) {
-            DB::statement('
-                CREATE UNIQUE INDEX students_nisn_unique_partial
-                ON students (nisn)
-                WHERE nisn IS NOT NULL AND deleted_at IS NULL
-            ');
-        }
+        if (DB::getDriverName() === 'pgsql') {
+            // Unique index untuk nisn (hanya untuk nilai yang tidak NULL)
+            $existingIdx = DB::select("
+                SELECT 1 FROM pg_indexes
+                WHERE tablename = 'students'
+                  AND indexname = 'students_nisn_unique_partial'
+            ");
+            if (empty($existingIdx)) {
+                DB::statement('
+                    CREATE UNIQUE INDEX students_nisn_unique_partial
+                    ON students (nisn)
+                    WHERE nisn IS NOT NULL AND deleted_at IS NULL
+                ');
+            }
 
-        // Backfill unit_id dari class → tbl_kelas.unit_pendidikan_id
-        // Siswa yang class_id-nya ada di tbl_kelas bisa dapat unit_id
-        if (Schema::hasColumn('tbl_kelas', 'unit_pendidikan_id')) {
-            DB::statement('
-                UPDATE students s
-                SET unit_id = tk.unit_pendidikan_id
-                FROM tbl_kelas tk
-                WHERE s.class_id = tk.id
-                  AND s.unit_id IS NULL
-                  AND tk.unit_pendidikan_id IS NOT NULL
-            ');
+            // Backfill unit_id dari class → tbl_kelas.unit_pendidikan_id
+            // Siswa yang class_id-nya ada di tbl_kelas bisa dapat unit_id
+            if (Schema::hasColumn('tbl_kelas', 'unit_pendidikan_id')) {
+                DB::statement('
+                    UPDATE students s
+                    SET unit_id = tk.unit_pendidikan_id
+                    FROM tbl_kelas tk
+                    WHERE s.class_id = tk.id
+                      AND s.unit_id IS NULL
+                      AND tk.unit_pendidikan_id IS NOT NULL
+                ');
+            }
         }
     }
 
     public function down(): void
     {
-        DB::statement('DROP INDEX IF EXISTS students_nisn_unique_partial');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('DROP INDEX IF EXISTS students_nisn_unique_partial');
+        }
 
         Schema::table('students', function (Blueprint $table) {
             $cols = [];

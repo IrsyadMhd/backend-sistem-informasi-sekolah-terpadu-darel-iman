@@ -40,48 +40,50 @@ return new class extends Migration
             }
         });
 
-        // Backfill 1: Match berdasarkan email
-        if (Schema::hasTable('employees') && Schema::hasColumn('employees', 'email')) {
-            DB::statement('
+        if (DB::getDriverName() === 'pgsql') {
+            // Backfill 1: Match berdasarkan email
+            if (Schema::hasTable('employees') && Schema::hasColumn('employees', 'email')) {
+                DB::statement('
+                    UPDATE teachers t
+                    SET employee_id = e.id,
+                        migrated_to_employee = true
+                    FROM employees e
+                    WHERE LOWER(t.email) = LOWER(e.email)
+                      AND t.email IS NOT NULL
+                      AND e.email IS NOT NULL
+                      AND t.employee_id IS NULL
+                      AND e.deleted_at IS NULL
+                ');
+            }
+
+            // Backfill 2: Match berdasarkan employee_number = niy
+            if (Schema::hasTable('employees') && Schema::hasColumn('employees', 'niy')) {
+                DB::statement('
+                    UPDATE teachers t
+                    SET employee_id = e.id,
+                        migrated_to_employee = true
+                    FROM employees e
+                    WHERE t.employee_number = e.niy
+                      AND t.employee_number IS NOT NULL
+                      AND e.niy IS NOT NULL
+                      AND t.employee_id IS NULL
+                      AND e.deleted_at IS NULL
+                ');
+            }
+
+            // Backfill 3: Match berdasarkan full_name (last resort, jika masih NULL)
+            DB::statement("
                 UPDATE teachers t
                 SET employee_id = e.id,
                     migrated_to_employee = true
                 FROM employees e
-                WHERE LOWER(t.email) = LOWER(e.email)
-                  AND t.email IS NOT NULL
-                  AND e.email IS NOT NULL
+                WHERE LOWER(TRIM(t.full_name)) = LOWER(TRIM(e.nama_lengkap))
+                  AND t.full_name IS NOT NULL
+                  AND e.nama_lengkap IS NOT NULL
                   AND t.employee_id IS NULL
                   AND e.deleted_at IS NULL
-            ');
+            ");
         }
-
-        // Backfill 2: Match berdasarkan employee_number = niy
-        if (Schema::hasTable('employees') && Schema::hasColumn('employees', 'niy')) {
-            DB::statement('
-                UPDATE teachers t
-                SET employee_id = e.id,
-                    migrated_to_employee = true
-                FROM employees e
-                WHERE t.employee_number = e.niy
-                  AND t.employee_number IS NOT NULL
-                  AND e.niy IS NOT NULL
-                  AND t.employee_id IS NULL
-                  AND e.deleted_at IS NULL
-            ');
-        }
-
-        // Backfill 3: Match berdasarkan full_name (last resort, jika masih NULL)
-        DB::statement("
-            UPDATE teachers t
-            SET employee_id = e.id,
-                migrated_to_employee = true
-            FROM employees e
-            WHERE LOWER(TRIM(t.full_name)) = LOWER(TRIM(e.nama_lengkap))
-              AND t.full_name IS NOT NULL
-              AND e.nama_lengkap IS NOT NULL
-              AND t.employee_id IS NULL
-              AND e.deleted_at IS NULL
-        ");
     }
 
     public function down(): void

@@ -5,6 +5,8 @@ namespace Database\Seeders;
 use App\Models\EducationUnit;
 use Illuminate\Database\Seeder;
 
+use App\Models\JenisUnitPendidikan;
+
 class DataDummyUnitPendidikanSeeder extends Seeder
 {
     /**
@@ -12,6 +14,11 @@ class DataDummyUnitPendidikanSeeder extends Seeder
      */
     public function run(): void
     {
+        if (JenisUnitPendidikan::count() === 0) {
+            $this->call(MasterJenisUnitPendidikanSeeder::class);
+        }
+
+        $jenisUnits = JenisUnitPendidikan::all();
         $units = [
             [
                 'code' => 'TKIT-01',
@@ -20,6 +27,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Taman Kanak-Kanak Islam Terpadu 1 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'TKIT 1',
+                    'jenjang' => 'TK',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Rahmat Hidayat, S.Pd',
@@ -45,6 +54,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Taman Kanak-Kanak Islam Terpadu 2 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'TKIT 2',
+                    'jenjang' => 'TK',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ustzh. Nurul Aini, S.Pd',
@@ -70,6 +81,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Taman Kanak-Kanak Islam Terpadu 3 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'TKIT 3',
+                    'jenjang' => 'TK',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ustzh. Yuliana, S.Pd',
@@ -95,6 +108,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Tahfizh Anak Usia Dini Sahabat Quran Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'TAUD',
+                    'jenjang' => 'PAUD',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ustzh. Siti Rahmah, S.Pd',
@@ -120,6 +135,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Dasar Islam Terpadu 1 Cabang 50 Kota.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SDIT 1',
+                    'jenjang' => 'SD',
                     'city' => '50 Kota',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Afrizal, S.Pd.I',
@@ -145,6 +162,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Dasar Islam Terpadu 2 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SDIT 2',
+                    'jenjang' => 'SD',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Fadli Rahman, S.Pd',
@@ -170,6 +189,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Dasar Islam Terpadu 3 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SDIT 3',
+                    'jenjang' => 'SD',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Hendra Gunawan, S.Pd',
@@ -195,6 +216,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Dasar Islam Terpadu 4 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SDIT 4',
+                    'jenjang' => 'SD',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Yogi Pratama, S.Pd',
@@ -220,6 +243,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Madrasah Ibtidaiyah Terpadu Sahabat Quran Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'MIT',
+                    'jenjang' => 'MI',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Irfan Maulana, S.Pd',
@@ -245,6 +270,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Menengah Pertama Islam Terpadu 1 Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SMPIT 1',
+                    'jenjang' => 'SMP',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Budi Santoso, S.Pd',
@@ -270,6 +297,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Menengah Pertama Islam Terpadu 2 Cabang 50 Kota.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SMPIT 2',
+                    'jenjang' => 'SMP',
                     'city' => '50 Kota',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. M. Ikhsan, S.Pd',
@@ -295,6 +324,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Pondok Pesantren Tahfizh & Sains Putra Dar el-Iman.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'PONPES PA',
+                    'jenjang' => 'Pondok Pesantren',
                     'city' => 'Padang Panjang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Dr. Muhammad Arifin, Lc., M.A',
@@ -320,6 +351,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Pondok Pesantren Tahfizh & Sains Putri Dar el-Iman.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'PONPES PI',
+                    'jenjang' => 'Pondok Pesantren',
                     'city' => 'Padang Panjang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ustzh. Dr. Maryam, Lc., M.A',
@@ -345,6 +378,8 @@ class DataDummyUnitPendidikanSeeder extends Seeder
                 'description' => 'Sekolah Menengah Atas Islam Terpadu Dar el-Iman Padang.',
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'SMAIT',
+                    'jenjang' => 'SMA',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Ahmad Fauzi, S.Pd',
@@ -366,10 +401,12 @@ class DataDummyUnitPendidikanSeeder extends Seeder
             [
                 'code' => 'MAHAD-01',
                 'name' => "Mahad Abu Ja'far",
-                'level' => 'Mahad',
+                'level' => 'MAHAD',
                 'description' => "Ma'had Aly Dirasat Islamiyah Abu Ja'far Padang.",
                 'is_active' => true,
                 'metadata' => [
+                    'singkatan' => 'MAHAD',
+                    'jenjang' => 'Mahad',
                     'city' => 'Padang',
                     'province' => 'Sumatera Barat',
                     'principal_name' => 'Ust. Salman Al-Farisi, Lc.',
@@ -391,9 +428,28 @@ class DataDummyUnitPendidikanSeeder extends Seeder
         ];
 
         foreach ($units as $unit) {
+            $levelKey = strtoupper($unit['level']);
+            $jenisUnit = $jenisUnits->first(function ($item) use ($levelKey, $unit) {
+                return strtoupper($item->kode_jenis) === $levelKey
+                    || strtoupper($item->singkatan) === $levelKey
+                    || strtoupper($item->jenjang) === $levelKey
+                    || \Illuminate\Support\Str::slug($item->kode_jenis) === \Illuminate\Support\Str::slug($unit['level'])
+                    || \Illuminate\Support\Str::slug($item->singkatan) === \Illuminate\Support\Str::slug($unit['level']);
+            });
+
+            if (!$jenisUnit) {
+                $jenisUnit = JenisUnitPendidikan::query()
+                    ->whereRaw('LOWER(kode_jenis) = ?', [strtolower($unit['level'])])
+                    ->orWhereRaw('LOWER(singkatan) = ?', [strtolower($unit['level'])])
+                    ->orWhereRaw('LOWER(jenjang) = ?', [strtolower($unit['level'])])
+                    ->first() ?? $jenisUnits->first();
+            }
+
             EducationUnit::query()->updateOrCreate(
                 ['code' => $unit['code']],
-                $unit
+                array_merge($unit, [
+                    'jenis_unit_id' => $jenisUnit?->uuid,
+                ])
             );
         }
     }

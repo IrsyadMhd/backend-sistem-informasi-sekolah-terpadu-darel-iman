@@ -84,4 +84,73 @@ export const mobileApiService = {
       return null;
     }
   },
+
+  // 6. Master Kurikulum API Integration
+  getKurikulumList: async (params = {}) => {
+    try {
+      const response = await api.get('/v1/kurikulum', { params });
+      return response.data;
+    } catch (error) {
+      console.log('Error fetching kurikulum list:', error);
+      return null;
+    }
+  },
+
+  getKurikulumDropdown: async (unitPendidikanId?: string) => {
+    try {
+      const response = await api.get('/v1/kurikulum/dropdown', {
+        params: { unit_pendidikan_id: unitPendidikanId },
+      });
+      return response.data;
+    } catch (error) {
+      console.log('Error fetching kurikulum dropdown:', error);
+      return null;
+    }
+  },
+
+  getKurikulumDetail: async (id: string) => {
+    try {
+      const response = await api.get(`/v1/kurikulum/${id}`);
+      return response.data;
+    } catch (error) {
+      console.log('Error fetching kurikulum detail:', error);
+      return null;
+    }
+  },
+
+  // 7. Master Mata Pelajaran & LMS Integration
+  getSubjectList: async (params = {}) => {
+    try {
+      const response = await api.get('/master/subjects', { params });
+      return response.data;
+    } catch (error) {
+      console.log('Error fetching subjects list:', error);
+      return null;
+    }
+  },
+
+  getSubjectDropdown: async (params = {}) => {
+    try {
+      const response = await api.get('/master/subjects/dropdown', { params });
+      return response.data;
+    } catch (error) {
+      console.log('Error fetching subjects dropdown:', error);
+      return null;
+    }
+  },
+
+  getLmsMateriList: async (params = {}) => {
+    try {
+      const response = await api.get('/lms/materi', { params });
+      return response.data;
+    } catch (error) {
+      console.log('Error fetching LMS materi:', error);
+      return null;
+    }
+  },
+
+  submitLmsTugas: async (penugasanId: string, payload: any) => {
+    const response = await api.post(`/lms/penugasan/${penugasanId}/submit`, payload);
+    return response.data;
+  },
 };

@@ -12,10 +12,16 @@ return new class extends Migration
      */
     public function up(): void
     {
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        }
 
         Schema::create('master_kurikulum', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            if (DB::getDriverName() === 'pgsql') {
+                $table->uuid('id')->primary();
+            } else {
+                $table->uuid('id')->primary();
+            }
             $table->string('kode_kurikulum', 30)->unique();
             $table->string('nama_kurikulum', 150);
             $table->enum('jenis_kurikulum', ['Nasional', 'Merdeka', 'SIT', 'Lokal', 'Pesantren', 'Lainnya'])->default('SIT');

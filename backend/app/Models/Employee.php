@@ -101,4 +101,21 @@ class Employee extends Model
     {
         return $this->hasMany(StudentGrade::class, 'created_by', 'user_id');
     }
+
+    // === Accessors (Backward Compatibility) ===
+
+    public function getNameAttribute(): ?string
+    {
+        return $this->nama_lengkap ?? $this->nama_panggilan ?? null;
+    }
+
+    public function getFullNameAttribute(): ?string
+    {
+        return $this->nama_lengkap ?? null;
+    }
+
+    public function getNipAttribute(): ?string
+    {
+        return $this->niy ?? $this->nik ?? null;
+    }
 }

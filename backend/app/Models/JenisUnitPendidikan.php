@@ -48,7 +48,7 @@ class JenisUnitPendidikan extends Model
      */
     public function unitPendidikan()
     {
-        return $this->hasMany(EducationUnit::class, 'jenis_unit_id');
+        return $this->hasMany(EducationUnit::class, 'jenis_unit_id', 'uuid');
     }
 
     /**
@@ -81,11 +81,12 @@ class JenisUnitPendidikan extends Model
     public function scopeFilter($query, array $filters)
     {
         $query->when($filters['search'] ?? null, function ($q, $search) {
-            $q->where(function ($sub) use ($search) {
-                $sub->where('kode_jenis', 'ILIKE', "%{$search}%")
-                    ->orWhere('nama_jenis', 'ILIKE', "%{$search}%")
-                    ->orWhere('singkatan', 'ILIKE', "%{$search}%")
-                    ->orWhere('keterangan', 'ILIKE', "%{$search}%");
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+            $q->where(function ($sub) use ($search, $likeOp) {
+                $sub->where('kode_jenis', $likeOp, "%{$search}%")
+                    ->orWhere('nama_jenis', $likeOp, "%{$search}%")
+                    ->orWhere('singkatan', $likeOp, "%{$search}%")
+                    ->orWhere('keterangan', $likeOp, "%{$search}%");
             });
         });
 

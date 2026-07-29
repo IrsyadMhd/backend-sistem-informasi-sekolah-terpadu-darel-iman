@@ -14,6 +14,19 @@ use App\Http\Controllers\Api\V1\HakAksesController;
 use App\Http\Controllers\Api\V1\JabatanController;
 use App\Http\Controllers\Api\V1\JenisUnitPendidikanController;
 use App\Http\Controllers\Api\V1\KelasController;
+use App\Http\Controllers\Api\V1\LmsAktivitasBelajarController;
+use App\Http\Controllers\Api\V1\LmsDiskusiController;
+use App\Http\Controllers\Api\LmsKisiKisiController;
+use App\Http\Controllers\Api\LmsBankSoalController;
+use App\Http\Controllers\Api\LmsUjianController;
+use App\Http\Controllers\Api\LmsPenilaianController;
+use App\Http\Controllers\Api\V1\LmsMateriController;
+use App\Http\Controllers\Api\V1\LmsMediaController;
+use App\Http\Controllers\Api\V1\LmsModulAjarController;
+use App\Http\Controllers\Api\V1\LmsPenugasanController;
+use App\Http\Controllers\Api\V1\LmsPengumpulanTugasController;
+use App\Http\Controllers\Api\V1\LmsPresensiController;
+use App\Http\Controllers\Api\V1\LmsReferensiController;
 use App\Http\Controllers\Api\V1\MasterKurikulumController;
 use App\Http\Controllers\Api\V1\ModulSemesterController;
 use App\Http\Controllers\Api\V1\ScheduleController;
@@ -22,6 +35,9 @@ use App\Http\Controllers\Api\V1\SubjectController;
 use App\Http\Controllers\Api\V1\TahfizhController;
 use App\Http\Controllers\Api\V1\TahunAjaranController;
 use App\Http\Controllers\Api\V1\TeacherController;
+use App\Http\Controllers\Api\V1\TujuanPembelajaranController;
+use App\Http\Controllers\Api\V1\CapaianPembelajaranController;
+use App\Http\Controllers\Api\V1\LmsRaporController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('auth')->group(function () {
@@ -117,6 +133,11 @@ Route::middleware('auth:sanctum')->group(function () {
         // Subjects (Mata Pelajaran)
         Route::get('/subjects/dropdown', [SubjectController::class, 'dropdown']);
         Route::get('/subjects/stats', [SubjectController::class, 'stats']);
+        Route::post('/subjects/bulk-status', [SubjectController::class, 'bulkStatus']);
+        Route::post('/subjects/bulk-delete', [SubjectController::class, 'bulkDelete']);
+        Route::get('/subjects/export/excel', [SubjectController::class, 'exportExcel']);
+        Route::get('/subjects/export/pdf', [SubjectController::class, 'exportPdf']);
+        Route::post('/subjects/import', [SubjectController::class, 'import']);
         Route::post('/subjects/{id}/restore', [SubjectController::class, 'restore']);
         Route::apiResource('subjects', SubjectController::class);
 
@@ -144,6 +165,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/kurikulum/import', [MasterKurikulumController::class, 'import']);
         Route::post('/kurikulum/{id}/restore', [MasterKurikulumController::class, 'restore']);
         Route::apiResource('kurikulum', MasterKurikulumController::class);
+
+        // Capaian Pembelajaran (CP)
+        Route::get('/capaian-pembelajaran/dropdown', [CapaianPembelajaranController::class, 'dropdown']);
+        Route::get('/capaian-pembelajaran/stats', [CapaianPembelajaranController::class, 'stats']);
+        Route::post('/capaian-pembelajaran/{id}/restore', [CapaianPembelajaranController::class, 'restore']);
+        Route::apiResource('capaian-pembelajaran', CapaianPembelajaranController::class);
     });
 
     // Rute Master Hak Akses (Role & Permission — Spatie)
@@ -187,6 +214,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // SAFE REFACTOR — Routes Baru (tidak mengubah routes di atas)
     // =========================================================================
 
+    // Direct Capaian Pembelajaran Dropdown
+    Route::get('/capaian-pembelajaran/dropdown', [CapaianPembelajaranController::class, 'dropdown']);
+
     // Master Divisi
     Route::get('/divisions/dropdown', [DivisionController::class, 'dropdown']);
     Route::apiResource('divisions', DivisionController::class)->except(['create', 'edit']);
@@ -197,4 +227,128 @@ Route::middleware('auth:sanctum')->group(function () {
     // Nilai Siswa / Raport
     Route::get('/grades/rekap', [GradeController::class, 'rekap']);
     Route::apiResource('grades', GradeController::class)->except(['create', 'edit', 'destroy']);
+
+    // LMS Modul Ajar (RPP Digital)
+    Route::prefix('lms')->group(function () {
+        // Direct Dropdown Route for CP
+        Route::get('/capaian-pembelajaran/dropdown', [CapaianPembelajaranController::class, 'dropdown']);
+        Route::get('/capaian-pembelajaran/stats', [CapaianPembelajaranController::class, 'stats']);
+        Route::post('/capaian-pembelajaran/{id}/restore', [CapaianPembelajaranController::class, 'restore']);
+        Route::apiResource('capaian-pembelajaran', CapaianPembelajaranController::class);
+
+        Route::get('/modul-ajar/stats', [LmsModulAjarController::class, 'stats']);
+        Route::get('/modul-ajar/options', [LmsModulAjarController::class, 'options']);
+        Route::get('/modul-ajar/export/excel', [LmsModulAjarController::class, 'exportExcel']);
+        Route::get('/modul-ajar/{id}/export/pdf', [LmsModulAjarController::class, 'exportPdf']);
+        Route::post('/modul-ajar/import', [LmsModulAjarController::class, 'import']);
+        Route::post('/modul-ajar/{id}/restore', [LmsModulAjarController::class, 'restore']);
+        Route::post('/modul-ajar/{id}/publish', [LmsModulAjarController::class, 'publish']);
+        Route::post('/modul-ajar/{id}/duplicate', [LmsModulAjarController::class, 'duplicate']);
+        Route::get('/modul-ajar/{id}/revisions', [LmsModulAjarController::class, 'revisions']);
+        Route::apiResource('modul-ajar', LmsModulAjarController::class);
+
+        // Tujuan Pembelajaran (TP)
+        Route::get('/tujuan-pembelajaran/stats', [TujuanPembelajaranController::class, 'stats']);
+        Route::get('/tujuan-pembelajaran/options', [TujuanPembelajaranController::class, 'options']);
+        Route::post('/tujuan-pembelajaran/{id}/restore', [TujuanPembelajaranController::class, 'restore']);
+        Route::apiResource('tujuan-pembelajaran', TujuanPembelajaranController::class);
+
+        // Materi Pembelajaran (Materi)
+        Route::get('/materi/stats', [LmsMateriController::class, 'stats']);
+        Route::get('/materi/options', [LmsMateriController::class, 'options']);
+        Route::post('/materi/{id}/restore', [LmsMateriController::class, 'restore']);
+        Route::apiResource('materi', LmsMateriController::class);
+
+        // Media Pembelajaran (Media)
+        Route::get('/media/stats', [LmsMediaController::class, 'stats']);
+        Route::get('/media/options', [LmsMediaController::class, 'options']);
+        Route::post('/media/reorder', [LmsMediaController::class, 'reorder']);
+        Route::apiResource('media', LmsMediaController::class);
+
+        // Referensi Pembelajaran (Referensi)
+        Route::get('/referensi/stats', [LmsReferensiController::class, 'stats']);
+        Route::get('/referensi/options', [LmsReferensiController::class, 'options']);
+        Route::post('/referensi/{id}/restore', [LmsReferensiController::class, 'restore']);
+        Route::apiResource('referensi', LmsReferensiController::class);
+
+        // Aktivitas Belajar (Aktivitas)
+        Route::get('/aktivitas/stats', [LmsAktivitasBelajarController::class, 'stats']);
+        Route::get('/aktivitas/options', [LmsAktivitasBelajarController::class, 'options']);
+        Route::post('/aktivitas/{id}/restore', [LmsAktivitasBelajarController::class, 'restore']);
+        Route::apiResource('aktivitas', LmsAktivitasBelajarController::class);
+
+        // Diskusi Kelas (Diskusi)
+        Route::get('/diskusi/stats', [LmsDiskusiController::class, 'stats']);
+        Route::get('/diskusi/options', [LmsDiskusiController::class, 'options']);
+        Route::post('/diskusi/{id}/restore', [LmsDiskusiController::class, 'restore']);
+        Route::post('/diskusi/{id}/toggle-pin', [LmsDiskusiController::class, 'togglePin']);
+        Route::post('/diskusi/{id}/toggle-close', [LmsDiskusiController::class, 'toggleClose']);
+        Route::post('/diskusi/{id}/komentar', [LmsDiskusiController::class, 'storeKomentar']);
+        Route::delete('/diskusi/{diskusiId}/komentar/{komentarId}', [LmsDiskusiController::class, 'destroyKomentar']);
+        Route::apiResource('diskusi', LmsDiskusiController::class);
+
+        // Penugasan (Assignments)
+        Route::get('/penugasan/stats', [LmsPenugasanController::class, 'stats']);
+        Route::get('/penugasan/options', [LmsPenugasanController::class, 'options']);
+        Route::post('/penugasan/{id}/restore', [LmsPenugasanController::class, 'restore']);
+        Route::post('/penugasan/{id}/toggle-publish', [LmsPenugasanController::class, 'togglePublish']);
+        Route::post('/penugasan/{id}/nilai', [LmsPenugasanController::class, 'gradeSubmission']);
+        Route::apiResource('penugasan', LmsPenugasanController::class);
+
+        // Pengumpulan Tugas (Assignment Submissions)
+        Route::get('/pengumpulan-tugas/stats', [LmsPengumpulanTugasController::class, 'stats']);
+        Route::get('/pengumpulan-tugas/options', [LmsPengumpulanTugasController::class, 'options']);
+        Route::post('/pengumpulan-tugas/{id}/restore', [LmsPengumpulanTugasController::class, 'restore']);
+        Route::apiResource('pengumpulan-tugas', LmsPengumpulanTugasController::class);
+
+        // Presensi Pembelajaran (Learning Attendance)
+        Route::get('/presensi/stats', [LmsPresensiController::class, 'stats']);
+        Route::get('/presensi/options', [LmsPresensiController::class, 'options']);
+        Route::post('/presensi/bulk', [LmsPresensiController::class, 'bulkStore']);
+        Route::post('/presensi/{id}/restore', [LmsPresensiController::class, 'restore']);
+        Route::apiResource('presensi', LmsPresensiController::class);
+
+        // Kisi-kisi Ujian (Exam Blueprint)
+        Route::get('/kisi-kisi/stats', [LmsKisiKisiController::class, 'stats']);
+        Route::get('/kisi-kisi/options', [LmsKisiKisiController::class, 'options']);
+        Route::post('/kisi-kisi/{id}/restore', [LmsKisiKisiController::class, 'restore']);
+        Route::post('/kisi-kisi/{id}/duplicate', [LmsKisiKisiController::class, 'duplicate']);
+        Route::apiResource('kisi-kisi', LmsKisiKisiController::class);
+
+        // Bank Soal (Question Bank)
+        Route::get('/bank-soal/stats', [LmsBankSoalController::class, 'stats']);
+        Route::get('/bank-soal/options', [LmsBankSoalController::class, 'options']);
+        Route::post('/bank-soal/{id}/restore', [LmsBankSoalController::class, 'restore']);
+        Route::post('/bank-soal/{id}/duplicate', [LmsBankSoalController::class, 'duplicate']);
+        Route::apiResource('bank-soal', LmsBankSoalController::class);
+
+        // CBT Ujian Online Engine
+        Route::get('/ujian/stats', [LmsUjianController::class, 'stats']);
+        Route::get('/ujian/options', [LmsUjianController::class, 'options']);
+        Route::post('/ujian/{id}/restore', [LmsUjianController::class, 'restore']);
+        Route::post('/ujian/{id}/duplicate', [LmsUjianController::class, 'duplicate']);
+        Route::post('/ujian/{id}/toggle-publish', [LmsUjianController::class, 'togglePublish']);
+        Route::post('/ujian/{id}/start-session', [LmsUjianController::class, 'startSession']);
+        Route::get('/ujian/{id}/results', [LmsUjianController::class, 'results']);
+        Route::post('/ujian/sesi/{sesiId}/submit-answers', [LmsUjianController::class, 'submitAnswers']);
+        Route::post('/ujian/sesi/{sesiId}/finish-session', [LmsUjianController::class, 'finishSession']);
+        Route::post('/ujian/jawaban/{jawabanId}/grade-essay', [LmsUjianController::class, 'gradeEssay']);
+        Route::apiResource('ujian', LmsUjianController::class);
+
+        // Penilaian & Rekap Rapor (Configurable Weight & Formula Engine)
+        Route::get('/penilaian/stats', [LmsPenilaianController::class, 'stats']);
+        Route::get('/penilaian/options', [LmsPenilaianController::class, 'options']);
+        Route::post('/penilaian/calculate-auto', [LmsPenilaianController::class, 'calculateAuto']);
+        Route::post('/penilaian/{id}/restore', [LmsPenilaianController::class, 'restore']);
+        Route::apiResource('penilaian', LmsPenilaianController::class);
+
+        // Rapor Digital & Cetak PDF
+        Route::get('/rapor/stats', [LmsRaporController::class, 'stats']);
+        Route::get('/rapor/options', [LmsRaporController::class, 'options']);
+        Route::post('/rapor/generate-class', [LmsRaporController::class, 'generateClass']);
+        Route::get('/rapor/{id}/pdf', [LmsRaporController::class, 'exportPdf']);
+        Route::post('/rapor/{id}/restore', [LmsRaporController::class, 'restore']);
+        Route::apiResource('rapor', LmsRaporController::class);
+    });
 });
+

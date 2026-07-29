@@ -26,7 +26,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('class_schedules', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
 
             // Referensi Kelas — dual FK untuk backward compat
             $table->uuid('kelas_id')->nullable()->comment('FK primer ke tbl_kelas');

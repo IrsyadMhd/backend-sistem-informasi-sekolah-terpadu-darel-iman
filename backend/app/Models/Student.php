@@ -117,4 +117,26 @@ class Student extends Model
             'id'         // kelas.id
         );
     }
+
+    public function presensiPembelajarans()
+    {
+        return $this->hasMany(LmsPresensi::class, 'siswa_id');
+    }
+
+    // Accessors for backward compatibility with existing controllers/resources
+    public function getNameAttribute(): ?string
+    {
+        return $this->attributes['full_name'] ?? null;
+    }
+
+    public function getNamaLengkapAttribute(): ?string
+    {
+        return $this->attributes['full_name'] ?? null;
+    }
+
+    public function getNamaAttribute(): ?string
+    {
+        return $this->attributes['full_name'] ?? null;
+    }
 }
+

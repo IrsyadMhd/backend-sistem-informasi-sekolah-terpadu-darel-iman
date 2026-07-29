@@ -1,0 +1,106 @@
+<?php
+
+namespace App\Models;
+
+use App\Traits\HasUuidPrimaryKey;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class LmsPresensi extends Model
+{
+    use HasFactory, HasUuidPrimaryKey, SoftDeletes;
+
+    protected $table = 'lms_presensi';
+
+    protected $fillable = [
+        'jadwal_pelajaran_id',
+        'siswa_id',
+        'tanggal',
+        'status_hadir',
+        'keterangan',
+        'pertemuan_ke',
+        'waktu_presensi',
+        'created_by',
+        'updated_by',
+        'deleted_by',
+    ];
+
+    protected $appends = ['status_label', 'status_badge_color'];
+
+    protected function casts(): array
+    {
+        return [
+            'tanggal' => 'date:Y-m-d',
+            'pertemuan_ke' => 'integer',
+            'waktu_presensi' => 'datetime',
+        ];
+    }
+
+    // --- Relationships ---
+
+    /**
+     * Relasi ke Jadwal Pelajaran (ClassSchedule)
+     */
+    public function jadwalPelajaran(): BelongsTo
+    {
+        return $this->belongsTo(ClassSchedule::class, 'jadwal_pelajaran_id');
+    }
+
+    /**
+     * Relasi ke Siswa (Student)
+     */
+    public function siswa(): BelongsTo
+    {
+        return $this->belongsTo(Student::class, 'siswa_id');
+    }
+
+    // --- Accessors ---
+
+    public function getStatusLabelAttribute(): string
+    {
+        return match (strtolower($this->status_hadir ?? '')) {
+            'hadir' => 'Hadir',
+            'izin' => 'Izin',
+            'sakit' => 'Sakit',
+            'alpa' => 'Alpa / Tanpa Keterangan',
+            'terlambat' => 'Terlambat',
+            default => ucfirst($this->status_hadir ?? 'Belum Presensi'),
+        };
+    }
+
+    public function getStatusBadgeColorAttribute(): string
+    {
+        return match (strtolower($this->status_hadir ?? '')) {
+            'hadir' => 'emerald',
+            'terlambat' => 'amber',
+            'sakit' => 'sky',
+            'izin' => 'indigo',
+            'alpa' => 'rose',
+            default => 'slate',
+        };
+    }
+
+    // --- Scopes ---
+
+    public function scopeByJadwal($query, string $jadwalId)
+    {
+        return $query->where('jadwal_pelajaran_id', $jadwalId);
+    }
+
+    public function scopeBySiswa($query, string $siswaId)
+    {
+        return $query->where('siswa_id', $siswaId);
+    }
+
+    public function scopeByTanggal($query, string $tanggal)
+    {
+        return $query->whereDate('tanggal', $tanggal);
+    }
+
+    public function scopeByStatus($query, string $status)
+    {
+        return $query->where('status_hadir', strtolower($status));
+    }
+}

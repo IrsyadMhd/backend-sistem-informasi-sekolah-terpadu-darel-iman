@@ -85,4 +85,30 @@ class SubjectService
     {
         return $this->subjectRepository->getDropdownOptions();
     }
+
+    /**
+     * Ubah status secara massal (Bulk Status Toggle).
+     */
+    public function ubahStatusMassal(array $ids, bool $status): int
+    {
+        Log::info('Memperbarui status mata pelajaran secara massal', ['ids' => $ids, 'status' => $status]);
+        return $this->subjectRepository->bulkStatusUpdate($ids, $status);
+    }
+
+    /**
+     * Hapus data mata pelajaran secara massal (Bulk Delete).
+     */
+    public function hapusMassal(array $ids): int
+    {
+        Log::info('Menghapus data mata pelajaran secara massal', ['ids' => $ids]);
+        return $this->subjectRepository->bulkDelete($ids);
+    }
+
+    /**
+     * Dapatkan data seluruh mata pelajaran untuk ekspor Excel / PDF.
+     */
+    public function dapatkanDataEkspor(array $filters = []): Collection
+    {
+        return $this->subjectRepository->getAllFilteredForExport($filters);
+    }
 }

@@ -269,7 +269,13 @@ export default function EducationUnitsPage() {
       closeFormModal()
     },
     onError: (err) => {
-      Swal.fire('Gagal!', err?.response?.data?.message || 'Terjadi kesalahan saat menyimpan.', 'error')
+      const errors = err?.response?.data?.errors
+      let msg = err?.response?.data?.message || 'Terjadi kesalahan saat menyimpan.'
+      if (errors && typeof errors === 'object') {
+        const firstErr = Object.values(errors).flat()[0]
+        if (firstErr) msg = firstErr
+      }
+      Swal.fire('Gagal!', msg, 'error')
     },
   })
 
@@ -286,7 +292,13 @@ export default function EducationUnitsPage() {
       closeFormModal()
     },
     onError: (err) => {
-      Swal.fire('Gagal!', err?.response?.data?.message || 'Terjadi kesalahan saat memperbarui.', 'error')
+      const errors = err?.response?.data?.errors
+      let msg = err?.response?.data?.message || 'Terjadi kesalahan saat memperbarui.'
+      if (errors && typeof errors === 'object') {
+        const firstErr = Object.values(errors).flat()[0]
+        if (firstErr) msg = firstErr
+      }
+      Swal.fire('Gagal!', msg, 'error')
     },
   })
 
@@ -304,7 +316,13 @@ export default function EducationUnitsPage() {
       setHasConfirmedDeleteCheck(false)
     },
     onError: (err) => {
-      Swal.fire('Gagal!', err?.response?.data?.message || 'Terjadi kesalahan saat menghapus.', 'error')
+      const errors = err?.response?.data?.errors
+      let msg = err?.response?.data?.message || 'Terjadi kesalahan saat menghapus.'
+      if (errors && typeof errors === 'object') {
+        const firstErr = Object.values(errors).flat()[0]
+        if (firstErr) msg = firstErr
+      }
+      Swal.fire('Gagal!', msg, 'error')
     },
   })
 
@@ -411,7 +429,7 @@ export default function EducationUnitsPage() {
           </div>
           <div>
             <p className="text-xs text-slate-500 font-bold mb-1">Total Unit Pendidikan</p>
-            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">{items.length || 15}</h3>
+            <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">{paginationInfo.total ?? items.length}</h3>
             <span className="text-xs text-[#16a34a] font-bold">Terdaftar di sistem</span>
           </div>
         </div>
@@ -423,7 +441,7 @@ export default function EducationUnitsPage() {
           <div>
             <p className="text-xs text-slate-500 font-bold mb-1">Tingkat SDIT / MIT</p>
             <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {items.filter((i) => i.unit_type === 'SDIT' || i.unit_type === 'MIT').length || 5}
+              {items.filter((i) => i.unit_type === 'SDIT' || i.unit_type === 'MIT').length}
             </h3>
             <span className="text-xs text-[#2563eb] font-bold">Data Terpadu</span>
           </div>
@@ -436,7 +454,7 @@ export default function EducationUnitsPage() {
           <div>
             <p className="text-xs text-slate-500 font-bold mb-1">Total Tenaga Pendidik</p>
             <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {items.reduce((acc, curr) => acc + (curr.total_guru || 0), 0) || 647}
+              {items.reduce((acc, curr) => acc + (curr.total_guru || 0), 0)}
             </h3>
             <span className="text-xs text-[#9333ea] font-bold">Dari semua unit</span>
           </div>
@@ -449,7 +467,7 @@ export default function EducationUnitsPage() {
           <div>
             <p className="text-xs text-slate-500 font-bold mb-1">Status Aktif</p>
             <h3 className="text-3xl font-black text-slate-900 leading-none mb-1">
-              {items.filter((i) => i.is_active).length || 15}
+              {items.filter((i) => i.is_active).length}
             </h3>
             <span className="text-xs text-[#d97706] font-bold">Beroperasi secara penuh</span>
           </div>
@@ -560,7 +578,7 @@ export default function EducationUnitsPage() {
                   const style = getUnitBadgeStyle(row.unit_type)
                   return (
                     <tr key={row.id || idx} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-4 px-4 text-center text-slate-400 font-bold">{idx + 1}</td>
+                      <td className="py-4 px-4 text-center text-slate-400 font-bold">{(paginationInfo.from || 1) + idx}</td>
                       <td className="py-4 px-4 text-center">
                         {row.logo_url ? (
                           <img

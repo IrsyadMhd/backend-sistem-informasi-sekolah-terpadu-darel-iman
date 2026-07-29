@@ -12,11 +12,12 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Pastikan ekstensi pgcrypto aktif untuk UUID
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        }
 
         Schema::create('tbl_kelas', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('yayasan_id')->nullable()->index();
             $table->uuid('unit_pendidikan_id')->index();
             $table->uuid('tahun_ajaran_id')->index();

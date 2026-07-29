@@ -27,7 +27,7 @@ return new class extends Migration
     {
         // Buat tabel master divisions
         Schema::create('divisions', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('code', 50)->unique();
             $table->string('name', 120);
             $table->text('description')->nullable();
@@ -88,14 +88,15 @@ return new class extends Migration
                     ->nullOnDelete();
             });
 
-            // Backfill: isi division_id berdasarkan nama_divisi yang cocok
-            DB::statement('
-                UPDATE pemantauan_divisis pd
-                SET division_id = d.id
-                FROM divisions d
-                WHERE pd.nama_divisi = d.name
-                  AND pd.division_id IS NULL
-            ');
+            if (DB::getDriverName() === 'pgsql') {
+                DB::statement('
+                    UPDATE pemantauan_divisis pd
+                    SET division_id = d.id
+                    FROM divisions d
+                    WHERE pd.nama_divisi = d.name
+                      AND pd.division_id IS NULL
+                ');
+            }
         }
     }
 

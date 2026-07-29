@@ -47,18 +47,15 @@ class ParentSeeder extends Seeder
 
             $user->assignRole('Orang Tua');
 
-            DB::table('parents')->updateOrInsert(
+            ParentModel::withTrashed()->firstOrCreate(
                 ['email' => $data['email']],
                 [
-                    'id' => DB::raw('gen_random_uuid()'),
                     'user_id' => $user->id,
                     'full_name' => $data['full_name'],
                     'phone' => $data['phone'],
                     'email' => $data['email'],
                     'occupation' => $data['occupation'],
                     'address' => $data['address'],
-                    'created_at' => now(),
-                    'updated_at' => now(),
                 ]
             );
         }

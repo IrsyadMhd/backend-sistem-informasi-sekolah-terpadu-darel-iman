@@ -29,71 +29,75 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Drop view dulu jika sudah ada (idempotent)
-        DB::statement('DROP VIEW IF EXISTS v_unified_classes');
+        if (DB::getDriverName() === 'pgsql') {
+            // Drop view dulu jika sudah ada (idempotent)
+            DB::statement('DROP VIEW IF EXISTS v_unified_classes');
 
-        DB::statement("
-            CREATE VIEW v_unified_classes AS
-            SELECT
-                tk.id,
-                'tbl_kelas'::VARCHAR(20)        AS source_table,
-                tk.unit_pendidikan_id,
-                tk.tahun_ajaran_id,
-                tk.semester_id,
-                tk.jenjang,
-                tk.tingkat,
-                tk.kode_kelas                   AS code,
-                tk.nama_kelas                   AS name,
-                tk.wali_kelas_id                AS homeroom_employee_id,
-                NULL::UUID                      AS homeroom_teacher_id,
-                tk.kapasitas                    AS capacity,
-                tk.ruangan                      AS room,
-                tk.status,
-                tk.yayasan_id,
-                tk.created_at,
-                tk.updated_at,
-                tk.deleted_at
-            FROM tbl_kelas tk
+            DB::statement("
+                CREATE VIEW v_unified_classes AS
+                SELECT
+                    tk.id,
+                    'tbl_kelas'::VARCHAR(20)        AS source_table,
+                    tk.unit_pendidikan_id,
+                    tk.tahun_ajaran_id,
+                    tk.semester_id,
+                    tk.jenjang,
+                    tk.tingkat,
+                    tk.kode_kelas                   AS code,
+                    tk.nama_kelas                   AS name,
+                    tk.wali_kelas_id                AS homeroom_employee_id,
+                    NULL::UUID                      AS homeroom_teacher_id,
+                    tk.kapasitas                    AS capacity,
+                    tk.ruangan                      AS room,
+                    tk.status,
+                    tk.yayasan_id,
+                    tk.created_at,
+                    tk.updated_at,
+                    tk.deleted_at
+                FROM tbl_kelas tk
 
-            UNION ALL
+                UNION ALL
 
-            SELECT
-                c.id,
-                'classes'::VARCHAR(20)          AS source_table,
-                NULL::UUID                      AS unit_pendidikan_id,
-                c.academic_year_id              AS tahun_ajaran_id,
-                c.semester_id,
-                c.level                         AS jenjang,
-                c.level                         AS tingkat,
-                c.name                          AS code,
-                c.name                          AS name,
-                NULL::UUID                      AS homeroom_employee_id,
-                c.homeroom_teacher_id,
-                cr.capacity                     AS capacity,
-                cr.name::VARCHAR(50)            AS room,
-                'Aktif'::VARCHAR(20)            AS status,
-                NULL::UUID                      AS yayasan_id,
-                c.created_at,
-                c.updated_at,
-                c.deleted_at
-            FROM classes c
-            LEFT JOIN classrooms cr ON c.classroom_id = cr.id
-            WHERE c.id NOT IN (SELECT id FROM tbl_kelas WHERE deleted_at IS NULL)
-        ");
+                SELECT
+                    c.id,
+                    'classes'::VARCHAR(20)          AS source_table,
+                    NULL::UUID                      AS unit_pendidikan_id,
+                    c.academic_year_id              AS tahun_ajaran_id,
+                    c.semester_id,
+                    c.level                         AS jenjang,
+                    c.level                         AS tingkat,
+                    c.name                          AS code,
+                    c.name                          AS name,
+                    NULL::UUID                      AS homeroom_employee_id,
+                    c.homeroom_teacher_id,
+                    cr.capacity                     AS capacity,
+                    cr.name::VARCHAR(50)            AS room,
+                    'Aktif'::VARCHAR(20)            AS status,
+                    NULL::UUID                      AS yayasan_id,
+                    c.created_at,
+                    c.updated_at,
+                    c.deleted_at
+                FROM classes c
+                LEFT JOIN classrooms cr ON c.classroom_id = cr.id
+                WHERE c.id NOT IN (SELECT id FROM tbl_kelas WHERE deleted_at IS NULL)
+            ");
 
-        // View kedua: hanya data aktif (tidak ter-soft-delete)
-        DB::statement('DROP VIEW IF EXISTS v_active_classes');
-        DB::statement("
-            CREATE VIEW v_active_classes AS
-            SELECT * FROM v_unified_classes
-            WHERE deleted_at IS NULL
-              AND status = 'Aktif'
-        ");
+            // View kedua: hanya data aktif (tidak ter-soft-delete)
+            DB::statement('DROP VIEW IF EXISTS v_active_classes');
+            DB::statement("
+                CREATE VIEW v_active_classes AS
+                SELECT * FROM v_unified_classes
+                WHERE deleted_at IS NULL
+                  AND status = 'Aktif'
+            ");
+        }
     }
 
     public function down(): void
     {
-        DB::statement('DROP VIEW IF EXISTS v_active_classes');
-        DB::statement('DROP VIEW IF EXISTS v_unified_classes');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('DROP VIEW IF EXISTS v_active_classes');
+            DB::statement('DROP VIEW IF EXISTS v_unified_classes');
+        }
     }
 };

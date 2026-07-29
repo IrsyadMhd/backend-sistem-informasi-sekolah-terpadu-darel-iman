@@ -27,4 +27,10 @@ interface SubjectRepositoryInterface
     public function getStats(): array;
 
     public function getDropdownOptions(): Collection;
+
+    public function bulkStatusUpdate(array $ids, bool $status): int;
+
+    public function bulkDelete(array $ids): int;
+
+    public function getAllFilteredForExport(array $filters = []): Collection;
 }

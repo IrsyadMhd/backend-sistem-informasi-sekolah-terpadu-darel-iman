@@ -26,7 +26,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('student_parents', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('student_id');
             $table->uuid('parent_id');
             $table->enum('relationship_type', ['father', 'mother', 'guardian'])
@@ -54,8 +54,7 @@ return new class extends Migration
                 ->cascadeOnDelete();
         });
 
-        // Backfill dari students.parent_id yang sudah ada
-        if (Schema::hasColumn('students', 'parent_id')) {
+        if (DB::getDriverName() === 'pgsql' && Schema::hasColumn('students', 'parent_id')) {
             DB::statement("
                 INSERT INTO student_parents (id, student_id, parent_id, relationship_type, is_primary, created_at, updated_at)
                 SELECT

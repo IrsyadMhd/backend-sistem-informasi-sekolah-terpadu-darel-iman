@@ -21,14 +21,14 @@ class DataDummyPegawaiSeeder extends Seeder
         $unitSmait = $units->firstWhere('level', 'SMAIT')?->id ?? $defaultUnitId;
         $unitTkit = $units->firstWhere('level', 'TKIT')?->id ?? $defaultUnitId;
 
-        $posKepsek = $positions->firstWhere('code', 'JAB-001')?->id;
-        $posWakepsek = $positions->firstWhere('code', 'JAB-002')?->id;
-        $posGuruKelas = $positions->firstWhere('code', 'JAB-003')?->id;
-        $posGuruMapel = $positions->firstWhere('code', 'JAB-004')?->id;
-        $posTU = $positions->firstWhere('code', 'JAB-005')?->id;
-        $posOperator = $positions->firstWhere('code', 'JAB-006')?->id;
-        $posDivPendidikan = $positions->firstWhere('code', 'JAB-007')?->id;
-        $posKetuaYayasan = $positions->firstWhere('code', 'JAB-008')?->id;
+        $posKepsek = $positions->firstWhere('code', 'JBT-003')?->id;
+        $posWakepsek = $positions->firstWhere('code', 'JBT-004')?->id;
+        $posGuruKelas = $positions->firstWhere('code', 'JBT-009')?->id ?? $positions->firstWhere('code', 'JBT-010')?->id;
+        $posGuruMapel = $positions->firstWhere('code', 'JBT-009')?->id;
+        $posTU = $positions->firstWhere('code', 'JBT-006')?->id;
+        $posOperator = $positions->firstWhere('code', 'JBT-007')?->id;
+        $posDivPendidikan = $positions->firstWhere('code', 'JBT-005')?->id;
+        $posKetuaYayasan = $positions->firstWhere('code', 'JBT-001')?->id;
 
         $dummyEmployees = [
             [

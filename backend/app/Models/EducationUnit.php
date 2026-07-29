@@ -14,6 +14,7 @@ class EducationUnit extends Model
     protected $table = 'education_units';
 
     protected $fillable = [
+        'jenis_unit_id',
         'code',
         'name',
         'level',
@@ -28,6 +29,40 @@ class EducationUnit extends Model
             'is_active' => 'boolean',
             'metadata' => 'array',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (EducationUnit $unit) {
+            if (empty($unit->jenis_unit_id)) {
+                $jenisUnitId = null;
+                if (!empty($unit->level)) {
+                    $jenisUnitId = JenisUnitPendidikan::query()
+                        ->where('singkatan', $unit->level)
+                        ->orWhere('kode_jenis', $unit->level)
+                        ->orWhere('nama_jenis', $unit->level)
+                        ->value('uuid');
+                }
+
+                if (!$jenisUnitId) {
+                    $jenisUnitId = JenisUnitPendidikan::query()->value('uuid');
+                }
+
+                if (!$jenisUnitId) {
+                    $default = JenisUnitPendidikan::query()->create([
+                        'uuid' => (string) \Illuminate\Support\Str::uuid(),
+                        'kode_jenis' => strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $unit->level ?? 'GEN'), 0, 10)) ?: 'GEN',
+                        'nama_jenis' => 'Jenis Unit ' . ($unit->level ?? 'Umum'),
+                        'singkatan' => strtoupper(substr($unit->level ?? 'UMUM', 0, 10)),
+                        'jenjang' => 'Lainnya',
+                        'status' => true,
+                    ]);
+                    $jenisUnitId = $default->uuid;
+                }
+
+                $unit->jenis_unit_id = $jenisUnitId;
+            }
+        });
     }
 
     // === Relasi Baru (SAFE REFACTOR — backward compatible) ===

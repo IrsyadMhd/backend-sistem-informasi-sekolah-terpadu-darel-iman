@@ -28,6 +28,23 @@ const MasterJenisUnitPendidikanPage = lazy(() => import('../pages/MasterJenisUni
 const MasterTahunAjaranPage = lazy(() => import('../pages/MasterTahunAjaranPage'))
 const MasterModulSemesterPage = lazy(() => import('../pages/MasterModulSemesterPage'))
 const MasterKurikulumPage = lazy(() => import('../pages/MasterKurikulumPage'))
+const MasterSubjectPage = lazy(() => import('../pages/MasterSubjectPage'))
+const MasterCapaianPembelajaranPage = lazy(() => import('../pages/MasterCapaianPembelajaranPage'))
+const MasterTujuanPembelajaranPage = lazy(() => import('../pages/MasterTujuanPembelajaranPage'))
+const LmsModulAjarPage = lazy(() => import('../pages/LmsModulAjarPage'))
+const LmsMateriPage = lazy(() => import('../pages/LmsMateriPage'))
+const LmsMediaPage = lazy(() => import('../pages/LmsMediaPage'))
+const LmsReferensiPage = lazy(() => import('../pages/LmsReferensiPage'))
+const LmsAktivitasBelajarPage = lazy(() => import('../pages/LmsAktivitasBelajarPage'))
+const LmsDiskusiPage = lazy(() => import('../pages/LmsDiskusiPage'))
+const LmsPenugasanPage = lazy(() => import('../pages/LmsPenugasanPage'))
+const LmsPengumpulanTugasPage = lazy(() => import('../pages/LmsPengumpulanTugasPage'))
+const LmsPresensiPage = lazy(() => import('../pages/LmsPresensiPage'))
+const LmsKisiKisiPage = lazy(() => import('../pages/LmsKisiKisiPage'))
+const LmsBankSoalPage = lazy(() => import('../pages/LmsBankSoalPage'))
+const LmsUjianPage = lazy(() => import('../pages/LmsUjianPage'))
+const LmsPenilaianPage = lazy(() => import('../pages/LmsPenilaianPage'))
+const LmsRaporPage = lazy(() => import('../pages/LmsRaporPage'))
 const StudentCrudPage = lazy(() => import('../pages/StudentCrudPage'))
 const MultiRoleDashboardPage = lazy(() => import('../pages/MultiRoleDashboardPage'))
 import RouteErrorElement from '../components/common/RouteErrorElement'
@@ -254,6 +271,22 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'modul-ajar',
+            element: (
+              <BungkusLazy>
+                <LmsModulAjarPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/modul-ajar',
+            element: (
+              <BungkusLazy>
+                <LmsModulAjarPage />
+              </BungkusLazy>
+            ),
+          },
+          {
             path: 'master-modul-semester',
             element: (
               <BungkusLazy>
@@ -266,6 +299,302 @@ export const router = createBrowserRouter([
             element: (
               <BungkusLazy>
                 <MasterKurikulumPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-subjects',
+            element: (
+              <BungkusLazy>
+                <MasterSubjectPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-capaian-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <MasterCapaianPembelajaranPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/capaian-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <MasterCapaianPembelajaranPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'master-tujuan-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <MasterTujuanPembelajaranPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/tujuan-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <MasterTujuanPembelajaranPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'materi-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsMateriPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/materi-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsMateriPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/materi',
+            element: (
+              <BungkusLazy>
+                <LmsMateriPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'media-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsMediaPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/media-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsMediaPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/media',
+            element: (
+              <BungkusLazy>
+                <LmsMediaPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'referensi-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsReferensiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/referensi-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsReferensiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/referensi',
+            element: (
+              <BungkusLazy>
+                <LmsReferensiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'aktivitas-belajar',
+            element: (
+              <BungkusLazy>
+                <LmsAktivitasBelajarPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/aktivitas-belajar',
+            element: (
+              <BungkusLazy>
+                <LmsAktivitasBelajarPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/aktivitas',
+            element: (
+              <BungkusLazy>
+                <LmsAktivitasBelajarPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'diskusi-kelas',
+            element: (
+              <BungkusLazy>
+                <LmsDiskusiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/diskusi-kelas',
+            element: (
+              <BungkusLazy>
+                <LmsDiskusiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/diskusi',
+            element: (
+              <BungkusLazy>
+                <LmsDiskusiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'penugasan',
+            element: (
+              <BungkusLazy>
+                <LmsPenugasanPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/penugasan',
+            element: (
+              <BungkusLazy>
+                <LmsPenugasanPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'pengumpulan-tugas',
+            element: (
+              <BungkusLazy>
+                <LmsPengumpulanTugasPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/pengumpulan-tugas',
+            element: (
+              <BungkusLazy>
+                <LmsPengumpulanTugasPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'presensi-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsPresensiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/presensi-pembelajaran',
+            element: (
+              <BungkusLazy>
+                <LmsPresensiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'kisi-kisi-ujian',
+            element: (
+              <BungkusLazy>
+                <LmsKisiKisiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/kisi-kisi',
+            element: (
+              <BungkusLazy>
+                <LmsKisiKisiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'bank-soal',
+            element: (
+              <BungkusLazy>
+                <LmsBankSoalPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/bank-soal',
+            element: (
+              <BungkusLazy>
+                <LmsBankSoalPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'ujian-online',
+            element: (
+              <BungkusLazy>
+                <LmsUjianPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/ujian-online',
+            element: (
+              <BungkusLazy>
+                <LmsUjianPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/ujian',
+            element: (
+              <BungkusLazy>
+                <LmsUjianPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'penilaian',
+            element: (
+              <BungkusLazy>
+                <LmsPenilaianPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/penilaian',
+            element: (
+              <BungkusLazy>
+                <LmsPenilaianPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/penilaian-rapor',
+            element: (
+              <BungkusLazy>
+                <LmsRaporPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'lms/rapor',
+            element: (
+              <BungkusLazy>
+                <LmsRaporPage />
               </BungkusLazy>
             ),
           },

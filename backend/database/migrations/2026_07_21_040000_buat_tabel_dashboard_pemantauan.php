@@ -10,7 +10,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('pemantauan_divisis', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('id_tahun_ajaran')->nullable();
             $table->uuid('id_semester')->nullable();
             $table->date('tanggal_pemantauan')->index();
@@ -31,7 +31,7 @@ return new class extends Migration
         });
 
         Schema::create('laporan_bulanans', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('id_tahun_ajaran')->nullable();
             $table->uuid('id_semester')->nullable();
             $table->smallInteger('bulan')->index();
@@ -54,7 +54,7 @@ return new class extends Migration
         });
 
         Schema::create('rekap_prestasi_siswas', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('id_siswa');
             $table->string('jenis_prestasi', 30)->index();
             $table->string('nama_prestasi', 180);
@@ -73,7 +73,7 @@ return new class extends Migration
         });
 
         Schema::create('pengumuman_sekolahs', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('judul_pengumuman', 200);
             $table->text('isi_pengumuman');
             $table->jsonb('target_peran')->nullable();
@@ -89,10 +89,12 @@ return new class extends Migration
             $table->foreign('id_penerbit')->references('id')->on('users')->restrictOnDelete();
         });
 
-        DB::statement("CREATE INDEX pengumuman_sekolahs_fts_idx ON pengumuman_sekolahs USING GIN (to_tsvector('simple', coalesce(judul_pengumuman,'') || ' ' || coalesce(isi_pengumuman,'')))");
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement("CREATE INDEX pengumuman_sekolahs_fts_idx ON pengumuman_sekolahs USING GIN (to_tsvector('simple', coalesce(judul_pengumuman,'') || ' ' || coalesce(isi_pengumuman,'')))");
+        }
 
         Schema::create('indikator_kinerja_utamas', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('kode_indikator', 80)->unique();
             $table->string('nama_indikator', 150);
             $table->string('kategori_indikator', 80)->index();

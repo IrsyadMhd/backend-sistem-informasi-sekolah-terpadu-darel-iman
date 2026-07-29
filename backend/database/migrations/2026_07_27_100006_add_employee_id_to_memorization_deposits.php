@@ -34,48 +34,50 @@ return new class extends Migration
             }
         });
 
-        // Backfill: isi employee_id dari teachers.employee_id (bridge Migration 05)
-        if (Schema::hasColumn('teachers', 'employee_id')) {
-            DB::statement('
-                UPDATE memorization_deposits md
-                SET employee_id = t.employee_id
-                FROM teachers t
-                WHERE md.teacher_id = t.id
-                  AND t.employee_id IS NOT NULL
-                  AND md.employee_id IS NULL
-            ');
-        }
+        if (DB::getDriverName() === 'pgsql') {
+            // Backfill: isi employee_id dari teachers.employee_id (bridge Migration 05)
+            if (Schema::hasColumn('teachers', 'employee_id')) {
+                DB::statement('
+                    UPDATE memorization_deposits md
+                    SET employee_id = t.employee_id
+                    FROM teachers t
+                    WHERE md.teacher_id = t.id
+                      AND t.employee_id IS NOT NULL
+                      AND md.employee_id IS NULL
+                ');
+            }
 
-        // Backfill tahfizh_records (tabel partisi) — tambah employee_id jika kolom belum ada
-        // Cek apakah tabel partisi ada dan belum memiliki kolom employee_id
-        $hasPartition = DB::select("
-            SELECT 1 FROM information_schema.tables
-            WHERE table_name = 'tahfizh_records'
-              AND table_schema = 'public'
-        ");
-
-        if (! empty($hasPartition)) {
-            $hasEmployeeId = DB::select("
-                SELECT 1 FROM information_schema.columns
+            // Backfill tahfizh_records (tabel partisi) — tambah employee_id jika kolom belum ada
+            // Cek apakah tabel partisi ada dan belum memiliki kolom employee_id
+            $hasPartition = DB::select("
+                SELECT 1 FROM information_schema.tables
                 WHERE table_name = 'tahfizh_records'
-                  AND column_name = 'employee_id'
                   AND table_schema = 'public'
             ");
 
-            if (empty($hasEmployeeId)) {
-                // Tambah kolom ke tabel partisi induk (otomatis ter-propagasi ke partisi anak)
-                DB::statement('ALTER TABLE tahfizh_records ADD COLUMN IF NOT EXISTS employee_id UUID NULL');
+            if (! empty($hasPartition)) {
+                $hasEmployeeId = DB::select("
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'tahfizh_records'
+                      AND column_name = 'employee_id'
+                      AND table_schema = 'public'
+                ");
 
-                // Backfill tahfizh_records dari teachers.employee_id
-                if (Schema::hasColumn('teachers', 'employee_id')) {
-                    DB::statement('
-                        UPDATE tahfizh_records tr
-                        SET employee_id = t.employee_id
-                        FROM teachers t
-                        WHERE tr.teacher_id = t.id
-                          AND t.employee_id IS NOT NULL
-                          AND tr.employee_id IS NULL
-                    ');
+                if (empty($hasEmployeeId)) {
+                    // Tambah kolom ke tabel partisi induk (otomatis ter-propagasi ke partisi anak)
+                    DB::statement('ALTER TABLE tahfizh_records ADD COLUMN IF NOT EXISTS employee_id UUID NULL');
+
+                    // Backfill tahfizh_records dari teachers.employee_id
+                    if (Schema::hasColumn('teachers', 'employee_id')) {
+                        DB::statement('
+                            UPDATE tahfizh_records tr
+                            SET employee_id = t.employee_id
+                            FROM teachers t
+                            WHERE tr.teacher_id = t.id
+                              AND t.employee_id IS NOT NULL
+                              AND tr.employee_id IS NULL
+                        ');
+                    }
                 }
             }
         }
@@ -90,7 +92,9 @@ return new class extends Migration
             }
         });
 
-        // Hapus dari tahfizh_records partisi
-        DB::statement('ALTER TABLE tahfizh_records DROP COLUMN IF EXISTS employee_id');
+        if (DB::getDriverName() === 'pgsql') {
+            // Hapus dari tahfizh_records partisi
+            DB::statement('ALTER TABLE tahfizh_records DROP COLUMN IF EXISTS employee_id');
+        }
     }
 };

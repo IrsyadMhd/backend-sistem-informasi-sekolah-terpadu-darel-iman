@@ -9,11 +9,13 @@ return new class extends Migration
 {
     public function up(): void
     {
-        DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
+        }
 
         // Master Jabatan (Positions)
         Schema::create('positions', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->string('code', 50)->unique();
             $table->string('name');
             $table->text('description')->nullable();
@@ -25,7 +27,7 @@ return new class extends Migration
 
         // Master Pegawai (Employees)
         Schema::create('employees', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             
             // Identitas
             $table->string('niy', 50)->unique();
@@ -77,7 +79,7 @@ return new class extends Migration
 
         // Penugasan Mengajar (Employee Teachings)
         Schema::create('employee_teachings', function (Blueprint $table) {
-            $table->uuid('id')->primary()->default(DB::raw('gen_random_uuid()'));
+            $table->uuid('id')->primary();
             $table->uuid('employee_id');
             $table->uuid('classroom_id')->nullable();
             $table->uuid('subject_id')->nullable();
@@ -96,14 +98,14 @@ return new class extends Migration
 
         // Insert Default Positions
         DB::table('positions')->insert([
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-001', 'name' => 'Kepala Sekolah', 'description' => 'Pimpinan Utama Unit Sekolah', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-002', 'name' => 'Wakil Kepala Sekolah', 'description' => 'Wakil Pimpinan Sekolah', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-003', 'name' => 'Guru Kelas', 'description' => 'Tenaga Pendidik Wali Kelas', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-004', 'name' => 'Guru Mata Pelajaran', 'description' => 'Tenaga Pendidik Mapel', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-005', 'name' => 'Tata Usaha (TU)', 'description' => 'Staf Administrasi Sekolah', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-006', 'name' => 'Operator Sekolah', 'description' => 'Pengelola Data & Sistem IT', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-007', 'name' => 'Divisi Pendidikan', 'description' => 'Pengawas & Penjamin Mutu Pendidikan Yayasan', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
-            ['id' => DB::raw('gen_random_uuid()'), 'code' => 'JAB-008', 'name' => 'Ketua Yayasan', 'description' => 'Pimpinan Tertinggi Yayasan Dar El-Iman', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-001', 'name' => 'Kepala Sekolah', 'description' => 'Pimpinan Utama Unit Sekolah', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-002', 'name' => 'Wakil Kepala Sekolah', 'description' => 'Wakil Pimpinan Sekolah', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-003', 'name' => 'Guru Kelas', 'description' => 'Tenaga Pendidik Wali Kelas', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-004', 'name' => 'Guru Mata Pelajaran', 'description' => 'Tenaga Pendidik Mapel', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-005', 'name' => 'Tata Usaha (TU)', 'description' => 'Staf Administrasi Sekolah', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-006', 'name' => 'Operator Sekolah', 'description' => 'Pengelola Data & Sistem IT', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-007', 'name' => 'Divisi Pendidikan', 'description' => 'Pengawas & Penjamin Mutu Pendidikan Yayasan', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
+            ['id' => (string) \Illuminate\Support\Str::uuid(), 'code' => 'JAB-008', 'name' => 'Ketua Yayasan', 'description' => 'Pimpinan Tertinggi Yayasan Dar El-Iman', 'is_active' => true, 'created_at' => now(), 'updated_at' => now()],
         ]);
     }
 

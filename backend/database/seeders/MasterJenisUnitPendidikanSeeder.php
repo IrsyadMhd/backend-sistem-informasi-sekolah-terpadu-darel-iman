@@ -102,11 +102,9 @@ class MasterJenisUnitPendidikanSeeder extends Seeder
         ];
 
         foreach ($defaultData as $item) {
-            JenisUnitPendidikan::updateOrCreate(
+            JenisUnitPendidikan::withTrashed()->firstOrCreate(
                 ['kode_jenis' => $item['kode_jenis']],
-                array_merge($item, [
-                    'uuid' => (string) Str::uuid(),
-                ])
+                $item
             );
         }
     }

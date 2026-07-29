@@ -28,21 +28,29 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // Deteksi apakah tabel attendances adalah tabel partisi atau biasa
-        $isPartitioned = DB::select("
-            SELECT 1 FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.relname = 'attendances'
-              AND n.nspname = 'public'
-              AND c.relkind = 'p'
-        ");
+        if (DB::getDriverName() === 'pgsql') {
+            // Deteksi apakah tabel attendances adalah tabel partisi atau biasa
+            $isPartitioned = DB::select("
+                SELECT 1 FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = 'attendances'
+                  AND n.nspname = 'public'
+                  AND c.relkind = 'p'
+            ");
 
-        if ($isPartitioned) {
-            // Versi PARTISI: tambah kolom yang tidak ada
-            $this->fixPartitionedTable();
+            if ($isPartitioned) {
+                // Versi PARTISI: tambah kolom yang tidak ada
+                $this->fixPartitionedTable();
+            } else {
+                // Versi NON-PARTISI: tambah kolom yang tidak ada
+                $this->fixNonPartitionedTable();
+            }
         } else {
-            // Versi NON-PARTISI: tambah kolom yang tidak ada
-            $this->fixNonPartitionedTable();
+            Schema::table('attendances', function (Blueprint $table) {
+                if (! Schema::hasColumn('attendances', 'employee_id')) {
+                    $table->uuid('employee_id')->nullable()->after('student_id');
+                }
+            });
         }
     }
 
@@ -114,6 +122,10 @@ return new class extends Migration
      */
     private function indexExists(string $table, string $indexName): bool
     {
+        if (DB::getDriverName() !== 'pgsql') {
+            return false;
+        }
+
         $result = DB::select("
             SELECT 1 FROM pg_indexes
             WHERE tablename = ? AND indexname = ?
@@ -124,20 +136,22 @@ return new class extends Migration
 
     public function down(): void
     {
-        // Hapus index jika ada (non-partisi)
-        DB::statement('DROP INDEX IF EXISTS attendances_date_unit_idx');
+        if (DB::getDriverName() === 'pgsql') {
+            // Hapus index jika ada (non-partisi)
+            DB::statement('DROP INDEX IF EXISTS attendances_date_unit_idx');
 
-        // Hapus FK employee_id (non-partisi)
-        DB::statement('ALTER TABLE attendances DROP CONSTRAINT IF EXISTS fk_attendances_employee');
+            // Hapus FK employee_id (non-partisi)
+            DB::statement('ALTER TABLE attendances DROP CONSTRAINT IF EXISTS fk_attendances_employee');
 
-        // Hapus kolom yang ditambahkan di versi partisi
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS tipe_presensi');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS unit_pendidikan_id');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS keterangan');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS latitude');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS longitude');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS attachment_path');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS created_by');
-        DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS updated_by');
+            // Hapus kolom yang ditambahkan di versi partisi
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS tipe_presensi');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS unit_pendidikan_id');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS keterangan');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS latitude');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS longitude');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS attachment_path');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS created_by');
+            DB::statement('ALTER TABLE attendances DROP COLUMN IF EXISTS updated_by');
+        }
     }
 };

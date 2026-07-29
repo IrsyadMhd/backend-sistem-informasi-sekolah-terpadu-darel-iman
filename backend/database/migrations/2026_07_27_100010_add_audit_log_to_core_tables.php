@@ -43,40 +43,44 @@ return new class extends Migration
             });
         }
 
-        // Tambahkan partial unique index untuk academic_years: maks 1 aktif
-        // Ini constraint yang aman — tidak break data lama, hanya cegah tambah baru
-        $existingIdx = \Illuminate\Support\Facades\DB::select("
-            SELECT 1 FROM pg_indexes
-            WHERE tablename = 'academic_years'
-              AND indexname = 'uniq_one_active_academic_year'
-        ");
-        if (empty($existingIdx)) {
-            \Illuminate\Support\Facades\DB::statement('
-                CREATE UNIQUE INDEX uniq_one_active_academic_year
-                ON academic_years (is_active)
-                WHERE is_active = true AND deleted_at IS NULL
-            ');
-        }
+        if (\Illuminate\Support\Facades\DB::getDriverName() === 'pgsql') {
+            // Tambahkan partial unique index untuk academic_years: maks 1 aktif
+            // Ini constraint yang aman — tidak break data lama, hanya cegah tambah baru
+            $existingIdx = \Illuminate\Support\Facades\DB::select("
+                SELECT 1 FROM pg_indexes
+                WHERE tablename = 'academic_years'
+                  AND indexname = 'uniq_one_active_academic_year'
+            ");
+            if (empty($existingIdx)) {
+                \Illuminate\Support\Facades\DB::statement('
+                    CREATE UNIQUE INDEX uniq_one_active_academic_year
+                    ON academic_years (is_active)
+                    WHERE is_active = true AND deleted_at IS NULL
+                ');
+            }
 
-        // Partial unique index untuk semesters: maks 1 semester aktif per tahun ajaran
-        $existingIdx2 = \Illuminate\Support\Facades\DB::select("
-            SELECT 1 FROM pg_indexes
-            WHERE tablename = 'semesters'
-              AND indexname = 'uniq_one_active_semester_per_year'
-        ");
-        if (empty($existingIdx2)) {
-            \Illuminate\Support\Facades\DB::statement('
-                CREATE UNIQUE INDEX uniq_one_active_semester_per_year
-                ON semesters (academic_year_id, is_active)
-                WHERE is_active = true AND deleted_at IS NULL
-            ');
+            // Partial unique index untuk semesters: maks 1 semester aktif per tahun ajaran
+            $existingIdx2 = \Illuminate\Support\Facades\DB::select("
+                SELECT 1 FROM pg_indexes
+                WHERE tablename = 'semesters'
+                  AND indexname = 'uniq_one_active_semester_per_year'
+            ");
+            if (empty($existingIdx2)) {
+                \Illuminate\Support\Facades\DB::statement('
+                    CREATE UNIQUE INDEX uniq_one_active_semester_per_year
+                    ON semesters (academic_year_id, is_active)
+                    WHERE is_active = true AND deleted_at IS NULL
+                ');
+            }
         }
     }
 
     public function down(): void
     {
-        \Illuminate\Support\Facades\DB::statement('DROP INDEX IF EXISTS uniq_one_active_academic_year');
-        \Illuminate\Support\Facades\DB::statement('DROP INDEX IF EXISTS uniq_one_active_semester_per_year');
+        if (\Illuminate\Support\Facades\DB::getDriverName() === 'pgsql') {
+            \Illuminate\Support\Facades\DB::statement('DROP INDEX IF EXISTS uniq_one_active_academic_year');
+            \Illuminate\Support\Facades\DB::statement('DROP INDEX IF EXISTS uniq_one_active_semester_per_year');
+        }
 
         $tables = ['academic_years', 'semesters', 'subjects', 'parents'];
 

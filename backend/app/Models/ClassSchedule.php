@@ -107,6 +107,12 @@ class ClassSchedule extends Model
         return $this->belongsTo(Semester::class, 'semester_id');
     }
 
+    public function presensis()
+    {
+        return $this->hasMany(LmsPresensi::class, 'jadwal_pelajaran_id');
+    }
+
+
     // --- Scopes ---
 
     public function scopeAktif($query)
