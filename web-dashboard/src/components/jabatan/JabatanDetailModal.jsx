@@ -88,7 +88,15 @@ export default function JabatanDetailModal({ isOpen, onClose, jabatan = null }) 
                 <span>Atribut Jabatan</span>
               </h4>
 
-              <div className="bg-white rounded-2xl p-4 border border-slate-200/90 space-y-2 text-xs">
+	              <div className="bg-white rounded-2xl p-4 border border-slate-200/90 space-y-2 text-xs">
+	                <div className="flex justify-between border-b border-slate-100 pb-2">
+	                  <span className="text-slate-500">Satuan Kerja:</span>
+	                  <span className="font-bold text-slate-800">{jabatan.satuan_kerja || '-'}</span>
+	                </div>
+	                <div className="flex justify-between border-b border-slate-100 pb-2">
+	                  <span className="text-slate-500">Cakupan Akses:</span>
+	                  <span className="font-bold text-slate-800">{jabatan.scope_akses_label || '-'}</span>
+	                </div>
                 <div className="flex justify-between border-b border-slate-100 pb-2">
                   <span className="text-slate-500">Unit Sekolah:</span>
                   <span className="font-bold text-slate-800">
@@ -98,7 +106,7 @@ export default function JabatanDetailModal({ isOpen, onClose, jabatan = null }) 
                 <div className="flex justify-between border-b border-slate-100 pb-2">
                   <span className="text-slate-500">Atasan Langsung:</span>
                   <span className="font-bold text-slate-800">
-                    {jabatan.atasan_langsung ? jabatan.atasan_langsung.nama_jabatan : 'Pimpinan Tertinggi'}
+	                    {jabatan.atasan_pegawai?.nama_pegawai || (jabatan.atasan_langsung ? jabatan.atasan_langsung.nama_jabatan : 'Pimpinan Tertinggi')}
                   </span>
                 </div>
                 <div className="flex justify-between border-b border-slate-100 pb-2">

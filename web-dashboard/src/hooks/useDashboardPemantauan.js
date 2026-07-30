@@ -87,7 +87,7 @@ export function useDaftarIndikatorKinerjaUtama(params) {
   })
 }
 
-function buatAksiGeneric(mutationFn, successFallback, errorFallback, queryClient) {
+function useAksiGeneric(mutationFn, successFallback, errorFallback, queryClient) {
   return useMutation({
     mutationFn,
     onSuccess: async (result) => {
@@ -104,19 +104,19 @@ export function useAksiLaporanBulanan() {
   const queryClient = useQueryClient()
 
   return {
-    tambah: buatAksiGeneric(
+    tambah: useAksiGeneric(
       dashboardPemantauanService.tambahLaporanBulanan,
       'Laporan bulanan berhasil ditambahkan',
       'Terjadi kesalahan saat menambah laporan bulanan',
       queryClient
     ),
-    ubah: buatAksiGeneric(
+    ubah: useAksiGeneric(
       dashboardPemantauanService.ubahLaporanBulanan,
       'Laporan bulanan berhasil diperbarui',
       'Terjadi kesalahan saat memperbarui laporan bulanan',
       queryClient
     ),
-    hapus: buatAksiGeneric(
+    hapus: useAksiGeneric(
       dashboardPemantauanService.hapusLaporanBulanan,
       'Laporan bulanan berhasil dihapus',
       'Terjadi kesalahan saat menghapus laporan bulanan',
@@ -129,19 +129,19 @@ export function useAksiRekapPrestasiSiswa() {
   const queryClient = useQueryClient()
 
   return {
-    tambah: buatAksiGeneric(
+    tambah: useAksiGeneric(
       dashboardPemantauanService.tambahRekapPrestasiSiswa,
       'Rekap prestasi siswa berhasil ditambahkan',
       'Terjadi kesalahan saat menambah rekap prestasi',
       queryClient
     ),
-    ubah: buatAksiGeneric(
+    ubah: useAksiGeneric(
       dashboardPemantauanService.ubahRekapPrestasiSiswa,
       'Rekap prestasi siswa berhasil diperbarui',
       'Terjadi kesalahan saat memperbarui rekap prestasi',
       queryClient
     ),
-    hapus: buatAksiGeneric(
+    hapus: useAksiGeneric(
       dashboardPemantauanService.hapusRekapPrestasiSiswa,
       'Rekap prestasi siswa berhasil dihapus',
       'Terjadi kesalahan saat menghapus rekap prestasi',
@@ -154,19 +154,19 @@ export function useAksiPengumumanSekolah() {
   const queryClient = useQueryClient()
 
   return {
-    tambah: buatAksiGeneric(
+    tambah: useAksiGeneric(
       dashboardPemantauanService.tambahPengumumanSekolah,
       'Pengumuman sekolah berhasil ditambahkan',
       'Terjadi kesalahan saat menambah pengumuman',
       queryClient
     ),
-    ubah: buatAksiGeneric(
+    ubah: useAksiGeneric(
       dashboardPemantauanService.ubahPengumumanSekolah,
       'Pengumuman sekolah berhasil diperbarui',
       'Terjadi kesalahan saat memperbarui pengumuman',
       queryClient
     ),
-    hapus: buatAksiGeneric(
+    hapus: useAksiGeneric(
       dashboardPemantauanService.hapusPengumumanSekolah,
       'Pengumuman sekolah berhasil dihapus',
       'Terjadi kesalahan saat menghapus pengumuman',
@@ -179,19 +179,19 @@ export function useAksiIndikatorKinerjaUtama() {
   const queryClient = useQueryClient()
 
   return {
-    tambah: buatAksiGeneric(
+    tambah: useAksiGeneric(
       dashboardPemantauanService.tambahIndikatorKinerjaUtama,
       'Indikator kinerja utama berhasil ditambahkan',
       'Terjadi kesalahan saat menambah indikator',
       queryClient
     ),
-    ubah: buatAksiGeneric(
+    ubah: useAksiGeneric(
       dashboardPemantauanService.ubahIndikatorKinerjaUtama,
       'Indikator kinerja utama berhasil diperbarui',
       'Terjadi kesalahan saat memperbarui indikator',
       queryClient
     ),
-    hapus: buatAksiGeneric(
+    hapus: useAksiGeneric(
       dashboardPemantauanService.hapusIndikatorKinerjaUtama,
       'Indikator kinerja utama berhasil dihapus',
       'Terjadi kesalahan saat menghapus indikator',

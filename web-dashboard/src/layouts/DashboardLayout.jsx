@@ -24,6 +24,7 @@ import {
   Moon,
   CalendarCheck,
   HelpCircle,
+  BookHeart,
 } from 'lucide-react'
 import Swal from 'sweetalert2'
 import { authService } from '../services/authService'
@@ -32,6 +33,7 @@ import { usePengaturanStore } from '../stores/pengaturanStore'
 import { useUnitStore } from '../stores/unitStore'
 import { Drawer } from '../components/ui/drawer'
 import { FAB } from '../components/ui/fab'
+import ActiveScheduleNotice from '../components/attendance/ActiveScheduleNotice'
 
 export default function DashboardLayout() {
   const location = useLocation()
@@ -43,6 +45,10 @@ export default function DashboardLayout() {
   const pengaturan = usePengaturanStore((state) => state.pengaturan)
   const muatPengaturan = usePengaturanStore((state) => state.muatPengaturan)
   const namaSekolah = pengaturan?.school_name || 'YAYASAN DAR EL - IMAN'
+  const roles = Array.isArray(user?.roles) ? user.roles : []
+  const permissions = Array.isArray(user?.permissions) ? user.permissions : []
+  const hasRole = (...names) => names.some((name) => roles.includes(name))
+  const can = (...names) => hasRole('Super Admin') || names.some((name) => permissions.includes(name))
 
   const [collapsed, setCollapsed] = useState(Boolean(pengaturan?.sidebar_collapsed))
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -115,7 +121,7 @@ export default function DashboardLayout() {
   }, [])
 
   const namaTampil = user?.name || 'Ketua Yayasan'
-  const roleTampil = 'Super Admin Yayasan'
+  const roleTampil = roles.join(', ') || 'Pengguna'
   const tanggalTampil = 'Senin, 27 Juli 2026 / 1 Muharram 1448 H'
 
   const toggleSection = (sectionKey) => {
@@ -146,6 +152,68 @@ export default function DashboardLayout() {
     { id: 'SMA', name: 'SMA Islam Terpadu' },
     { id: 'PONPES', name: 'Pondok Pesantren' },
   ]
+
+  const attendanceSubmenus = [
+    ...(hasRole('Wali Kelas') && can('attendance.homeroom.dashboard', 'homeroom_attendance.dashboard', 'homeroom_attendance.view') ? [
+      { to: '/absensi/dashboard-wali-kelas', label: 'Dashboard Wali Kelas' },
+      { to: '/absensi/rekap-kehadiran', label: 'Rekap Kehadiran' },
+      { to: '/absensi/verifikasi-izin', label: 'Verifikasi Izin/Sakit' },
+      { to: '/absensi/koreksi', label: 'Koreksi Presensi' },
+      { to: '/absensi/tindak-lanjut', label: 'Tindak Lanjut Siswa' },
+      { to: '/absensi/laporan', label: 'Laporan Rombel' },
+    ] : []),
+    ...(hasRole('Guru') && can('attendance.teacher.dashboard', 'lesson_attendance.view_own', 'lesson_attendance.create') ? [
+      { to: '/absensi/dashboard-guru', label: 'Dashboard Guru' },
+      { to: '/absensi/jadwal-mengajar', label: 'Jadwal Mengajar' },
+      { to: '/absensi/presensi', label: 'Presensi Pembelajaran' },
+      { to: '/absensi/riwayat-guru', label: 'Riwayat Presensi' },
+    ] : []),
+    ...(hasRole('Siswa') && can('attendance.student.view_own', 'student_attendance.view_own') ? [
+      { to: '/absensi/kehadiran-saya', label: 'Kehadiran Saya' },
+      { to: '/absensi/riwayat-saya', label: 'Riwayat Kehadiran' },
+      { to: '/absensi/pengajuan-izin', label: 'Pengajuan Izin/Sakit' },
+    ] : []),
+    ...(!hasRole('Guru') && !hasRole('Wali Kelas') && !hasRole('Siswa') ? [
+            { to: '/dashboard/attendance', label: 'Presensi Guru' },
+            { to: '/dashboard/attendance?view=siswa', label: 'Presensi Siswa' },
+            { to: '/dashboard/lms/presensi-pembelajaran', label: 'Presensi Pembelajaran (LMS)' },
+            { to: '/dashboard/laporan-absensi', label: 'Rekap Presensi' },
+    ] : []),
+  ].filter((item, index, list) => list.findIndex((entry) => entry.to === item.to) === index)
+
+  const bolehBukaMenu = (to) => {
+    if (hasRole('Super Admin')) return true
+
+    if (to === '/dashboard') return can('dashboard.view')
+    if (to.startsWith('/dashboard/pemantauan')) return can('dashboard.pemantauan.lihat')
+    if (to === '/dashboard/students') return can('kesiswaan.data_lengkap_siswa', 'sekolah.data_pribadi_siswa')
+    if (to.includes('/students/rombel') || to.includes('/students/kelas')) return can('kesiswaan.kelas_rombel')
+    if (to.includes('/students/input') || to.includes('/students/laporan')) return can('kesiswaan.laporan_masuk_keluar')
+    if (to.includes('/lms/penugasan')) return can('kesiswaan.penugasan_siswa')
+    if (to.includes('/lms/materi-pembelajaran')) return can('pembelajaran.materi')
+    if (to.includes('/lms/kisi-kisi')) return can('pembelajaran.kisi_kisi_ujian')
+    if (to.includes('/lms/bank-soal')) return can('pembelajaran.bank_soal')
+    if (to.includes('/jadwal-pelajaran')) return can('pembelajaran.jadwal_pelajaran')
+    if (to.includes('/master-kurikulum')) return can('pembelajaran.kurikulum.view')
+    if (to.includes('/tahfizh')) return can('tahfizh.monitoring_target', 'tahfizh.laporan_target')
+    if (to.includes('/mutabaah')) return hasRole('Guru', 'Wali Kelas', 'Pembimbing', 'Tata Usaha', 'TU') || can('mutabaah.view', 'mutabaah.input', 'mutabaah.agenda.manage', 'sistem.master_data')
+    if (to.includes('/laporan-absensi')) return can('kehadiran.siswa.monitoring', 'kehadiran.siswa.rekap_keterlambatan', 'kehadiran.siswa.rekap_ketidakhadiran')
+    if (to.includes('/laporan-siswa')) return can('kesiswaan.rekap_prestasi', 'kesiswaan.kelulusan_per_unit', 'kesiswaan.kelulusan_per_tahun')
+    if (to.includes('/laporan-alumni')) return can('kesiswaan.alumni_tujuan_lanjut')
+    if (to.startsWith('/absensi') || to.includes('/attendance') || to.includes('/lms/presensi')) {
+      return can(
+        'kehadiran.siswa.absensi_digital',
+        'kehadiran.siswa.barcode_kartu',
+        'lesson_attendance.view',
+        'lesson_attendance.view_own',
+        'student_attendance.view_own',
+      )
+    }
+    if (to.includes('/hak-akses')) return can('sistem.hak_akses')
+    if (to.includes('/pengaturan')) return can('sistem.pengaturan')
+
+    return can('sistem.master_data')
+  }
 
   const sidebarMenu = [
     {
@@ -178,6 +246,7 @@ export default function DashboardLayout() {
         { to: '/dashboard/master-kurikulum', label: 'Kurikulum' },
         { to: '/dashboard/students/rombel', label: 'Kelas & Rombel' },
         { to: '/dashboard/master-subjects', label: 'Mata Pelajaran' },
+        { to: '/dashboard/jadwal-pelajaran', label: 'Jadwal Pelajaran' },
         { to: '/dashboard/master-capaian-pembelajaran', label: 'Capaian Pembelajaran (CP)' },
         { to: '/dashboard/master-tujuan-pembelajaran', label: 'Tujuan Pembelajaran (TP)' },
         { to: '/dashboard/lms/modul-ajar', label: 'Modul Ajar (RPP)' },
@@ -200,11 +269,15 @@ export default function DashboardLayout() {
       key: 'absensi',
       label: 'ABSENSI',
       icon: CalendarCheck,
+      submenus: attendanceSubmenus,
+    },
+    {
+      key: 'mutabaah',
+      label: 'MUTABA’AH',
+      icon: BookHeart,
       submenus: [
-        { to: '/dashboard/attendance', label: 'Presensi Guru' },
-        { to: '/dashboard/attendance?view=siswa', label: 'Presensi Siswa' },
-        { to: '/dashboard/lms/presensi-pembelajaran', label: 'Presensi Pembelajaran (LMS)' },
-        { to: '/dashboard/laporan-absensi', label: 'Rekap Presensi' },
+        { to: '/dashboard/mutabaah', label: 'Input Mutaba’ah Harian' },
+        ...(hasRole('Super Admin', 'Tata Usaha', 'TU') || can('mutabaah.agenda.manage') ? [{ to: '/dashboard/mutabaah?tab=agenda', label: 'Rincian Agenda TU' }] : []),
       ],
     },
     {
@@ -213,7 +286,6 @@ export default function DashboardLayout() {
       icon: BookMarked,
       submenus: [
         { to: '/dashboard/tahfizh', label: 'Hafalan' },
-        { to: '/dashboard/laporan-tahfizh', label: 'Mutabaah' },
         { to: '/dashboard/tahfizh?tab=murajaah', label: 'Murajaah' },
       ],
     },
@@ -223,8 +295,10 @@ export default function DashboardLayout() {
       icon: FileText,
       submenus: [
         { to: '/dashboard/laporan-siswa', label: 'Laporan Siswa' },
+        { to: '/dashboard/laporan-absensi', label: 'Laporan Absensi' },
         { to: '/dashboard/laporan-akademik', label: 'Laporan Akademik' },
-        { to: '/dashboard/laporan-tahfizh', label: 'Laporan Tahfizh' },
+        { to: '/dashboard/laporan-pegawai', label: 'Laporan Pegawai & Guru' },
+        { to: '/dashboard/laporan-lms', label: 'Laporan LMS' },
       ],
     },
     {
@@ -237,7 +311,13 @@ export default function DashboardLayout() {
         // { to: '/dashboard/pengaturan?tab=unit', label: 'Pengaturan Unit' },
       ],
     },
-  ]
+  ].map((item) => (
+    item.submenus
+      ? { ...item, submenus: item.submenus.filter((submenu) => bolehBukaMenu(submenu.to)) }
+      : item
+  )).filter((item) => (
+    item.submenus ? item.submenus.length > 0 : bolehBukaMenu(item.to)
+  ))
 
   const isSubActive = (to) => {
     if (to === '/dashboard/students') {
@@ -672,6 +752,7 @@ export default function DashboardLayout() {
 
           {/* Main Page Workspace */}
           <main className="flex-1 p-6 md:p-8 space-y-8 max-w-7xl w-full mx-auto pb-24 md:pb-12">
+            <ActiveScheduleNotice />
             <Outlet />
           </main>
         </div>

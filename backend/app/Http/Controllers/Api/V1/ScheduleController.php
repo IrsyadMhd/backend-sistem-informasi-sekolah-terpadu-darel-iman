@@ -3,10 +3,16 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\AcademicYear;
 use App\Models\ClassSchedule;
+use App\Models\Employee;
+use App\Models\Kelas;
+use App\Models\Semester;
+use App\Models\Subject;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\ValidationException;
 
 /**
  * ScheduleController
@@ -60,17 +66,80 @@ class ScheduleController extends Controller
             $query->where('day_of_week', (int) $request->query('day_of_week'));
         }
 
-        if ($request->boolean('aktif_only', true)) {
+        if ($request->filled('search')) {
+            $search = trim((string) $request->query('search'));
+            $query->where(function ($subQuery) use ($search) {
+                $subQuery
+                    ->whereHas('employee', fn ($q) => $q->where('nama_lengkap', 'ilike', "%{$search}%"))
+                    ->orWhereHas('teacher', fn ($q) => $q->where('name', 'ilike', "%{$search}%"))
+                    ->orWhereHas('subject', fn ($q) => $q
+                        ->where('name', 'ilike', "%{$search}%")
+                        ->orWhere('nama_mapel', 'ilike', "%{$search}%"))
+                    ->orWhereHas('kelas', fn ($q) => $q
+                        ->where('nama_kelas', 'ilike', "%{$search}%")
+                        ->orWhere('kode_kelas', 'ilike', "%{$search}%"));
+            });
+        }
+
+        if ($request->filled('is_active')) {
+            $query->where('is_active', $request->boolean('is_active'));
+        } elseif ($request->boolean('aktif_only', false)) {
             $query->where('is_active', true);
         }
 
-        $perPage = (int) $request->query('per_page', 50);
+        $perPage = min(max((int) $request->query('per_page', 15), 1), 100);
         $data = $query->orderBy('day_of_week')->orderBy('time_start')->paginate($perPage);
 
         return response()->json([
             'status'  => 'success',
             'message' => 'Daftar jadwal pelajaran berhasil diambil.',
-            'data'    => $data,
+            'data'    => $data->items(),
+            'meta'    => [
+                'current_page' => $data->currentPage(),
+                'from' => $data->firstItem(),
+                'last_page' => $data->lastPage(),
+                'per_page' => $data->perPage(),
+                'to' => $data->lastItem(),
+                'total' => $data->total(),
+            ],
+            'statistik' => [
+                'total' => ClassSchedule::count(),
+                'aktif' => ClassSchedule::where('is_active', true)->count(),
+                'tidak_aktif' => ClassSchedule::where('is_active', false)->count(),
+                'guru_terjadwal' => ClassSchedule::whereNotNull('employee_id')->distinct()->count('employee_id'),
+            ],
+        ]);
+    }
+
+    public function options(): JsonResponse
+    {
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Opsi jadwal pelajaran berhasil diambil.',
+            'data' => [
+                'kelas' => Kelas::query()
+                    ->with(['unitPendidikan:id,name', 'tahunAjaran:id,name', 'semester:id,name'])
+                    ->orderBy('nama_kelas')
+                    ->get(['id', 'nama_kelas', 'kode_kelas', 'unit_pendidikan_id', 'tahun_ajaran_id', 'semester_id']),
+                'guru' => Employee::query()
+                    ->where('status', 'Aktif')
+                    ->orderBy('nama_lengkap')
+                    ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']),
+                'mata_pelajaran' => Subject::query()
+                    ->where(fn ($q) => $q->where('status', true)->orWhereNull('status'))
+                    ->orderByRaw('COALESCE(nama_mapel, name)')
+                    ->get(['id', 'nama_mapel', 'name', 'kode_mapel', 'code', 'unit_pendidikan_id']),
+                'tahun_ajaran' => AcademicYear::query()
+                    ->orderByDesc('start_date')
+                    ->get(['id', 'name', 'is_active']),
+                'semester' => Semester::query()
+                    ->with('academicYear:id,name')
+                    ->orderByDesc('start_date')
+                    ->get(['id', 'academic_year_id', 'name', 'is_active']),
+                'hari' => collect(ClassSchedule::DAY_NAMES)
+                    ->map(fn ($name, $id) => ['id' => $id, 'name' => $name])
+                    ->values(),
+            ],
         ]);
     }
 
@@ -101,6 +170,14 @@ class ScheduleController extends Controller
             ], 422);
         }
 
+        if (empty($validated['employee_id']) && empty($validated['teacher_id'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Guru pengampu wajib dipilih.',
+            ], 422);
+        }
+
+        $this->ensureNoConflict($validated);
         $validated['created_by'] = Auth::id();
 
         $schedule = ClassSchedule::create($validated);
@@ -141,14 +218,29 @@ class ScheduleController extends Controller
             'teacher_id'   => 'nullable|uuid|exists:teachers,id',
             'subject_id'   => 'sometimes|uuid|exists:subjects,id',
             'classroom_id' => 'nullable|uuid|exists:classrooms,id',
+            'academic_year_id' => 'sometimes|uuid|exists:academic_years,id',
+            'semester_id'  => 'sometimes|uuid|exists:semesters,id',
             'day_of_week'  => 'sometimes|integer|min:1|max:7',
             'time_start'   => 'sometimes|date_format:H:i',
-            'time_end'     => 'sometimes|date_format:H:i',
+            'time_end'     => 'sometimes|date_format:H:i|after:time_start',
             'week_type'    => 'nullable|string|in:all,odd,even',
             'is_active'    => 'nullable|boolean',
             'metadata'     => 'nullable|array',
         ]);
 
+        $merged = array_merge($schedule->only([
+            'kelas_id', 'class_id', 'employee_id', 'teacher_id', 'academic_year_id',
+            'semester_id', 'day_of_week', 'time_start', 'time_end',
+        ]), $validated);
+
+        if (empty($merged['employee_id']) && empty($merged['teacher_id'])) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Guru pengampu wajib dipilih.',
+            ], 422);
+        }
+
+        $this->ensureNoConflict($merged, $schedule->id);
         $validated['updated_by'] = Auth::id();
         $schedule->update($validated);
 
@@ -171,5 +263,36 @@ class ScheduleController extends Controller
         $schedule->delete();
 
         return response()->json(['status' => 'success', 'message' => 'Jadwal berhasil dihapus.']);
+    }
+
+    private function ensureNoConflict(array $data, ?string $ignoreId = null): void
+    {
+        $query = ClassSchedule::query()
+            ->where('academic_year_id', $data['academic_year_id'])
+            ->where('semester_id', $data['semester_id'])
+            ->where('day_of_week', $data['day_of_week'])
+            ->where('is_active', true)
+            ->where('time_start', '<', $data['time_end'])
+            ->where('time_end', '>', $data['time_start'])
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->where(function ($q) use ($data) {
+                if (!empty($data['employee_id'])) {
+                    $q->where('employee_id', $data['employee_id']);
+                } elseif (!empty($data['teacher_id'])) {
+                    $q->where('teacher_id', $data['teacher_id']);
+                }
+
+                if (!empty($data['kelas_id'])) {
+                    $q->orWhere('kelas_id', $data['kelas_id']);
+                } elseif (!empty($data['class_id'])) {
+                    $q->orWhere('class_id', $data['class_id']);
+                }
+            });
+
+        if ($query->exists()) {
+            throw ValidationException::withMessages([
+                'time_start' => 'Jadwal bentrok dengan jadwal aktif guru atau kelas pada hari dan jam yang sama.',
+            ]);
+        }
     }
 }

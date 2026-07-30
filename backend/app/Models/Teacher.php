@@ -13,6 +13,7 @@ class Teacher extends Model
 
     protected $fillable = [
         'user_id',
+        'employee_id',
         'employee_number',
         'full_name',
         'phone',
@@ -20,6 +21,16 @@ class Teacher extends Model
         'join_date',
         'metadata',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function employee()
+    {
+        return $this->belongsTo(Employee::class, 'employee_id');
+    }
 
     protected function casts(): array
     {

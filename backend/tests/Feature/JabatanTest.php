@@ -24,6 +24,8 @@ class JabatanTest extends TestCase
         $payload = [
             'kode_jabatan' => 'JBT-999',
             'nama_jabatan' => 'Bendahara Yayasan',
+            'satuan_kerja' => 'Pengurus',
+            'scope_akses' => 'semua_unit',
             'level_jabatan' => 2,
             'urutan' => 1,
             'warna' => '#3B82F6',
@@ -46,6 +48,36 @@ class JabatanTest extends TestCase
             'code' => 'JBT-999',
             'name' => 'Bendahara Yayasan',
             'description' => 'Bertanggung jawab atas pengelolaan keuangan yayasan',
+            'satuan_kerja' => 'Pengurus',
+            'scope_akses' => 'semua_unit',
         ]);
+    }
+
+    public function test_dapat_menambah_jabatan_baru_dengan_satuan_kerja_dan_scope(): void
+    {
+        $response = $this->actingAs($this->user)->postJson('/api/jabatan', [
+            'nama_jabatan' => 'Koordinator Laboratorium',
+            'satuan_kerja' => 'Unit Pendidikan',
+            'scope_akses' => 'unit_sendiri',
+            'level_jabatan' => 10,
+            'status' => 'Aktif',
+            'tampil_struktur' => true,
+            'boleh_login' => true,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.satuan_kerja', 'Unit Pendidikan')
+            ->assertJsonPath('data.scope_akses', 'unit_sendiri');
+    }
+
+    public function test_menolak_satuan_kerja_dan_scope_tidak_valid(): void
+    {
+        $this->actingAs($this->user)->postJson('/api/jabatan', [
+            'nama_jabatan' => 'Jabatan Tidak Valid',
+            'satuan_kerja' => 'Tidak Dikenal',
+            'scope_akses' => 'bebas',
+            'level_jabatan' => 10,
+        ])->assertUnprocessable()
+            ->assertJsonValidationErrors(['satuan_kerja', 'scope_akses']);
     }
 }

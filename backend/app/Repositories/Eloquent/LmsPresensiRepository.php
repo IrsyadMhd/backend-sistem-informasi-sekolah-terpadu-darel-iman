@@ -68,6 +68,14 @@ class LmsPresensiRepository implements LmsPresensiRepositoryInterface
             });
         }
 
+        if (!empty($filters['employee_id'])) {
+            $query->whereHas('jadwalPelajaran', fn ($q) => $q->where('employee_id', $filters['employee_id']));
+        }
+
+        if (!empty($filters['class_ids'])) {
+            $query->whereHas('jadwalPelajaran', fn ($q) => $q->whereIn('kelas_id', $filters['class_ids']));
+        }
+
         return $query->orderBy($orderBy, $orderDir)->paginate($perPage);
     }
 

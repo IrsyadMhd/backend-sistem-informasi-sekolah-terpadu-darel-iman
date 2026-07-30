@@ -27,6 +27,7 @@ export default function MasterJabatanPage() {
   // Filter & Pagination States
   const [search, setSearch] = useState('')
   const [selectedUnitFilter, setSelectedUnitFilter] = useState('')
+  const [selectedSatuanKerjaFilter, setSelectedSatuanKerjaFilter] = useState('')
   const [selectedLevelFilter, setSelectedLevelFilter] = useState('')
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('')
   const [denganSampahFilter, setDenganSampahFilter] = useState('')
@@ -62,6 +63,7 @@ export default function MasterJabatanPage() {
       perPage,
       search,
       selectedUnitFilter,
+      selectedSatuanKerjaFilter,
       selectedLevelFilter,
       selectedStatusFilter,
       denganSampahFilter,
@@ -72,6 +74,7 @@ export default function MasterJabatanPage() {
         per_page: perPage,
         search,
         unit_sekolah_id: selectedUnitFilter,
+        satuan_kerja: selectedSatuanKerjaFilter,
         level_jabatan: selectedLevelFilter,
         status: selectedStatusFilter,
         dengan_sampah: denganSampahFilter,
@@ -229,6 +232,7 @@ export default function MasterJabatanPage() {
       const dataEkspor = await jabatanService.ekspor({
         search,
         unit_sekolah_id: selectedUnitFilter,
+        satuan_kerja: selectedSatuanKerjaFilter,
         level_jabatan: selectedLevelFilter,
         status: selectedStatusFilter,
       })
@@ -241,6 +245,7 @@ export default function MasterJabatanPage() {
       const headers = [
         'Kode Jabatan',
         'Nama Jabatan',
+        'Satuan Kerja',
         'Level',
         'Level Label',
         'Unit Sekolah',
@@ -260,6 +265,7 @@ export default function MasterJabatanPage() {
           [
             `"${row.kode_jabatan || ''}"`,
             `"${row.nama_jabatan || ''}"`,
+            `"${row.satuan_kerja || ''}"`,
             row.level_jabatan || '',
             `"${row.level_label || ''}"`,
             `"${row.unit_sekolah || ''}"`,
@@ -304,7 +310,7 @@ export default function MasterJabatanPage() {
           <div>
             <h1 className="text-2xl font-black tracking-tight text-slate-800">Master Jabatan</h1>
             <p className="mt-1 text-xs text-slate-500">
-              Kelola 14 level hirarki jabatan, visibilitas bagan struktur organisasi, dan hak akses login pegawai.
+              Kelola jabatan, satuan kerja, cakupan akses, struktur organisasi, dan role sistem pegawai.
             </p>
           </div>
 
@@ -380,7 +386,7 @@ export default function MasterJabatanPage() {
       </section>
 
       <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm" aria-label="Pencarian dan filter">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
         <div className="relative lg:col-span-2">
           <FaSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
           <label htmlFor="cari-jabatan" className="sr-only">Cari jabatan</label>
@@ -397,7 +403,22 @@ export default function MasterJabatanPage() {
           />
         </div>
 
-          <select
+	          <select
+	            aria-label="Filter satuan kerja"
+	            value={selectedSatuanKerjaFilter}
+	            onChange={(e) => {
+	              setSelectedSatuanKerjaFilter(e.target.value)
+	              setPage(1)
+	            }}
+	            className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-emerald-600"
+	          >
+	            <option value="">Semua Satuan Kerja</option>
+	            {(options.satuan_kerja || []).map((item) => (
+	              <option key={item.value} value={item.value}>{item.label}</option>
+	            ))}
+	          </select>
+
+	          <select
             aria-label="Filter level jabatan"
             value={selectedLevelFilter}
             onChange={(e) => {
@@ -444,7 +465,7 @@ export default function MasterJabatanPage() {
             <option value="Aktif">Status Aktif</option>
             <option value="Nonaktif">Status Nonaktif</option>
           </select>
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 md:col-span-2 lg:col-span-4">
+	        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-4 text-xs text-slate-500 md:col-span-2 lg:col-span-5">
           <div className="flex items-center space-x-4">
             <label className="flex items-center space-x-1.5 cursor-pointer">
               <input
@@ -460,11 +481,12 @@ export default function MasterJabatanPage() {
             </label>
           </div>
 
-          {(search || selectedUnitFilter || selectedLevelFilter || selectedStatusFilter || denganSampahFilter) && (
+	          {(search || selectedUnitFilter || selectedSatuanKerjaFilter || selectedLevelFilter || selectedStatusFilter || denganSampahFilter) && (
             <button
               onClick={() => {
                 setSearch('')
-                setSelectedUnitFilter('')
+	                setSelectedUnitFilter('')
+	                setSelectedSatuanKerjaFilter('')
                 setSelectedLevelFilter('')
                 setSelectedStatusFilter('')
                 setDenganSampahFilter('')

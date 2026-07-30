@@ -31,14 +31,31 @@ class Position extends Model
         14 => 'Cleaning Service',
     ];
 
+    public const SATUAN_KERJA_OPTIONS = [
+        'Pengurus' => 'Pengurus',
+        'Bidang Pendidikan' => 'Bidang Pendidikan',
+        'Unit Pendidikan' => 'Unit Pendidikan',
+    ];
+
+    public const SCOPE_AKSES_OPTIONS = [
+        'semua_unit' => 'Semua Unit',
+        'bidang_pendidikan' => 'Bidang Pendidikan',
+        'unit_sendiri' => 'Unit Pendidikan Sendiri',
+        'rombel_sendiri' => 'Rombel Sendiri',
+        'kelas_mapel_sendiri' => 'Kelas & Mata Pelajaran Sendiri',
+        'siswa_binaan' => 'Siswa Binaan',
+    ];
+
     protected $fillable = [
         'code',
         'name',
+        'satuan_kerja',
         'unit_sekolah_id',
         'level_jabatan',
         'atasan_langsung_id',
         'atasan_pegawai_id',
         'role_sistem_id',
+        'scope_akses',
         'urutan',
         'warna',
         'ikon',
@@ -65,19 +82,13 @@ class Position extends Model
      */
     public static function generateKode(): string
     {
-        $last = static::withTrashed()
+        $lastNumber = static::withTrashed()
             ->where('code', 'LIKE', 'JBT-%')
-            ->orderByRaw("CAST(SUBSTRING(code FROM '[0-9]+') AS INTEGER) DESC")
-            ->first();
+            ->pluck('code')
+            ->map(fn (string $code) => (int) preg_replace('/[^0-9]/', '', $code))
+            ->max() ?? 0;
 
-        if (!$last) {
-            return 'JBT-001';
-        }
-
-        $num = (int) preg_replace('/[^0-9]/', '', $last->code);
-        $next = $num + 1;
-
-        return 'JBT-' . str_pad($next, 3, '0', STR_PAD_LEFT);
+        return 'JBT-' . str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
     }
 
     // Accessor level label
@@ -153,6 +164,10 @@ class Position extends Model
 
         $query->when($filters['unit_sekolah_id'] ?? null, function ($q, $unitId) {
             $q->where('unit_sekolah_id', $unitId);
+        });
+
+        $query->when($filters['satuan_kerja'] ?? null, function ($q, $satuanKerja) {
+            $q->where('satuan_kerja', $satuanKerja);
         });
 
         $query->when($filters['level_jabatan'] ?? null, function ($q, $level) {

@@ -62,7 +62,7 @@ export default function JabatanTable({
           <tr className="border-b border-slate-200/80 bg-slate-50/80 text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">
             <th className="py-3.5 px-4 w-12 text-center">NO</th>
             <th className="py-3.5 px-4">KODE & NAMA JABATAN</th>
-            <th className="py-3.5 px-4">LEVEL & UNIT SEKOLAH</th>
+            <th className="py-3.5 px-4">SATUAN KERJA & LEVEL</th>
             <th className="py-3.5 px-4">ATASAN LANGSUNG</th>
             <th className="py-3.5 px-4 text-center">STRUKTUR & LOGIN</th>
             <th className="py-3.5 px-4 text-center">STATUS</th>
@@ -111,16 +111,17 @@ export default function JabatanTable({
                 {/* Level & Unit Sekolah */}
                 <td className="py-3.5 px-4">
                   <div className="space-y-1">
-                    <span className="inline-block px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
-                      Level {item.level_jabatan}: {item.level_label}
-                    </span>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+	                    <span className="inline-block px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+	                      Level {item.level_jabatan}: {item.level_label}
+	                    </span>
+	                    <p className="text-xs font-bold text-emerald-800">{item.satuan_kerja || 'Belum ditentukan'}</p>
+	                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       {item.unit_sekolah ? (
                         <span className="font-medium text-slate-700">
                           {item.unit_sekolah.nama} ({item.unit_sekolah.kode})
                         </span>
                       ) : (
-                        <span className="italic text-slate-400">Seluruh Unit / Yayasan</span>
+	                        <span className="italic text-slate-400">{item.scope_akses_label || 'Cakupan belum ditentukan'}</span>
                       )}
                     </p>
                   </div>

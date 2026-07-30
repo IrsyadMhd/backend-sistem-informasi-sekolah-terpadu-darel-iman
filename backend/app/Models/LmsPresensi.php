@@ -16,15 +16,20 @@ class LmsPresensi extends Model
 
     protected $fillable = [
         'jadwal_pelajaran_id',
+        'session_id',
         'siswa_id',
         'tanggal',
         'status_hadir',
         'keterangan',
         'pertemuan_ke',
         'waktu_presensi',
+        'arrival_time',
+        'verification_status',
         'created_by',
         'updated_by',
         'deleted_by',
+        'recorded_method', 'recorded_at', 'recorded_by', 'scan_log_id',
+        'confidence_score', 'device_identifier', 'capture_metadata',
     ];
 
     protected $appends = ['status_label', 'status_badge_color'];
@@ -35,6 +40,9 @@ class LmsPresensi extends Model
             'tanggal' => 'date:Y-m-d',
             'pertemuan_ke' => 'integer',
             'waktu_presensi' => 'datetime',
+            'recorded_at' => 'datetime',
+            'confidence_score' => 'decimal:2',
+            'capture_metadata' => 'array',
         ];
     }
 
@@ -54,6 +62,11 @@ class LmsPresensi extends Model
     public function siswa(): BelongsTo
     {
         return $this->belongsTo(Student::class, 'siswa_id');
+    }
+
+    public function session(): BelongsTo
+    {
+        return $this->belongsTo(LessonAttendanceSession::class, 'session_id');
     }
 
     // --- Accessors ---

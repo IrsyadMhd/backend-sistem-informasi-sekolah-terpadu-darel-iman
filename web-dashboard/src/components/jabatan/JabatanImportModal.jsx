@@ -59,7 +59,9 @@ export default function JabatanImportModal({ isOpen, onClose, onImport, isSubmit
     const sampleData = [
       {
         kode_jabatan: 'JBT-101',
-        nama_jabatan: 'Koordinator Ekstrakurikuler',
+	        nama_jabatan: 'Koordinator Ekstrakurikuler',
+	        satuan_kerja: 'Unit Pendidikan',
+	        scope_akses: 'siswa_binaan',
         level_jabatan: 5,
         urutan: 15,
         warna: '#3B82F6',

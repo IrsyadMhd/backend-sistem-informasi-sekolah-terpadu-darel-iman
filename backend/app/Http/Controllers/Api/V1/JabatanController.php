@@ -25,6 +25,7 @@ class JabatanController extends Controller
         $filters = [
             'search' => $request->query('search'),
             'unit_sekolah_id' => $request->query('unit_sekolah_id') ?? $request->query('unit_id'),
+            'satuan_kerja' => $request->query('satuan_kerja'),
             'level_jabatan' => $request->query('level_jabatan'),
             'status' => $request->query('status'),
             'dengan_sampah' => $request->query('dengan_sampah'),
@@ -201,6 +202,7 @@ class JabatanController extends Controller
         $filters = [
             'search' => $request->query('search'),
             'unit_sekolah_id' => $request->query('unit_sekolah_id') ?? $request->query('unit_id'),
+            'satuan_kerja' => $request->query('satuan_kerja'),
             'level_jabatan' => $request->query('level_jabatan'),
             'status' => $request->query('status'),
         ];

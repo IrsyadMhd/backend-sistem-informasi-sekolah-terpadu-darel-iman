@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\IndexRequest;
 use App\Http\Requests\V1\StoreStudentRequest;
+use App\Models\Employee;
 use App\Models\SchoolClass;
 use App\Models\Student;
 use App\Repositories\Contracts\StudentRepositoryInterface;
@@ -65,47 +66,94 @@ class StudentController extends Controller
 
     public function dashboard(Request $request): JsonResponse
     {
-        $students = Student::query()
+        $user = $request->user();
+        $employee = $user ? Employee::query()
+            ->with([
+                'position:id,name,scope_akses',
+                'unit:id,name',
+            ])
+            ->where('user_id', $user->id)
+            ->first() : null;
+        $bolehSemuaUnit = $user?->hasAnyRole(['Super Admin', 'Yayasan']) === true
+            || $employee?->position?->scope_akses === 'semua_unit'
+            || str_contains(strtolower((string) $employee?->position?->name), 'yayasan');
+        $unitPengguna = $employee?->unit_id
+            ?? data_get($user?->metadata, 'unit_id')
+            ?? data_get($user?->metadata, 'unit_pendidikan_id');
+
+        $studentQuery = Student::query()
+            ->with([
+                'educationUnit:id,name,level',
+                'schoolClass:id,name,level',
+            ]);
+
+        if (! $bolehSemuaUnit) {
+            // Role unit hanya boleh membaca siswa pada unit kerjanya sendiri.
+            // Jika akun belum dipetakan ke unit, hasil sengaja dikosongkan agar
+            // data lintas unit tidak bocor.
+            $studentQuery->when(
+                $unitPengguna,
+                fn ($query, $unitId) => $query->where('unit_id', $unitId),
+                fn ($query) => $query->whereRaw('1 = 0')
+            );
+        }
+
+        $students = $studentQuery
             ->orderBy('full_name')
-            ->limit(8)
             ->get([
                 'id',
                 'nis',
                 'full_name',
                 'class_id',
+                'unit_id',
                 'gender',
                 'birth_place',
                 'birth_date',
                 'address',
                 'is_active',
                 'metadata',
+                'created_at',
             ]);
 
+        $classIds = $students->pluck('class_id')->filter()->unique()->values();
         $classes = SchoolClass::query()
+            ->when(! $bolehSemuaUnit, fn ($query) => $query->whereIn('id', $classIds))
             ->orderBy('name')
-            ->limit(8)
             ->get(['id', 'name', 'level', 'metadata']);
 
-        $totalSiswa = Student::query()->count();
-        $totalKelas = SchoolClass::query()->count();
-        $siswaBaru = Student::query()->whereDate('created_at', '>=', now()->startOfYear())->count();
-        $mutasiKeluar = Student::query()->where('is_active', false)->count();
-        $alumni = Student::query()
-            ->where('is_active', false)
-            ->where(function ($query) {
-                $query->where('metadata->status', 'alumni')
-                    ->orWhere('metadata->status', 'lulus');
-            })
-            ->count();
+        $totalSiswa = $students->count();
+        $totalKelas = $classes->count();
+        $siswaBaru = $students->where('created_at', '>=', now()->startOfYear())->count();
+        $mutasiKeluar = $students->where('is_active', false)->count();
+        $alumni = $students->filter(fn (Student $student) => in_array(
+            strtolower((string) data_get($student->metadata, 'status')),
+            ['alumni', 'lulus'],
+            true
+        ))->count();
 
         $selected = $students->first();
+        $siswaAktif = $students->where('is_active', true)->count();
+        $siswaNonaktif = $students->where('is_active', false)->count();
+        $lakiLaki = $students->filter(fn (Student $student) => in_array(
+            strtolower((string) $student->gender),
+            ['l', 'laki-laki', 'laki laki', 'male'],
+            true
+        ))->count();
+        $perempuan = $students->filter(fn (Student $student) => in_array(
+            strtolower((string) $student->gender),
+            ['p', 'perempuan', 'female'],
+            true
+        ))->count();
 
         $daftarSiswa = $students->map(function (Student $student) {
             return [
                 'id' => $student->id,
                 'nis' => $student->nis,
                 'nama' => $student->full_name,
-                'kelas' => $student->metadata['kelas_label'] ?? '-',
+                'unit' => $student->educationUnit?->name ?? ($student->metadata['unit_pendidikan'] ?? '-'),
+                'jenjang' => $student->educationUnit?->level ?? $student->schoolClass?->level ?? '-',
+                'kelas' => $student->metadata['kelas_label'] ?? $student->schoolClass?->name ?? '-',
+                'jenis_kelamin' => $student->gender,
                 'aktif' => (bool) $student->is_active,
             ];
         })->values();
@@ -134,12 +182,23 @@ class StudentController extends Controller
         }
 
         return response()->json([
+            'akses' => [
+                'semua_unit' => $bolehSemuaUnit,
+                'unit_id' => $bolehSemuaUnit ? null : $unitPengguna,
+                'unit_nama' => $bolehSemuaUnit ? 'Seluruh Unit Pendidikan' : ($employee?->unit?->name ?? null),
+            ],
             'statistik' => [
                 'total_siswa' => $totalSiswa,
                 'total_kelas' => $totalKelas,
                 'siswa_baru' => $siswaBaru,
                 'mutasi_keluar' => $mutasiKeluar,
                 'alumni' => $alumni,
+                'siswa_aktif' => $siswaAktif,
+                'siswa_nonaktif' => $siswaNonaktif,
+            ],
+            'komposisi_gender' => [
+                'laki_laki' => $lakiLaki,
+                'perempuan' => $perempuan,
             ],
             'daftar_siswa' => $daftarSiswa,
             'siswa_terpilih' => $selected ? [

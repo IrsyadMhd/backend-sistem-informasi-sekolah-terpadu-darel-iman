@@ -363,7 +363,7 @@ class HakAksesController extends Controller
             'role_name'     => ['required', 'string', 'exists:roles,name'],
             'permissions'   => ['nullable', 'array'],
             'permissions.*' => ['string', 'exists:permissions,name'],
-            'password'      => ['nullable', 'string', 'min:6'],
+            'password'      => ['nullable', 'string', \Illuminate\Validation\Rules\Password::min(8)->mixedCase()->letters()->numbers()->symbols()],
         ]);
 
         $employee = Employee::findOrFail($employeeId);
@@ -377,9 +377,10 @@ class HakAksesController extends Controller
                     $user = User::create([
                         'name'      => $employee->nama_lengkap,
                         'email'     => $email,
-                        'password'  => bcrypt($validated['password'] ?? '12345678'),
+                        'password'  => $validated['password'] ?? 'AkunBaru@2026!',
                         'phone'     => $employee->no_hp,
                         'is_active' => true,
+                        'metadata'  => ['must_change_password' => true, 'created_by' => 'employee_access_module'],
                     ]);
 
                     $employee->user_id = $user->id;
@@ -411,4 +412,3 @@ class HakAksesController extends Controller
         }
     }
 }
-

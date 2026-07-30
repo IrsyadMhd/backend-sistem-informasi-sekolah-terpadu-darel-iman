@@ -2,7 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\User;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -22,20 +21,9 @@ class DatabaseSeeder extends Seeder
     {
         $this->call([
             RolePermissionSeeder::class,
+            AttendancePermissionSeeder::class,
+            DefaultRoleUserSeeder::class,
         ]);
-
-        $superAdmin = User::query()->updateOrCreate([
-            'email' => 'superadmin@school-erp.local',
-        ], [
-            'name' => 'Super Admin',
-            'password' => 'Password123!',
-            'is_active' => true,
-            'metadata' => [
-                'created_by' => 'system_seeder',
-            ],
-        ]);
-
-        $superAdmin->assignRole('Super Admin');
 
         $this->call([
             MasterJenisUnitPendidikanSeeder::class,
@@ -48,6 +36,7 @@ class DatabaseSeeder extends Seeder
             MasterKurikulumSeeder::class,
             SubjectSeeder::class,
             KelasSeeder::class,
+            JadwalPelajaranSeeder::class,
             ModulSemesterSeeder::class,
             ModulAjarSeeder::class,
             LmsReferensiSeeder::class,
@@ -57,6 +46,7 @@ class DatabaseSeeder extends Seeder
             LmsPenugasanSeeder::class,
             LmsPengumpulanTugasSeeder::class,
             LmsPresensiSeeder::class,
+            PresensiPembelajaranSeeder::class,
             LmsBankSoalSeeder::class,
             LmsUjianSeeder::class,
             LmsPenilaianSeeder::class,

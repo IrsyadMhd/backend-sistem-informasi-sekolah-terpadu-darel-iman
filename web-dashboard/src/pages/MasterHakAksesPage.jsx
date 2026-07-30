@@ -23,6 +23,7 @@ import {
   FaLayerGroup,
 } from 'react-icons/fa'
 import { hakAksesService } from '../services/hakAksesService'
+import UserAccountManagement from '../components/auth/UserAccountManagement'
 
 // ─────────────────────────────────────────────────────────────────
 // MODAL ROLE FORM
@@ -396,7 +397,7 @@ function PegawaiRoleModal({ isOpen, onClose, onSubmit, employee = null, availabl
 export default function MasterHakAksesPage() {
   const queryClient = useQueryClient()
 
-  const [activeTab, setActiveTab] = useState('roles') // 'roles' | 'permissions' | 'pegawai'
+  const [activeTab, setActiveTab] = useState('roles')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
 
@@ -594,6 +595,13 @@ export default function MasterHakAksesPage() {
       count: metaPegawai.total ?? '—',
       search: 'Cari nama, NIY, atau email pegawai...',
     },
+    akun: {
+      label: 'Akun login',
+      description: 'CRUD akun, role, status, dan password',
+      icon: FaUserCog,
+      count: '—',
+      search: 'Pencarian tersedia pada tabel akun...',
+    },
   }
 
   const activeTabConfig = tabConfig[activeTab]
@@ -680,7 +688,7 @@ export default function MasterHakAksesPage() {
       </section>
 
       {/* ───── Content toolbar ───── */}
-      <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+      {activeTab !== 'akun' && <section className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <ActiveTabIcon className="h-4 w-4 text-emerald-700" />
@@ -706,7 +714,7 @@ export default function MasterHakAksesPage() {
             )}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* ───── TAB: ROLES ───── */}
       {activeTab === 'roles' && (
@@ -951,6 +959,10 @@ export default function MasterHakAksesPage() {
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === 'akun' && (
+        <UserAccountManagement roles={availableRoleNames} />
       )}
 
       {/* ───── Modals ───── */}

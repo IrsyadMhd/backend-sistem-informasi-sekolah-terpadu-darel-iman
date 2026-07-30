@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\Auth\AuthController;
 use App\Http\Controllers\Api\V1\AttendanceController;
+use App\Http\Controllers\Api\V1\AttendanceWorkflowController;
+use App\Http\Controllers\Api\V1\AttendanceCaptureController;
 use App\Http\Controllers\Api\V1\ClassController;
 use App\Http\Controllers\Api\V1\DashboardPemantauanController;
 use App\Http\Controllers\Api\V1\DashboardController;
@@ -36,9 +38,11 @@ use App\Http\Controllers\Api\V1\TahfizhController;
 use App\Http\Controllers\Api\V1\TahunAjaranController;
 use App\Http\Controllers\Api\V1\TeacherController;
 use App\Http\Controllers\Api\V1\TujuanPembelajaranController;
+use App\Http\Controllers\Api\V1\UserAccountController;
 use App\Http\Controllers\Api\V1\CapaianPembelajaranController;
 use App\Http\Controllers\Api\V1\LmsRaporController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
+use App\Http\Controllers\Api\V1\MutabaahController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/site-settings', [SiteSettingController::class, 'show']);
@@ -53,7 +57,18 @@ Route::prefix('auth')->group(function () {
 });
 
 Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/site-settings', [SiteSettingController::class, 'update']);
+    Route::prefix('mutabaah')->group(function () {
+        Route::get('/options', [MutabaahController::class, 'options']);
+        Route::get('/agendas', [MutabaahController::class, 'agendas']);
+        Route::post('/agendas', [MutabaahController::class, 'storeAgenda']);
+        Route::put('/agendas/{agenda}', [MutabaahController::class, 'updateAgenda']);
+        Route::delete('/agendas/{agenda}', [MutabaahController::class, 'destroyAgenda']);
+        Route::get('/daily', [MutabaahController::class, 'daily']);
+        Route::post('/daily', [MutabaahController::class, 'saveDaily']);
+        Route::get('/history', [MutabaahController::class, 'history']);
+    });
+    Route::post('/site-settings', [SiteSettingController::class, 'update'])
+        ->middleware('can:sistem.pengaturan');
     Route::get('/dashboard', [DashboardPemantauanController::class, 'ringkasan']);
     Route::get('/dashboard-v1', DashboardController::class);
 
@@ -178,7 +193,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Rute Master Hak Akses (Role & Permission — Spatie)
-    Route::prefix('hak-akses')->group(function () {
+    Route::prefix('hak-akses')->middleware('can:sistem.hak_akses')->group(function () {
         Route::get('/stats', [HakAksesController::class, 'stats']);
 
         // Role CRUD
@@ -196,6 +211,14 @@ Route::middleware('auth:sanctum')->group(function () {
         // Pegawai Hak Akses (Menarik Data Pegawai)
         Route::get('/pegawai', [HakAksesController::class, 'indexPegawaiHakAkses']);
         Route::post('/pegawai/{id}/assign-role', [HakAksesController::class, 'assignPegawaiRole']);
+
+        // CRUD akun login dan reset password
+        Route::get('/users', [UserAccountController::class, 'index']);
+        Route::post('/users', [UserAccountController::class, 'store']);
+        Route::get('/users/{user}', [UserAccountController::class, 'show']);
+        Route::put('/users/{user}', [UserAccountController::class, 'update']);
+        Route::put('/users/{user}/password', [UserAccountController::class, 'resetPassword']);
+        Route::delete('/users/{user}', [UserAccountController::class, 'destroy']);
     });
 
     Route::get('/attendance/stats', [AttendanceController::class, 'stats']);
@@ -203,6 +226,83 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/attendance/checkout', [AttendanceController::class, 'absenPulang']);
     Route::get('/attendance/report', [AttendanceController::class, 'rekapKehadiran']);
     Route::apiResource('attendance', AttendanceController::class);
+
+    // Presensi pembelajaran berbasis jadwal (route lama /lms/presensi tetap dipertahankan).
+    Route::prefix('lesson-attendance')->group(function () {
+        Route::get('/active-schedules', [AttendanceWorkflowController::class, 'activeSchedules']);
+        Route::get('/my-schedules', [AttendanceWorkflowController::class, 'schedules']);
+        Route::get('/my-schedules/{schedule}/students', [AttendanceWorkflowController::class, 'scheduleStudents']);
+        Route::get('/sessions', [AttendanceWorkflowController::class, 'sessions']);
+        Route::post('/sessions', [AttendanceWorkflowController::class, 'storeSession']);
+        Route::get('/sessions/{session}', [AttendanceWorkflowController::class, 'showSession']);
+        Route::post('/sessions/{session}/finalize', [AttendanceWorkflowController::class, 'finalize']);
+        Route::post('/sessions/{session}/unlock', [AttendanceWorkflowController::class, 'unlock']);
+        Route::post('/sessions/{session}/cancel', [AttendanceWorkflowController::class, 'cancelSession']);
+        Route::get('/corrections', [AttendanceWorkflowController::class, 'corrections']);
+        Route::post('/corrections', [AttendanceWorkflowController::class, 'correction']);
+        Route::post('/corrections/{correction}/review', [AttendanceWorkflowController::class, 'reviewCorrection']);
+        Route::post('/corrections/{correction}/cancel', [AttendanceWorkflowController::class, 'cancelCorrection']);
+        Route::get('/report', [AttendanceWorkflowController::class, 'report']);
+        Route::post('/sessions/{session}/start-session', [AttendanceCaptureController::class, 'start']);
+        Route::post('/sessions/{session}/close-session', [AttendanceCaptureController::class, 'close']);
+        Route::post('/sessions/{session}/manual-check', [AttendanceCaptureController::class, 'manual']);
+        Route::post('/sessions/{session}/scan/{method}', [AttendanceCaptureController::class, 'scan'])->whereIn('method', ['qr','barcode','face']);
+        Route::get('/sessions/{session}/scan-logs', [AttendanceCaptureController::class, 'logs']);
+        Route::get('/students/{student}/qr-token', [AttendanceCaptureController::class, 'studentToken']);
+    });
+    Route::get('/student-attendance/me', [AttendanceWorkflowController::class, 'myAttendance']);
+    Route::match(['get','post'], '/student-attendance/permissions', [AttendanceWorkflowController::class, 'permissions']);
+    Route::put('/student-attendance/permissions/{permission}', [AttendanceWorkflowController::class, 'updatePermission']);
+    Route::post('/student-attendance/permissions/{permission}/submit', [AttendanceWorkflowController::class, 'submitPermission']);
+    Route::post('/student-attendance/permissions/{permission}/cancel', [AttendanceWorkflowController::class, 'cancelPermission']);
+    Route::get('/homeroom-attendance/permissions', [AttendanceWorkflowController::class, 'homeroomPermissions']);
+    Route::post('/homeroom-attendance/permissions/{permission}/review', [AttendanceWorkflowController::class, 'reviewPermission']);
+    Route::get('/homeroom-attendance/dashboard', [AttendanceWorkflowController::class, 'homeroomDashboard']);
+    Route::match(['get','post'], '/homeroom-attendance/follow-ups', [AttendanceWorkflowController::class, 'followUps']);
+    Route::put('/homeroom-attendance/follow-ups/{followUp}', [AttendanceWorkflowController::class, 'updateFollowUp']);
+    Route::post('/homeroom-attendance/follow-ups/{followUp}/complete', [AttendanceWorkflowController::class, 'completeFollowUp']);
+    Route::post('/homeroom-attendance/follow-ups/{followUp}/close', [AttendanceWorkflowController::class, 'closeFollowUp']);
+
+    Route::post('/attendance/devices/heartbeat', [AttendanceCaptureController::class, 'heartbeat'])->withoutMiddleware('auth:sanctum');
+    Route::post('/attendance/devices/events/fingerprint', [AttendanceCaptureController::class, 'fingerprint'])->withoutMiddleware('auth:sanctum');
+
+    // URL publik API Modul Absensi; route lama tetap aktif untuk kompatibilitas.
+    Route::get('/attendance/teacher/dashboard', [AttendanceWorkflowController::class, 'teacherDashboard']);
+    Route::get('/attendance/homeroom/dashboard', [AttendanceWorkflowController::class, 'homeroomDashboard']);
+    Route::get('/attendance/student/me', [AttendanceWorkflowController::class, 'myAttendance']);
+    Route::get('/attendance/teacher/schedules', [AttendanceWorkflowController::class, 'schedules']);
+    Route::get('/attendance/schedules/{schedule}/students', [AttendanceWorkflowController::class, 'scheduleStudents']);
+
+    Route::get('/lesson-attendances', [AttendanceWorkflowController::class, 'sessions']);
+    Route::post('/lesson-attendances', [AttendanceWorkflowController::class, 'storeSession']);
+    Route::get('/lesson-attendances/{session}', [AttendanceWorkflowController::class, 'showSession']);
+    Route::put('/lesson-attendances/{session}', [AttendanceWorkflowController::class, 'updateSession']);
+    Route::post('/lesson-attendances/{session}/finalize', [AttendanceWorkflowController::class, 'finalize']);
+    Route::post('/lesson-attendances/{session}/unlock', [AttendanceWorkflowController::class, 'unlock']);
+    Route::post('/lesson-attendances/{session}/cancel', [AttendanceWorkflowController::class, 'cancelSession']);
+
+    Route::get('/attendance-permissions', [AttendanceWorkflowController::class, 'permissionIndex']);
+    Route::post('/attendance-permissions', [AttendanceWorkflowController::class, 'permissionCreate']);
+    Route::get('/attendance-permissions/{permission}', [AttendanceWorkflowController::class, 'showPermission']);
+    Route::put('/attendance-permissions/{permission}', [AttendanceWorkflowController::class, 'updatePermission']);
+    Route::post('/attendance-permissions/{permission}/submit', [AttendanceWorkflowController::class, 'submitPermission']);
+    Route::post('/attendance-permissions/{permission}/{action}', [AttendanceWorkflowController::class, 'permissionReviewAction'])->whereIn('action', ['approve','reject','revision']);
+    Route::post('/attendance-permissions/{permission}/cancel', [AttendanceWorkflowController::class, 'cancelPermission']);
+
+    Route::get('/attendance-corrections', [AttendanceWorkflowController::class, 'corrections']);
+    Route::post('/attendance-corrections', [AttendanceWorkflowController::class, 'correction']);
+    Route::get('/attendance-corrections/{correction}', [AttendanceWorkflowController::class, 'showCorrection']);
+    Route::post('/attendance-corrections/{correction}/{action}', [AttendanceWorkflowController::class, 'correctionReviewAction'])->whereIn('action', ['approve','reject']);
+    Route::post('/attendance-corrections/{correction}/cancel', [AttendanceWorkflowController::class, 'cancelCorrection']);
+
+    Route::get('/attendance-follow-ups', [AttendanceWorkflowController::class, 'followUps']);
+    Route::post('/attendance-follow-ups', [AttendanceWorkflowController::class, 'followUps']);
+    Route::get('/attendance-follow-ups/{followUp}', [AttendanceWorkflowController::class, 'showFollowUp']);
+    Route::put('/attendance-follow-ups/{followUp}', [AttendanceWorkflowController::class, 'updateFollowUp']);
+    Route::post('/attendance-follow-ups/{followUp}/complete', [AttendanceWorkflowController::class, 'completeFollowUp']);
+    Route::post('/attendance-follow-ups/{followUp}/close', [AttendanceWorkflowController::class, 'closeFollowUp']);
+    Route::get('/attendance/reports/summary', [AttendanceWorkflowController::class, 'report']);
+    Route::get('/attendance/reports/export', [AttendanceWorkflowController::class, 'report']);
 
     Route::post('/tahfizh/store', [TahfizhController::class, 'inputSetoran']);
     Route::get('/tahfizh/report', [TahfizhController::class, 'rekapTahfizh']);
@@ -226,6 +326,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('divisions', DivisionController::class)->except(['create', 'edit']);
 
     // Jadwal Pelajaran
+    Route::get('/schedules-options', [ScheduleController::class, 'options']);
     Route::apiResource('schedules', ScheduleController::class)->except(['create', 'edit']);
 
     // Nilai Siswa / Raport

@@ -18,6 +18,8 @@ const LaporanTahfizhPage = lazy(() => import('../pages/LaporanTahfizhPage'))
 const LaporanAkademikPage = lazy(() => import('../pages/LaporanAkademikPage'))
 const LaporanSiswaPage = lazy(() => import('../pages/LaporanSiswaPage'))
 const LaporanAlumniPage = lazy(() => import('../pages/LaporanAlumniPage'))
+const LaporanPegawaiPage = lazy(() => import('../pages/LaporanPegawaiPage'))
+const LaporanLmsPage = lazy(() => import('../pages/LaporanLmsPage'))
 const ParentsPage = lazy(() => import('../pages/ParentsPage'))
 const UserProfileManagementPage = lazy(() => import('../pages/UserProfileManagementPage'))
 const EmployeesPage = lazy(() => import('../pages/EmployeesPage'))
@@ -29,6 +31,7 @@ const MasterTahunAjaranPage = lazy(() => import('../pages/MasterTahunAjaranPage'
 const MasterModulSemesterPage = lazy(() => import('../pages/MasterModulSemesterPage'))
 const MasterKurikulumPage = lazy(() => import('../pages/MasterKurikulumPage'))
 const MasterSubjectPage = lazy(() => import('../pages/MasterSubjectPage'))
+const MasterSchedulePage = lazy(() => import('../pages/MasterSchedulePage'))
 const MasterCapaianPembelajaranPage = lazy(() => import('../pages/MasterCapaianPembelajaranPage'))
 const MasterTujuanPembelajaranPage = lazy(() => import('../pages/MasterTujuanPembelajaranPage'))
 const LmsModulAjarPage = lazy(() => import('../pages/LmsModulAjarPage'))
@@ -39,7 +42,7 @@ const LmsAktivitasBelajarPage = lazy(() => import('../pages/LmsAktivitasBelajarP
 const LmsDiskusiPage = lazy(() => import('../pages/LmsDiskusiPage'))
 const LmsPenugasanPage = lazy(() => import('../pages/LmsPenugasanPage'))
 const LmsPengumpulanTugasPage = lazy(() => import('../pages/LmsPengumpulanTugasPage'))
-const LmsPresensiPage = lazy(() => import('../pages/LmsPresensiPage'))
+const AttendanceWorkspacePage = lazy(() => import('../pages/AttendanceWorkspacePage'))
 const LmsKisiKisiPage = lazy(() => import('../pages/LmsKisiKisiPage'))
 const LmsBankSoalPage = lazy(() => import('../pages/LmsBankSoalPage'))
 const LmsUjianPage = lazy(() => import('../pages/LmsUjianPage'))
@@ -47,7 +50,9 @@ const LmsPenilaianPage = lazy(() => import('../pages/LmsPenilaianPage'))
 const LmsRaporPage = lazy(() => import('../pages/LmsRaporPage'))
 const StudentCrudPage = lazy(() => import('../pages/StudentCrudPage'))
 const MultiRoleDashboardPage = lazy(() => import('../pages/MultiRoleDashboardPage'))
+const MutabaahPage = lazy(() => import('../pages/MutabaahPage'))
 import RouteErrorElement from '../components/common/RouteErrorElement'
+import { useAuthStore } from '../stores/authStore'
 
 function BungkusLazy({ children }) {
   return <Suspense fallback={<section className="panel">Memuat halaman...</section>}>{children}</Suspense>
@@ -61,6 +66,14 @@ function RouteTerlindungi() {
   }
 
   return <Outlet />
+}
+
+function AbsensiIndex() {
+  const roles = useAuthStore((state) => state.user?.roles || [])
+  if (roles.includes('Wali Kelas')) return <Navigate to="/absensi/dashboard-wali-kelas" replace />
+  if (roles.includes('Guru')) return <Navigate to="/absensi/dashboard-guru" replace />
+  if (roles.includes('Siswa')) return <Navigate to="/absensi/kehadiran-saya" replace />
+  return <Navigate to="/dashboard" replace />
 }
 
 export const router = createBrowserRouter([
@@ -100,6 +113,45 @@ export const router = createBrowserRouter([
     element: <RouteTerlindungi />,
     errorElement: <RouteErrorElement />,
     children: [
+      {
+        path: '/absensi',
+        element: (
+          <BungkusLazy>
+            <DashboardLayout />
+          </BungkusLazy>
+        ),
+        children: [
+          { index: true, element: <AbsensiIndex /> },
+          { path: 'dashboard-guru', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'jadwal-mengajar', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'presensi', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'presensi/tambah', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'presensi/:id', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'presensi/:id/edit', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'riwayat-guru', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'dashboard-wali-kelas', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'rekap-kehadiran', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'verifikasi-izin', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'koreksi', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'tindak-lanjut', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'tindak-lanjut/tambah', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'kehadiran-saya', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'riwayat-saya', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'pengajuan-izin', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'pengajuan-izin/tambah', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'pengajuan-izin/:id', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'pengajuan-izin/:id/edit', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          { path: 'laporan', element: <BungkusLazy><AttendanceWorkspacePage /></BungkusLazy> },
+          {
+            path: '*',
+            element: (
+              <BungkusLazy>
+                <AttendanceWorkspacePage />
+              </BungkusLazy>
+            ),
+          },
+        ],
+      },
       {
         path: '/dashboard',
         element: (
@@ -311,6 +363,14 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'jadwal-pelajaran',
+            element: (
+              <BungkusLazy>
+                <MasterSchedulePage />
+              </BungkusLazy>
+            ),
+          },
+          {
             path: 'master-capaian-pembelajaran',
             element: (
               <BungkusLazy>
@@ -498,7 +558,7 @@ export const router = createBrowserRouter([
             path: 'presensi-pembelajaran',
             element: (
               <BungkusLazy>
-                <LmsPresensiPage />
+                <AttendanceWorkspacePage />
               </BungkusLazy>
             ),
           },
@@ -506,7 +566,15 @@ export const router = createBrowserRouter([
             path: 'lms/presensi-pembelajaran',
             element: (
               <BungkusLazy>
-                <LmsPresensiPage />
+                <AttendanceWorkspacePage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'absensi/*',
+            element: (
+              <BungkusLazy>
+                <AttendanceWorkspacePage />
               </BungkusLazy>
             ),
           },
@@ -599,6 +667,14 @@ export const router = createBrowserRouter([
             ),
           },
           {
+            path: 'mutabaah',
+            element: (
+              <BungkusLazy>
+                <MutabaahPage />
+              </BungkusLazy>
+            ),
+          },
+          {
             path: 'parents',
             element: (
               <BungkusLazy>
@@ -651,6 +727,22 @@ export const router = createBrowserRouter([
             element: (
               <BungkusLazy>
                 <LaporanSiswaPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'laporan-pegawai',
+            element: (
+              <BungkusLazy>
+                <LaporanPegawaiPage />
+              </BungkusLazy>
+            ),
+          },
+          {
+            path: 'laporan-lms',
+            element: (
+              <BungkusLazy>
+                <LaporanLmsPage />
               </BungkusLazy>
             ),
           },

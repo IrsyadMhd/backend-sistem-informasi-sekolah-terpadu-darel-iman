@@ -15,7 +15,7 @@ class JabatanService
      */
     public function dapatkanDaftar(array $filters = [], int $perPage = 15, string $orderBy = 'urutan', string $orderDir = 'asc'): LengthAwarePaginator
     {
-        $query = Position::with(['unitSekolah', 'atasanLangsung', 'roleSistem'])
+        $query = Position::with(['unitSekolah', 'atasanLangsung', 'atasanPegawai', 'roleSistem'])
             ->withCount('employees')
             ->filter($filters);
 
@@ -97,6 +97,12 @@ class JabatanService
             'atasan_langsung' => $pegawaiList,
             'role_sistem' => $roles,
             'level_jabatan' => $levelMap,
+            'satuan_kerja' => collect(Position::SATUAN_KERJA_OPTIONS)
+                ->map(fn ($label, $value) => compact('value', 'label'))
+                ->values(),
+            'scope_akses' => collect(Position::SCOPE_AKSES_OPTIONS)
+                ->map(fn ($label, $value) => compact('value', 'label'))
+                ->values(),
         ];
     }
 
@@ -118,11 +124,13 @@ class JabatanService
             $jabatan = Position::create([
                 'code'                => $kode,
                 'name'                => $data['nama_jabatan'],
+                'satuan_kerja'        => $data['satuan_kerja'],
                 'unit_sekolah_id'     => $data['unit_sekolah_id'] ?? null,
                 'level_jabatan'       => $data['level_jabatan'] ?? 9,
                 'atasan_langsung_id'  => $data['atasan_langsung_id'] ?? null,
                 'atasan_pegawai_id'   => $data['atasan_pegawai_id'] ?? null,
                 'role_sistem_id'      => $data['role_sistem_id'] ?? null,
+                'scope_akses'         => $data['scope_akses'],
                 'urutan'              => $data['urutan'] ?? 0,
                 'warna'               => $data['warna'] ?? '#3B82F6',
                 'ikon'                => $data['ikon'] ?? 'UserCheck',
@@ -145,7 +153,7 @@ class JabatanService
     public function cariBerdasarkanId(string $id): ?Position
     {
         return Position::withTrashed()
-            ->with(['unitSekolah', 'atasanLangsung', 'roleSistem', 'creator', 'updater'])
+            ->with(['unitSekolah', 'atasanLangsung', 'atasanPegawai', 'roleSistem', 'creator', 'updater'])
             ->withCount('employees')
             ->find($id);
     }
@@ -169,6 +177,9 @@ class JabatanService
             if (array_key_exists('unit_sekolah_id', $data)) {
                 $payload['unit_sekolah_id'] = $data['unit_sekolah_id'];
             }
+            if (array_key_exists('satuan_kerja', $data)) {
+                $payload['satuan_kerja'] = $data['satuan_kerja'];
+            }
             if (array_key_exists('level_jabatan', $data)) {
                 $payload['level_jabatan'] = (int) $data['level_jabatan'];
             }
@@ -180,6 +191,9 @@ class JabatanService
             }
             if (array_key_exists('role_sistem_id', $data)) {
                 $payload['role_sistem_id'] = $data['role_sistem_id'];
+            }
+            if (array_key_exists('scope_akses', $data)) {
+                $payload['scope_akses'] = $data['scope_akses'];
             }
             if (array_key_exists('urutan', $data)) {
                 $payload['urutan'] = (int) $data['urutan'];
@@ -216,7 +230,7 @@ class JabatanService
 
             $jabatan->update($payload);
 
-            return $jabatan->load(['unitSekolah', 'atasanLangsung', 'roleSistem']);
+            return $jabatan->load(['unitSekolah', 'atasanLangsung', 'atasanPegawai', 'roleSistem']);
         });
     }
 
@@ -266,6 +280,8 @@ class JabatanService
                 $this->simpan([
                     'kode_jabatan' => $row['kode_jabatan'] ?? null,
                     'nama_jabatan' => $row['nama_jabatan'],
+                    'satuan_kerja' => $row['satuan_kerja'] ?? 'Unit Pendidikan',
+                    'scope_akses' => $row['scope_akses'] ?? 'unit_sendiri',
                     'level_jabatan' => $row['level_jabatan'] ?? 9,
                     'unit_sekolah_id' => $row['unit_sekolah_id'] ?? null,
                     'urutan' => $row['urutan'] ?? 0,
@@ -296,7 +312,7 @@ class JabatanService
      */
     public function eksporData(array $filters = []): array
     {
-        return Position::with(['unitSekolah', 'atasanLangsung', 'roleSistem'])
+        return Position::with(['unitSekolah', 'atasanLangsung', 'atasanPegawai', 'roleSistem'])
             ->withCount('employees')
             ->filter($filters)
             ->orderBy('urutan')
@@ -305,11 +321,13 @@ class JabatanService
                 return [
                     'kode_jabatan' => $j->code,
                     'nama_jabatan' => $j->name,
+                    'satuan_kerja' => $j->satuan_kerja ?? '-',
                     'level_jabatan' => $j->level_jabatan,
                     'level_label' => Position::LEVEL_JABATAN_MAP[$j->level_jabatan] ?? "Level {$j->level_jabatan}",
                     'unit_sekolah' => $j->unitSekolah?->nama_unit ?? '-',
-                    'atasan_langsung' => $j->atasanLangsung?->name ?? '-',
+                    'atasan_langsung' => $j->atasanPegawai?->nama_lengkap ?? $j->atasanLangsung?->name ?? '-',
                     'role_sistem' => $j->roleSistem?->name ?? '-',
+                    'scope_akses' => $j->scope_akses ?? '-',
                     'urutan' => $j->urutan,
                     'status' => $j->is_active ? 'Aktif' : 'Nonaktif',
                     'tampil_struktur' => $j->tampil_struktur ? 'Ya' : 'Tidak',

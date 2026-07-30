@@ -74,4 +74,33 @@ export const hakAksesService = {
     const { data } = await api.post(`/hak-akses/pegawai/${employeeId}/assign-role`, payload)
     return data
   },
+
+  // ─────────────────────────────────────────────────
+  // AKUN LOGIN & PASSWORD
+  // ─────────────────────────────────────────────────
+
+  getUsers: async (params = {}) => {
+    const { data } = await api.get('/hak-akses/users', { params })
+    return data
+  },
+
+  tambahUser: async (payload) => {
+    const { data } = await api.post('/hak-akses/users', payload)
+    return data
+  },
+
+  ubahUser: async ({ id, payload }) => {
+    const { data } = await api.put(`/hak-akses/users/${id}`, payload)
+    return data
+  },
+
+  resetPassword: async ({ id, payload }) => {
+    const { data } = await api.put(`/hak-akses/users/${id}/password`, payload)
+    return data
+  },
+
+  hapusUser: async (id) => {
+    const { data } = await api.delete(`/hak-akses/users/${id}`)
+    return data
+  },
 }

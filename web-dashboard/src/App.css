@@ -161,6 +161,87 @@
   }
 }
 
+.laporan-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.laporan-filter label {
+  display: grid;
+  gap: 6px;
+  min-width: 190px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.laporan-filter input,
+.laporan-filter select {
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+}
+
+.laporan-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.laporan-table {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.laporan-table th,
+.laporan-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.laporan-table th {
+  color: #475569;
+  background: #f8fafc;
+}
+
+.laporan-empty,
+.laporan-state {
+  padding: 28px;
+  color: #64748b;
+  text-align: center !important;
+}
+
+.laporan-state--error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-radius: 10px;
+}
+
+@media print {
+  .sidebar,
+  .topbar,
+  .panel-aksi-laporan,
+  .laporan-filter {
+    display: none !important;
+  }
+
+  .laporan-produksi {
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+}
+
 .ticks {
   position: relative;
   width: 100%;

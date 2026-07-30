@@ -16,6 +16,7 @@ class JabatanResource extends JsonResource
             'code' => $this->code,
             'nama_jabatan' => $this->name,
             'name' => $this->name,
+            'satuan_kerja' => $this->satuan_kerja,
             'unit_sekolah_id' => $this->unit_sekolah_id,
             'unit_sekolah' => $this->relationLoaded('unitSekolah') && $this->unitSekolah ? [
                 'id' => $this->unitSekolah->id,
@@ -30,11 +31,19 @@ class JabatanResource extends JsonResource
                 'kode_jabatan' => $this->atasanLangsung->code,
                 'nama_jabatan' => $this->atasanLangsung->name,
             ] : null,
+            'atasan_pegawai_id' => $this->atasan_pegawai_id,
+            'atasan_pegawai' => $this->relationLoaded('atasanPegawai') && $this->atasanPegawai ? [
+                'id' => $this->atasanPegawai->id,
+                'nama_pegawai' => $this->atasanPegawai->nama_lengkap,
+                'niy' => $this->atasanPegawai->niy,
+            ] : null,
             'role_sistem_id' => $this->role_sistem_id,
             'role_sistem' => $this->relationLoaded('roleSistem') && $this->roleSistem ? [
                 'id' => $this->roleSistem->id,
                 'name' => $this->roleSistem->name,
             ] : null,
+            'scope_akses' => $this->scope_akses,
+            'scope_akses_label' => Position::SCOPE_AKSES_OPTIONS[$this->scope_akses] ?? $this->scope_akses,
             'urutan' => $this->urutan ?? 0,
             'warna' => $this->warna ?? '#3B82F6',
             'ikon' => $this->ikon ?? 'UserCheck',

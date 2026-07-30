@@ -8,11 +8,13 @@ import { FaTimes, FaCheckCircle } from 'react-icons/fa'
 const jabatanSchema = z.object({
   kode_jabatan: z.string().optional().or(z.literal('')),
   nama_jabatan: z.string().min(2, { message: 'Nama jabatan minimal 2 karakter' }),
+  satuan_kerja: z.enum(['Pengurus', 'Bidang Pendidikan', 'Unit Pendidikan']),
   unit_sekolah_id: z.string().optional().nullable(),
   level_jabatan: z.coerce.number().min(1, { message: 'Pilih level jabatan (1-14)' }).max(14),
   atasan_langsung_id: z.string().optional().nullable(),
   atasan_pegawai_id: z.string().optional().nullable(),
   role_sistem_id: z.string().optional().nullable(),
+  scope_akses: z.enum(['semua_unit', 'bidang_pendidikan', 'unit_sendiri', 'rombel_sendiri', 'kelas_mapel_sendiri', 'siswa_binaan']),
   urutan: z.coerce.number().min(0, { message: 'Urutan minimal 0' }),
   warna: z.string().min(1, { message: 'Warna wajib dipilih' }),
   ikon: z.string().min(1, { message: 'Ikon wajib dipilih' }),
@@ -95,11 +97,13 @@ export default function JabatanFormModal({
     defaultValues: {
       kode_jabatan: '',
       nama_jabatan: '',
+      satuan_kerja: 'Unit Pendidikan',
       unit_sekolah_id: '',
       level_jabatan: 9,
       atasan_langsung_id: '',
       atasan_pegawai_id: '',
       role_sistem_id: '',
+      scope_akses: 'unit_sendiri',
       urutan: 0,
       warna: '#3B82F6',
       ikon: 'UserCheck',
@@ -123,11 +127,13 @@ export default function JabatanFormModal({
         reset({
           kode_jabatan: initialData.kode_jabatan || initialData.code || '',
           nama_jabatan: initialData.nama_jabatan || initialData.name || '',
+          satuan_kerja: initialData.satuan_kerja || 'Unit Pendidikan',
           unit_sekolah_id: initialData.unit_sekolah_id || '',
           level_jabatan: initialData.level_jabatan || 9,
           atasan_langsung_id: initialData.atasan_langsung_id || '',
           atasan_pegawai_id: initialData.atasan_pegawai_id || '',
           role_sistem_id: initialData.role_sistem_id ? String(initialData.role_sistem_id) : '',
+          scope_akses: initialData.scope_akses || 'unit_sendiri',
           urutan: initialData.urutan || 0,
           warna: initialData.warna || '#3B82F6',
           ikon: initialData.ikon || 'UserCheck',
@@ -140,11 +146,13 @@ export default function JabatanFormModal({
         reset({
           kode_jabatan: '',
           nama_jabatan: '',
+          satuan_kerja: 'Unit Pendidikan',
           unit_sekolah_id: '',
           level_jabatan: 9,
           atasan_langsung_id: '',
           atasan_pegawai_id: '',
           role_sistem_id: '',
+          scope_akses: 'unit_sendiri',
           urutan: 0,
           warna: '#3B82F6',
           ikon: 'UserCheck',
@@ -243,8 +251,26 @@ export default function JabatanFormModal({
                     Identitas Jabatan
                   </h3>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
+	                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+	                    <div>
+	                      <label className="block text-xs font-bold text-[#0f172a] mb-1.5">
+	                        Satuan Kerja <span className="text-rose-500">*</span>
+	                      </label>
+	                      <select
+	                        {...register('satuan_kerja')}
+	                        className="w-full rounded-xl border border-slate-200/90 px-4 py-2.5 text-sm text-[#0f172a] focus:border-[#054e3b] focus:ring-2 focus:ring-[#054e3b]/10 focus:outline-none transition-all bg-white"
+	                      >
+	                        {(options.satuan_kerja || [
+	                          { value: 'Pengurus', label: 'Pengurus' },
+	                          { value: 'Bidang Pendidikan', label: 'Bidang Pendidikan' },
+	                          { value: 'Unit Pendidikan', label: 'Unit Pendidikan' },
+	                        ]).map((item) => (
+	                          <option key={item.value} value={item.value}>{item.label}</option>
+	                        ))}
+	                      </select>
+	                    </div>
+
+	                    <div>
                       <label className="block text-xs font-bold text-[#0f172a] mb-1.5">
                         Kode Jabatan <span className="text-slate-400 font-normal">(Auto jika kosong)</span>
                       </label>
@@ -259,8 +285,8 @@ export default function JabatanFormModal({
                       )}
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-[#0f172a] mb-1.5">
+	                    <div>
+	                      <label className="block text-xs font-bold text-[#0f172a] mb-1.5">
                         Nama Jabatan <span className="text-rose-500">*</span>
                       </label>
                       <input
@@ -272,8 +298,29 @@ export default function JabatanFormModal({
                       {errors.nama_jabatan && (
                         <p className="mt-1 text-xs text-rose-500">{errors.nama_jabatan.message}</p>
                       )}
-                    </div>
-                  </div>
+	                    </div>
+
+	                    <div>
+	                      <label className="block text-xs font-bold text-[#0f172a] mb-1.5">
+	                        Cakupan Akses <span className="text-rose-500">*</span>
+	                      </label>
+	                      <select
+	                        {...register('scope_akses')}
+	                        className="w-full rounded-xl border border-slate-200/90 px-4 py-2.5 text-sm text-[#0f172a] focus:border-[#054e3b] focus:ring-2 focus:ring-[#054e3b]/10 focus:outline-none transition-all bg-white"
+	                      >
+	                        {(options.scope_akses || [
+	                          { value: 'semua_unit', label: 'Semua Unit' },
+	                          { value: 'bidang_pendidikan', label: 'Bidang Pendidikan' },
+	                          { value: 'unit_sendiri', label: 'Unit Pendidikan Sendiri' },
+	                          { value: 'rombel_sendiri', label: 'Rombel Sendiri' },
+	                          { value: 'kelas_mapel_sendiri', label: 'Kelas & Mata Pelajaran Sendiri' },
+	                          { value: 'siswa_binaan', label: 'Siswa Binaan' },
+	                        ]).map((item) => (
+	                          <option key={item.value} value={item.value}>{item.label}</option>
+	                        ))}
+	                      </select>
+	                    </div>
+	                  </div>
 
                   <div>
                     <label className="block text-xs font-bold text-[#0f172a] mb-1.5">
