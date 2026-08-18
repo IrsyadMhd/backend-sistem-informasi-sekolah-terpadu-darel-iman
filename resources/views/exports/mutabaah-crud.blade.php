@@ -1,0 +1,4 @@
+<!doctype html>
+<html lang="id">
+<head><meta charset="utf-8"><style>body{font-family:DejaVu Sans,sans-serif;color:#152238;font-size:10px}h1{color:#0E5C44;margin-bottom:3px}p{color:#64748b;margin-top:0}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #dce3ea;padding:7px;text-align:left}th{background:#0E5C44;color:#fff}.footer{margin-top:15px;color:#64748b}</style></head>
+<body><h1>{{ $title }}</h1><p>SIMSIT · Mutaba’ah Yaumiyyah · Dicetak {{ now()->format('d/m/Y H:i') }}</p><table><thead><tr>@foreach($headings as $heading)<th>{{ str($heading)->replace('_', ' ')->title() }}</th>@endforeach</tr></thead><tbody>@foreach($rows as $row)<tr>@foreach($headings as $heading)<td>{{ data_get($row, $heading, '-') }}</td>@endforeach</tr>@endforeach</tbody></table><div class="footer">Total {{ count($rows) }} data</div></body></html>

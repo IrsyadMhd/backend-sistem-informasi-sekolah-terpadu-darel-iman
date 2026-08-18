@@ -1,0 +1,244 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Models\Employee;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Password;
+
+class ProfileController extends Controller
+{
+    /**
+     * Ambil data profil lengkap pengguna yang sedang login.
+     */
+    public function show(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $user->load([
+            'roles:id,name',
+            'employee.unit:id,name,code',
+            'employee.position:id,name,level',
+            'employee.division:id,name,code',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $this->formatUserProfile($user),
+        ]);
+    }
+
+    /**
+     * Perbarui informasi pribadi profil pengguna.
+     */
+    public function update(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'nama_panggilan' => ['nullable', 'string', 'max:100'],
+            'phone' => ['nullable', 'string', 'max:30'],
+            'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+            'alamat' => ['nullable', 'string', 'max:500'],
+        ], [
+            'email.required' => 'Alamat email wajib diisi.',
+            'email.email' => 'Format email tidak valid.',
+            'email.unique' => 'Alamat email sudah digunakan oleh pengguna lain.',
+        ]);
+
+        DB::transaction(function () use ($user, $validated) {
+            // 1. Update User Record
+            $user->fill([
+                'email' => strtolower($validated['email']),
+                'phone' => $validated['phone'] ?? $user->phone,
+            ])->save();
+
+            // 2. Update Employee Record (jika terhubung)
+            /** @var Employee|null $employee */
+            $employee = $user->employee;
+            if ($employee) {
+                $employee->fill([
+                    'nama_panggilan' => $validated['nama_panggilan'] ?? $employee->nama_panggilan,
+                    'no_hp' => $validated['phone'] ?? $employee->no_hp,
+                    'email' => strtolower($validated['email']),
+                    'alamat' => $validated['alamat'] ?? $employee->alamat,
+                ])->save();
+            }
+        });
+
+        $user->refresh();
+        $user->load([
+            'roles:id,name',
+            'employee.unit:id,name,code',
+            'employee.position:id,name,level',
+            'employee.division:id,name,code',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Profil berhasil diperbarui.',
+            'data' => $this->formatUserProfile($user),
+        ]);
+    }
+
+    /**
+     * Upload dan ganti foto profil / avatar.
+     */
+    public function updateAvatar(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $request->validate([
+            'foto' => ['required', 'file', 'image', 'mimes:jpeg,png,jpg,webp', 'max:2048'],
+        ], [
+            'foto.required' => 'File foto wajib diunggah.',
+            'foto.image' => 'File harus berupa gambar.',
+            'foto.mimes' => 'Format foto yang diizinkan: jpeg, png, jpg, webp.',
+            'foto.max' => 'Ukuran foto maksimal 2MB.',
+        ]);
+
+        $file = $request->file('foto');
+        $path = $file->store('avatars', 'public');
+
+        DB::transaction(function () use ($user, $path) {
+            /** @var Employee|null $employee */
+            $employee = $user->employee;
+            if ($employee) {
+                // Hapus foto lama jika ada
+                if ($employee->foto && Storage::disk('public')->exists($employee->foto)) {
+                    Storage::disk('public')->delete($employee->foto);
+                }
+                $employee->update(['foto' => $path]);
+            }
+
+            $metadata = $user->metadata ?? [];
+            $metadata['avatar'] = $path;
+            $user->update(['metadata' => $metadata]);
+        });
+
+        $user->refresh();
+        $user->load([
+            'roles:id,name',
+            'employee.unit:id,name,code',
+            'employee.position:id,name,level',
+            'employee.division:id,name,code',
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Foto profil berhasil diperbarui.',
+            'data' => $this->formatUserProfile($user),
+        ]);
+    }
+
+    /**
+     * Ubah password akun.
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ], [
+            'current_password.required' => 'Password saat ini wajib diisi.',
+            'password.required' => 'Password baru wajib diisi.',
+            'password.confirmed' => 'Konfirmasi password baru tidak cocok.',
+            'password.min' => 'Password baru minimal 8 karakter.',
+        ]);
+
+        if (! Hash::check($validated['current_password'], $user->password)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Password saat ini yang Anda masukkan salah.',
+                'errors' => [
+                    'current_password' => ['Password saat ini yang Anda masukkan tidak sesuai.'],
+                ],
+            ], 422);
+        }
+
+        $user->forceFill([
+            'password' => Hash::make($validated['password']),
+        ])->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Password berhasil diubah.',
+        ]);
+    }
+
+    /**
+     * Format data profil lengkap pengguna.
+     */
+    private function formatUserProfile(User $user): array
+    {
+        $employee = $user->employee;
+        $roles = $user->getRoleNames()->values()->toArray();
+        $permissions = $user->getAllPermissions()->pluck('name')->values()->toArray();
+
+        $fotoUrl = null;
+        if ($employee && $employee->foto) {
+            $fotoUrl = str_starts_with($employee->foto, 'http')
+                ? $employee->foto
+                : asset('storage/' . $employee->foto);
+        } elseif (isset($user->metadata['avatar'])) {
+            $fotoUrl = str_starts_with($user->metadata['avatar'], 'http')
+                ? $user->metadata['avatar']
+                : asset('storage/' . $user->metadata['avatar']);
+        }
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'phone' => $user->phone ?? $employee?->no_hp,
+            'roles' => $roles,
+            'permissions' => $permissions,
+            'foto' => $fotoUrl,
+            'employee' => $employee ? [
+                'id' => $employee->id,
+                'niy' => $employee->niy,
+                'nik' => $employee->nik,
+                'nama_lengkap' => $employee->nama_lengkap,
+                'nama_panggilan' => $employee->nama_panggilan,
+                'gelar_depan' => $employee->gelar_depan,
+                'gelar_belakang' => $employee->gelar_belakang,
+                'jenis_kelamin' => $employee->jenis_kelamin,
+                'tempat_lahir' => $employee->tempat_lahir,
+                'tanggal_lahir' => $employee->tanggal_lahir?->format('Y-m-d'),
+                'foto' => $fotoUrl,
+                'status_pegawai' => $employee->status_pegawai ?? 'Aktif',
+                'tanggal_masuk' => $employee->tanggal_masuk?->format('Y-m-d'),
+                'no_hp' => $employee->no_hp,
+                'email' => $employee->email,
+                'alamat' => $employee->alamat,
+                'unit' => $employee->unit ? [
+                    'id' => $employee->unit->id,
+                    'name' => $employee->unit->name,
+                    'code' => $employee->unit->code,
+                ] : null,
+                'position' => $employee->position ? [
+                    'id' => $employee->position->id,
+                    'name' => $employee->position->name,
+                ] : null,
+                'division' => $employee->division ? [
+                    'id' => $employee->division->id,
+                    'name' => $employee->division->name,
+                ] : null,
+            ] : null,
+            'metadata' => $user->metadata,
+            'created_at' => $user->created_at?->toIso8601String(),
+        ];
+    }
+}
