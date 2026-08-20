@@ -4,18 +4,43 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Attendance;
+use App\Services\AccessScopeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class AttendanceController extends Controller
 {
+    public function __construct(
+        private AccessScopeService $accessScope
+    ) {}
+
     /**
      * Get paginated list of attendance records with filters.
      */
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
         $query = Attendance::with(['student', 'employee', 'schoolClass', 'educationUnit']);
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if ($request->filled('unit_pendidikan_id')) {
+                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where('unit_pendidikan_id', $requestedUnit);
+            } elseif ($unitIds->isNotEmpty()) {
+                $query->where(function ($q) use ($unitIds) {
+                    $q->whereIn('unit_pendidikan_id', $unitIds)
+                        ->orWhereHas('student', fn ($sq) => $sq->whereIn('unit_id', $unitIds))
+                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds));
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($request->filled('unit_pendidikan_id')) {
+            $query->where('unit_pendidikan_id', (string) $request->query('unit_pendidikan_id'));
+        }
 
         // Filters
         if ($request->filled('tipe_presensi')) {
@@ -36,10 +61,6 @@ class AttendanceController extends Controller
 
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->query('class_id'));
-        }
-
-        if ($request->filled('unit_pendidikan_id')) {
-            $query->where('unit_pendidikan_id', $request->query('unit_pendidikan_id'));
         }
 
         if ($request->filled('date')) {
@@ -80,12 +101,27 @@ class AttendanceController extends Controller
      */
     public function stats(Request $request): JsonResponse
     {
+        $user = $request->user();
         $date = $request->query('date', now()->toDateString());
-        $unitId = $request->query('unit_pendidikan_id');
-
         $query = Attendance::whereDate('attendance_date', $date);
-        if ($unitId) {
-            $query->where('unit_pendidikan_id', $unitId);
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if ($request->filled('unit_pendidikan_id')) {
+                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where('unit_pendidikan_id', $requestedUnit);
+            } elseif ($unitIds->isNotEmpty()) {
+                $query->where(function ($q) use ($unitIds) {
+                    $q->whereIn('unit_pendidikan_id', $unitIds)
+                        ->orWhereHas('student', fn ($sq) => $sq->whereIn('unit_id', $unitIds))
+                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds));
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($request->filled('unit_pendidikan_id')) {
+            $query->where('unit_pendidikan_id', (string) $request->query('unit_pendidikan_id'));
         }
 
         $total = (clone $query)->count();
@@ -216,7 +252,27 @@ class AttendanceController extends Controller
      */
     public function rekapKehadiran(Request $request): JsonResponse
     {
+        $user = $request->user();
         $query = Attendance::with(['student', 'employee', 'schoolClass']);
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if ($request->filled('unit_pendidikan_id')) {
+                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where('unit_pendidikan_id', $requestedUnit);
+            } elseif ($unitIds->isNotEmpty()) {
+                $query->where(function ($q) use ($unitIds) {
+                    $q->whereIn('unit_pendidikan_id', $unitIds)
+                        ->orWhereHas('student', fn ($sq) => $sq->whereIn('unit_id', $unitIds))
+                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds));
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($request->filled('unit_pendidikan_id')) {
+            $query->where('unit_pendidikan_id', (string) $request->query('unit_pendidikan_id'));
+        }
 
         if ($request->filled('student_id')) {
             $query->where('student_id', (string) $request->query('student_id'));

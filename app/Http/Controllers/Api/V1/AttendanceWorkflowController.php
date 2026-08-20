@@ -191,15 +191,23 @@ class AttendanceWorkflowController extends Controller
 
     public function sessions(Request $request): JsonResponse
     {
-        $this->permit($request, ['lesson_attendance.view', 'lesson_attendance.view_own'], ['Guru', 'Wali Kelas']);
+        $this->permit($request, ['lesson_attendance.view', 'lesson_attendance.view_own', 'attendance.view', 'kehadiran.siswa.monitoring'], ['Guru', 'Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Tata Usaha', 'TU', 'Admin']);
         $query = LessonAttendanceSession::query()->with([
             'schedule.subject', 'schedule.kelas', 'schedule.employee', 'attendances.siswa',
         ]);
-        if (! $request->user()->hasRole('Super Admin')) {
-            if ($request->user()->hasRole('Wali Kelas')) {
-                $query->whereHas('schedule', fn ($q) => $q->whereIn('kelas_id', $this->access->homeroomClasses($request->user())->pluck('id')));
+        $user = $request->user();
+        if ($user && ! $this->accessScopeService->hasGlobalScope($user)) {
+            if ($user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'KepalaSekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'DivisiPendidikan', 'Kepala Bidang Pendidikan', 'Tata Usaha', 'TU', 'Admin'])) {
+                $unitIds = $this->accessScopeService->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+                if ($unitIds->isNotEmpty()) {
+                    $query->whereHas('schedule.kelas', fn ($q) => $q->whereIn('unit_pendidikan_id', $unitIds));
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            } elseif ($user->hasRole('Wali Kelas')) {
+                $query->whereHas('schedule', fn ($q) => $q->whereIn('kelas_id', $this->access->homeroomClasses($user)->pluck('id')));
             } else {
-                $query->whereIn('schedule_id', $this->access->teacherSchedules($request->user())->select('id'));
+                $query->whereIn('schedule_id', $this->access->teacherSchedules($user)->select('id'));
             }
         }
         $query->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
@@ -212,13 +220,15 @@ class AttendanceWorkflowController extends Controller
 
     public function showSession(Request $request, LessonAttendanceSession $session): JsonResponse
     {
-        $this->permit($request, ['lesson_attendance.view', 'lesson_attendance.view_own', 'homeroom_attendance.view'], ['Guru', 'Wali Kelas']);
+        $this->permit($request, ['lesson_attendance.view', 'lesson_attendance.view_own', 'homeroom_attendance.view', 'attendance.view', 'kehadiran.siswa.monitoring'], ['Guru', 'Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Tata Usaha', 'TU', 'Admin']);
         $sample = $session->attendances()->first();
         $schedule = $session->schedule;
-        $canAccess = $request->user()->hasRole('Super Admin')
-            || ($sample && $this->access->canAccessAttendance($request->user(), $sample))
-            || ($schedule && $request->user()->hasRole('Wali Kelas') && $this->access->homeroomClasses($request->user())->whereKey($schedule->kelas_id)->exists())
-            || ($schedule && $this->access->teacherSchedules($request->user())->whereKey($schedule->id)->exists());
+        $user = $request->user();
+        $canAccess = $this->accessScopeService->hasGlobalScope($user)
+            || ($sample && $this->access->canAccessAttendance($user, $sample))
+            || ($schedule && $user->hasRole('Wali Kelas') && $this->access->homeroomClasses($user)->whereKey($schedule->kelas_id)->exists())
+            || ($schedule && $this->access->teacherSchedules($user)->whereKey($schedule->id)->exists())
+            || ($schedule && $schedule->kelas && $this->accessScopeService->accessibleEducationUnits($user)->whereKey($schedule->kelas->unit_pendidikan_id)->exists());
         abort_unless($canAccess, 403);
 
         return response()->json(['success' => true, 'data' => $session->load([
@@ -610,17 +620,62 @@ class AttendanceWorkflowController extends Controller
 
     public function homeroomDashboard(Request $request): JsonResponse
     {
-        $this->permit($request, ['homeroom_attendance.dashboard'], ['Wali Kelas']);
-        $classIds = $this->access->homeroomClasses($request->user())->pluck('id');
-        $studentIds = $this->access->homeroomStudentIds($request->user());
+        $this->permit($request, ['homeroom_attendance.dashboard', 'attendance.view', 'kehadiran.siswa.monitoring'], ['Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Tata Usaha', 'TU', 'Admin']);
+        $user = $request->user();
+        $isKepsekOrDivisi = $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'KepalaSekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'DivisiPendidikan', 'Kepala Bidang Pendidikan', 'Tata Usaha', 'TU', 'Admin']);
+
+        if ($isKepsekOrDivisi) {
+            $unitIds = $this->accessScopeService->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            $studentIds = Student::whereIn('unit_id', $unitIds)->pluck('id');
+            $classIds = \App\Models\Kelas::whereIn('unit_pendidikan_id', $unitIds)->pluck('id');
+        } else {
+            $classIds = $this->access->homeroomClasses($user)->pluck('id');
+            $studentIds = $this->access->homeroomStudentIds($user);
+        }
         $base = LmsPresensi::whereIn('siswa_id', $studentIds)->whereDate('tanggal', today());
 
+        $classesData = [];
+        if ($isKepsekOrDivisi) {
+            $classes = \App\Models\Kelas::with(['unitPendidikan', 'waliKelas', 'jadwal.subject'])
+                ->withCount('siswa')
+                ->whereIn('unit_pendidikan_id', $unitIds)
+                ->orderBy('nama_kelas', 'asc')
+                ->get();
+
+            $classesData = $classes->map(function ($k) {
+                $subjects = $k->jadwal
+                    ->map(fn ($j) => $j->subject?->name)
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                return [
+                    'id' => $k->id,
+                    'nama_kelas' => $k->nama_kelas,
+                    'kode_kelas' => $k->kode_kelas,
+                    'unit_name' => $k->unitPendidikan?->name ?? $k->unitPendidikan?->code ?? '-',
+                    'wali_kelas' => $k->waliKelas ? ($k->waliKelas->nama_tampil ?? $k->waliKelas->nama_lengkap) : 'Belum Ditentukan',
+                    'wali_kelas_niy' => $k->waliKelas?->niy ?? null,
+                    'wali_kelas_photo' => $k->waliKelas?->foto ?? null,
+                    'mata_pelajaran' => $subjects,
+                    'jumlah_siswa' => $k->siswa_count ?? 0,
+                    'kapasitas' => $k->kapasitas ?? 0,
+                ];
+            });
+        }
+
         return response()->json(['success' => true, 'data' => [
-            'total_students' => $studentIds->count(), 'present' => (clone $base)->whereIn('status_hadir', ['hadir', 'terlambat'])->count(),
-            'late' => (clone $base)->where('status_hadir', 'terlambat')->count(), 'permission' => (clone $base)->where('status_hadir', 'izin')->count(),
-            'sick' => (clone $base)->where('status_hadir', 'sakit')->count(), 'absent' => (clone $base)->where('status_hadir', 'alpa')->count(),
+            'total_students' => $studentIds->count(),
+            'total_classes' => $classIds->count(),
+            'present' => (clone $base)->whereIn('status_hadir', ['hadir', 'terlambat'])->count(),
+            'late' => (clone $base)->where('status_hadir', 'terlambat')->count(),
+            'permission' => (clone $base)->where('status_hadir', 'izin')->count(),
+            'sick' => (clone $base)->where('status_hadir', 'sakit')->count(),
+            'absent' => (clone $base)->where('status_hadir', 'alpa')->count(),
             'unverified' => (clone $base)->where('verification_status', '!=', 'verified')->count(),
             'open_follow_ups' => HomeroomAttendanceFollowUp::whereIn('class_id', $classIds)->whereNotIn('status', ['completed', 'closed'])->count(),
+            'classes' => $classesData,
         ]]);
     }
 

@@ -10,7 +10,7 @@ class EmployeeRepository implements EmployeeRepositoryInterface
 {
     public function paginate(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = Employee::query()->with(['unit', 'position', 'user', 'role', 'teachings.subject', 'teachings.classroom']);
+        $query = Employee::query()->with(['unit', 'position', 'user', 'role', 'teachings.subject', 'teachings.classroom', 'schedules.subject', 'schedules.kelas']);
 
         if (! empty($filters['search'])) {
             $search = '%'.$filters['search'].'%';
@@ -53,7 +53,7 @@ class EmployeeRepository implements EmployeeRepositoryInterface
 
     public function findById(string $id): ?Employee
     {
-        return Employee::with(['unit', 'position', 'user', 'role', 'teachings.subject', 'teachings.classroom'])->find($id);
+        return Employee::with(['unit', 'position', 'user', 'role', 'teachings.subject', 'teachings.classroom', 'schedules.subject', 'schedules.kelas'])->find($id);
     }
 
     public function create(array $data): Employee

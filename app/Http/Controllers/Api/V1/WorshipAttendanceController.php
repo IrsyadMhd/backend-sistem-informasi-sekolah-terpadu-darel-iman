@@ -6,13 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\WorshipAttendanceDetail;
 use App\Models\WorshipAttendanceSession;
 use App\Models\WorshipAttendanceTemplate;
+use App\Services\AccessScopeService;
 use App\Services\WorshipAttendanceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class WorshipAttendanceController extends Controller
 {
-    public function __construct(private WorshipAttendanceService $worshipService) {}
+    public function __construct(
+        private WorshipAttendanceService $worshipService,
+        private AccessScopeService $accessScope,
+    ) {}
 
     /**
      * List all worship attendance templates.
@@ -20,12 +24,23 @@ class WorshipAttendanceController extends Controller
     public function templates(Request $request): JsonResponse
     {
         $query = WorshipAttendanceTemplate::with('educationUnit');
+        $user = $request->user();
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if ($request->filled('unit_id')) {
+                $requestedUnit = (string) $request->query('unit_id');
+                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where('education_unit_id', $requestedUnit);
+            } elseif ($unitIds->isNotEmpty()) {
+                $query->where(fn ($q) => $q->whereIn('education_unit_id', $unitIds)->orWhereNull('education_unit_id'));
+            }
+        } elseif ($request->filled('unit_id')) {
+            $query->where('education_unit_id', $request->query('unit_id'));
+        }
 
         if ($request->filled('category')) {
             $query->where('category', $request->query('category'));
-        }
-        if ($request->filled('unit_id')) {
-            $query->where('education_unit_id', $request->query('unit_id'));
         }
         if ($request->filled('gender_scope')) {
             $query->where('gender_scope', $request->query('gender_scope'));
@@ -81,12 +96,22 @@ class WorshipAttendanceController extends Controller
     public function sessions(Request $request): JsonResponse
     {
         $date = $request->query('date', today()->toDateString());
+        $user = $request->user();
 
         // Ensure sessions exist for target date
         $this->worshipService->generateDailySessions($date);
 
         $query = WorshipAttendanceSession::with(['template', 'supervisor'])
             ->whereDate('session_date', $date);
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if ($unitIds->isNotEmpty()) {
+                $query->whereHas('template', function ($tq) use ($unitIds) {
+                    $tq->whereIn('education_unit_id', $unitIds)->orWhereNull('education_unit_id');
+                });
+            }
+        }
 
         if ($request->filled('template_id')) {
             $query->where('template_id', $request->query('template_id'));

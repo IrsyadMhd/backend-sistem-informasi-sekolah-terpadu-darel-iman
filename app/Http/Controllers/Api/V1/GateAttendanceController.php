@@ -238,22 +238,18 @@ class GateAttendanceController extends Controller
             return $request->query('unit_id');
         }
 
-        $roles = $user->getRoleNames()->map(fn (string $role) => $this->normalizeRole($role));
-        $isMultiUnit = $roles->intersect([
-            'superadmin', 'super_admin', 'admin', 'yayasan', 'ketuayayasan',
-            'pengurusayayasan', 'sekretarisyayasan', 'bendaharayayasan',
-            'kepalabidangpendidikan', 'divisipendidikan', 'divisikurikulum',
-            'divisikesiswaan', 'divisibahasa', 'divisiprogramkhusus',
-        ])->isNotEmpty();
-
-        if ($isMultiUnit) {
+        if ($this->accessScope->hasGlobalScope($user)) {
             return $request->query('unit_id');
         }
 
-        // Single unit restriction for pegawai, guru, etc.
-        $userUnitId = $user->education_unit_id ?? $user->unit_id ?? $user->employee?->unit_id;
+        $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+        if ($request->filled('unit_id')) {
+            $this->accessScope->assertEducationUnitAccess($user, (string) $request->query('unit_id'));
 
-        return $userUnitId ?: '__none__';
+            return (string) $request->query('unit_id');
+        }
+
+        return $unitIds->first() ?: ($user->education_unit_id ?? $user->unit_id ?? $user->employee?->unit_id ?? '__none__');
     }
 
     private function assertStudentScope(Request $request, array $data): void

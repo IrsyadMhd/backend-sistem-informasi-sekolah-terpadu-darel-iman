@@ -197,6 +197,13 @@ class AttendanceAccessService
         if ($user->hasRole('Siswa')) {
             return $attendance->siswa_id === $this->student($user)?->id;
         }
+        if ($user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'KepalaSekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'DivisiPendidikan', 'Kepala Bidang Pendidikan', 'Tata Usaha', 'TU', 'Admin'])) {
+            $unitIds = app(AccessScopeService::class)->accessibleEducationUnits($user)->pluck('id');
+            $studentUnit = $attendance->siswa?->unit_id ?? $attendance->siswa?->kelas?->unit_pendidikan_id;
+            $scheduleUnit = $attendance->jadwalPelajaran?->kelas?->unit_pendidikan_id;
+
+            return ($studentUnit && $unitIds->contains($studentUnit)) || ($scheduleUnit && $unitIds->contains($scheduleUnit));
+        }
         if ($user->hasRole('Wali Kelas')) {
             $schedule = $attendance->jadwalPelajaran;
 

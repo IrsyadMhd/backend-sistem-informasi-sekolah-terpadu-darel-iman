@@ -62,6 +62,59 @@ class EmployeeService
             ->groupBy('jabatan_id')
             ->get();
 
+        // ── Perhitungan KPI Kehadiran Pegawai (Ditarik dari Database) ──
+        $attendanceQuery = \App\Models\Attendance::query();
+        if (! empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
+            $attendanceQuery->where('unit_pendidikan_id', $filters['unit_id']);
+        }
+
+        $totalPresensiCount = (clone $attendanceQuery)->count();
+        $hadirCount = (clone $attendanceQuery)->whereIn('status', ['HADIR', 'present', 'HADIR_TEPAT_WAKTU'])->count();
+        $terlambatCount = (clone $attendanceQuery)->where('status', 'TERLAMBAT')->count();
+        $tidakMasukCount = (clone $attendanceQuery)->whereIn('status', ['IZIN', 'SAKIT', 'ALPHA', 'absent', 'alpa'])->count();
+
+        if ($totalPresensiCount > 0) {
+            $pctHadir = round(($hadirCount / $totalPresensiCount) * 100, 1);
+            $pctTerlambat = round(($terlambatCount / $totalPresensiCount) * 100, 1);
+            $pctTidakMasuk = round(($tidakMasukCount / $totalPresensiCount) * 100, 1);
+        } else {
+            $pctHadir = $totalPegawai > 0 ? round(($totalAktif / $totalPegawai) * 100, 1) : 100.0;
+            $pctTerlambat = 0.0;
+            $pctTidakMasuk = round(100 - $pctHadir, 1);
+        }
+
+        // ── Perhitungan KPI Jam Mengajar Guru (Ditarik dari Database) ──
+        $scheduleQuery = \App\Models\ClassSchedule::query()->where('is_active', true);
+        if (! empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
+            $scheduleQuery->whereHas('kelas', function ($q) use ($filters) {
+                $q->where('unit_id', $filters['unit_id']);
+            });
+        }
+
+        $totalScheduleCount = (clone $scheduleQuery)->count();
+
+        $topSubjectData = (clone $scheduleQuery)
+            ->select('subject_id', \Illuminate\Support\Facades\DB::raw('count(*) as total_jam'))
+            ->with('subject')
+            ->groupBy('subject_id')
+            ->orderByDesc('total_jam')
+            ->first();
+
+        $topSubjectName = $topSubjectData?->subject?->name ?? $topSubjectData?->subject?->nama ?? ($totalScheduleCount > 0 ? 'Mata Pelajaran Utama' : '-');
+        $topSubjectHours = (int) ($topSubjectData?->total_jam ?? 0);
+
+        $topTeacherData = (clone $scheduleQuery)
+            ->select('employee_id', \Illuminate\Support\Facades\DB::raw('count(*) as total_jam'))
+            ->with('employee')
+            ->groupBy('employee_id')
+            ->orderByDesc('total_jam')
+            ->first();
+
+        $topTeacherName = $topTeacherData?->employee?->nama_lengkap ?? '-';
+        $topTeacherHours = (int) ($topTeacherData?->total_jam ?? 0);
+
+        $avgHoursPerGuru = $totalGuru > 0 ? round($totalScheduleCount / $totalGuru, 1) : 0;
+
         return [
             'total_pegawai' => $totalPegawai,
             'total_aktif' => $totalAktif,
@@ -69,6 +122,23 @@ class EmployeeService
             'total_tu_operator' => $totalTUOperator,
             'by_unit' => $byUnit,
             'by_jabatan' => $byJabatan,
+            'kpi_presensi_pegawai' => [
+                'total_presensi' => $totalPresensiCount,
+                'total_hadir' => $hadirCount,
+                'total_terlambat' => $terlambatCount,
+                'total_tidak_masuk' => $tidakMasukCount,
+                'persentase_hadir' => $pctHadir,
+                'persentase_terlambat' => $pctTerlambat,
+                'persentase_tidak_masuk' => $pctTidakMasuk,
+            ],
+            'kpi_jam_mengajar_guru' => [
+                'total_jam_pelajaran' => $totalScheduleCount,
+                'mapel_terbanyak' => $topSubjectName,
+                'jam_mapel_terbanyak' => $topSubjectHours,
+                'guru_terbanyak' => $topTeacherName,
+                'jam_guru_terbanyak' => $topTeacherHours,
+                'rata_jam_per_guru' => $avgHoursPerGuru,
+            ],
         ];
     }
 
