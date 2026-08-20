@@ -7,29 +7,19 @@ use App\Http\Requests\V1\SimpanJabatanRequest;
 use App\Http\Requests\V1\UbahJabatanRequest;
 use App\Http\Resources\V1\JabatanResource;
 use App\Models\Position;
+use App\Services\AccessScopeService;
 use App\Services\JabatanService;
-use App\Support\RoleName;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class JabatanController extends Controller
 {
     public function __construct(
-        protected JabatanService $jabatanService
+        protected JabatanService $jabatanService,
+        protected AccessScopeService $accessScopeService,
     ) {}
-
-    /**
-     * Helper untuk memeriksa apakah user merupakan Kepala Sekolah
-     */
-    protected function userAdalahKepalaSekolah(?object $user): bool
-    {
-        if (! $user) {
-            return false;
-        }
-
-        return RoleName::userHasAny($user, ['Kepala Sekolah', 'kepala_sekolah', 'kepsek']);
-    }
 
     /**
      * Dapatkan daftar master jabatan berpaginasi.
@@ -45,6 +35,7 @@ class JabatanController extends Controller
             'dengan_sampah' => $request->query('dengan_sampah'),
         ];
 
+        $filters = $this->applyUnitReadScope($request, $filters);
         $perPage = (int) $request->query('per_page', 15);
         $orderBy = (string) $request->query('order_by', 'urutan');
         $orderDir = (string) $request->query('order_dir', 'asc');
@@ -63,16 +54,17 @@ class JabatanController extends Controller
                 'to' => $jabatan->lastItem(),
                 'total' => $jabatan->total(),
             ],
-            'statistik' => $this->jabatanService->dapatkanStatistik(),
+            'statistik' => $this->jabatanService->dapatkanStatistik($filters),
         ]);
     }
 
     /**
      * Dapatkan opsi masukan untuk dropdown form.
      */
-    public function options(): JsonResponse
+    public function options(Request $request): JsonResponse
     {
-        $options = $this->jabatanService->dapatkanOpsiMaster();
+        $allowedUnitIds = $this->unitScopeIds($request);
+        $options = $this->jabatanService->dapatkanOpsiMaster($allowedUnitIds);
 
         return response()->json([
             'status' => 'success',
@@ -84,9 +76,11 @@ class JabatanController extends Controller
     /**
      * Dapatkan ringkasan statistik jabatan.
      */
-    public function stats(): JsonResponse
+    public function stats(Request $request): JsonResponse
     {
-        $stats = $this->jabatanService->dapatkanStatistik();
+        $stats = $this->jabatanService->dapatkanStatistik(
+            $this->applyUnitReadScope($request, [])
+        );
 
         return response()->json([
             'status' => 'success',
@@ -101,18 +95,8 @@ class JabatanController extends Controller
     {
         $user = $request->user();
         $validated = $request->validated();
-
-        if ($this->userAdalahKepalaSekolah($user)) {
-            $isLevel1 = isset($validated['level_jabatan']) && (int) $validated['level_jabatan'] === 1;
-            $isPengurus = isset($validated['satuan_kerja']) && $validated['satuan_kerja'] === 'Pengurus';
-            $nameLower = strtolower($validated['nama_jabatan'] ?? '');
-
-            if ($isLevel1 || $isPengurus || str_contains($nameLower, 'pengurus yayasan') || str_contains($nameLower, 'yayasan')) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Role Kepala Sekolah tidak diizinkan untuk membuat atau mengubah data jabatan Pengurus Yayasan.',
-                ], Response::HTTP_FORBIDDEN);
-            }
+        if ($denied = $this->positionMutationDenied($user, null, $validated)) {
+            return $denied;
         }
 
         $userId = $user?->id;
@@ -128,9 +112,13 @@ class JabatanController extends Controller
     /**
      * Detail data jabatan berdasarkan ID.
      */
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         $jabatan = $this->jabatanService->cariBerdasarkanId($id);
+
+        if ($jabatan && $this->isUnitOnlyManager($request) && ! $this->accessScopeService->accessiblePositions($request->user())->whereKey($id)->exists()) {
+            $jabatan = null;
+        }
 
         if (! $jabatan) {
             return response()->json([
@@ -153,16 +141,13 @@ class JabatanController extends Controller
     {
         $user = $request->user();
         $existing = Position::withTrashed()->find($id);
-
-        if ($existing && $this->userAdalahKepalaSekolah($user) && $existing->isPengurusYayasan()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Role Kepala Sekolah tidak diizinkan untuk mengubah data jabatan Pengurus Yayasan.',
-            ], Response::HTTP_FORBIDDEN);
+        $validated = $request->validated();
+        if ($denied = $this->positionMutationDenied($user, $existing, $validated)) {
+            return $denied;
         }
 
         $userId = $user?->id;
-        $jabatan = $this->jabatanService->ubah($id, $request->validated(), $userId);
+        $jabatan = $this->jabatanService->ubah($id, $validated, $userId);
 
         return response()->json([
             'status' => 'success',
@@ -178,12 +163,8 @@ class JabatanController extends Controller
     {
         $user = $request->user();
         $existing = Position::find($id);
-
-        if ($existing && $this->userAdalahKepalaSekolah($user) && $existing->isPengurusYayasan()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Role Kepala Sekolah tidak diizinkan untuk menghapus data jabatan Pengurus Yayasan.',
-            ], Response::HTTP_FORBIDDEN);
+        if ($denied = $this->positionMutationDenied($user, $existing)) {
+            return $denied;
         }
 
         $berhasil = $this->jabatanService->hapus($id);
@@ -204,8 +185,12 @@ class JabatanController extends Controller
     /**
      * Pulihkan data jabatan terhapus.
      */
-    public function restore(string $id): JsonResponse
+    public function restore(Request $request, string $id): JsonResponse
     {
+        $existing = Position::onlyTrashed()->find($id);
+        if ($denied = $this->positionMutationDenied($request->user(), $existing)) {
+            return $denied;
+        }
         $berhasil = $this->jabatanService->pulihkan($id);
 
         if (! $berhasil) {
@@ -234,6 +219,20 @@ class JabatanController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
+        if ($this->isUnitOnlyManager($request)) {
+            foreach ($rows as $row) {
+                $denied = $this->positionMutationDenied($request->user(), null, [
+                    'unit_sekolah_id' => $row['unit_sekolah_id'] ?? $row['unit_id'] ?? null,
+                    'level_jabatan' => $row['level_jabatan'] ?? 8,
+                    'satuan_kerja' => $row['satuan_kerja'] ?? 'Unit Pendidikan',
+                    'scope_akses' => $row['scope_akses'] ?? 'unit_sendiri',
+                ]);
+                if ($denied) {
+                    return $denied;
+                }
+            }
+        }
+
         $userId = $request->user()?->id;
         $hasil = $this->jabatanService->prosesImport($rows, $userId);
 
@@ -257,12 +256,54 @@ class JabatanController extends Controller
             'status' => $request->query('status'),
         ];
 
-        $data = $this->jabatanService->eksporData($filters);
+        $data = $this->jabatanService->eksporData($this->applyUnitReadScope($request, $filters));
 
         return response()->json([
             'status' => 'success',
             'message' => 'Data ekspor master jabatan berhasil dibuat.',
             'data' => $data,
         ]);
+    }
+
+    private function isUnitOnlyManager(Request $request): bool
+    {
+        return $this->accessScopeService->canManageUnitAccess($request->user())
+            && ! $this->accessScopeService->canManageGlobalAccess($request->user());
+    }
+
+    private function unitScopeIds(Request $request): ?array
+    {
+        if (! $this->isUnitOnlyManager($request)) {
+            return null;
+        }
+
+        return $this->accessScopeService
+            ->accessibleEducationUnits($request->user())
+            ->pluck('id')
+            ->all();
+    }
+
+    private function applyUnitReadScope(Request $request, array $filters): array
+    {
+        $unitIds = $this->unitScopeIds($request);
+        if ($unitIds !== null) {
+            $filters['allowed_unit_ids'] = $unitIds;
+        }
+
+        return $filters;
+    }
+
+    private function positionMutationDenied(object $user, ?Position $position, array $payload = []): ?JsonResponse
+    {
+        try {
+            $this->accessScopeService->assertPositionDefinitionMutation($user, $position, $payload);
+        } catch (HttpException $exception) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $exception->getMessage(),
+            ], $exception->getStatusCode() ?: Response::HTTP_FORBIDDEN);
+        }
+
+        return null;
     }
 }

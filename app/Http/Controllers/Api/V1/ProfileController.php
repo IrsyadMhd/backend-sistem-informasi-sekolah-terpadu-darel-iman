@@ -25,7 +25,7 @@ class ProfileController extends Controller
         $user->load([
             'roles:id,name',
             'employee.unit:id,name,code',
-            'employee.position:id,name,level',
+            'employee.position:id,name,level_jabatan',
             'employee.division:id,name,code',
         ]);
 
@@ -44,33 +44,60 @@ class ProfileController extends Controller
         $user = $request->user();
 
         $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
+            'fullName' => ['nullable', 'string', 'max:255'],
             'nama_panggilan' => ['nullable', 'string', 'max:100'],
             'phone' => ['nullable', 'string', 'max:30'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'alamat' => ['nullable', 'string', 'max:500'],
+            'unit' => ['nullable', 'string', 'max:255'],
+            'unit_id' => ['nullable', 'string', 'max:255'],
         ], [
             'email.required' => 'Alamat email wajib diisi.',
             'email.email' => 'Format email tidak valid.',
             'email.unique' => 'Alamat email sudah digunakan oleh pengguna lain.',
         ]);
 
-        DB::transaction(function () use ($user, $validated) {
+        $name = $validated['name'] ?? $validated['fullName'] ?? null;
+
+        DB::transaction(function () use ($user, $validated, $name) {
             // 1. Update User Record
-            $user->fill([
+            $userPayload = [
                 'email' => strtolower($validated['email']),
                 'phone' => $validated['phone'] ?? $user->phone,
-            ])->save();
+            ];
+            if ($name) {
+                $userPayload['name'] = $name;
+            }
+            $user->fill($userPayload)->save();
 
-            // 2. Update Employee Record (jika terhubung)
+            // 2. Resolve Unit ID if provided
+            $unitId = null;
+            if (! empty($validated['unit_id'])) {
+                $unitId = $validated['unit_id'];
+            } elseif (! empty($validated['unit'])) {
+                $unitId = \App\Models\EducationUnit::where('name', $validated['unit'])
+                    ->orWhere('id', $validated['unit'])
+                    ->value('id');
+            }
+
+            // 3. Update Employee Record (jika terhubung)
             /** @var Employee|null $employee */
             $employee = $user->employee;
             if ($employee) {
-                $employee->fill([
+                $employeePayload = [
                     'nama_panggilan' => $validated['nama_panggilan'] ?? $employee->nama_panggilan,
                     'no_hp' => $validated['phone'] ?? $employee->no_hp,
                     'email' => strtolower($validated['email']),
                     'alamat' => $validated['alamat'] ?? $employee->alamat,
-                ])->save();
+                ];
+                if ($name) {
+                    $employeePayload['nama_lengkap'] = $name;
+                }
+                if ($unitId) {
+                    $employeePayload['unit_id'] = $unitId;
+                }
+                $employee->fill($employeePayload)->save();
             }
         });
 
@@ -78,7 +105,7 @@ class ProfileController extends Controller
         $user->load([
             'roles:id,name',
             'employee.unit:id,name,code',
-            'employee.position:id,name,level',
+            'employee.position:id,name,level_jabatan',
             'employee.division:id,name,code',
         ]);
 
@@ -97,7 +124,19 @@ class ProfileController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        $request->validate([
+        $file = $request->file('foto') ?? $request->file('avatar');
+
+        if (! $file) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'File foto wajib diunggah.',
+                'errors' => [
+                    'foto' => ['File foto wajib diunggah.'],
+                ],
+            ], 422);
+        }
+
+        $validator = \Illuminate\Support\Facades\Validator::make(['foto' => $file], [
             'foto' => ['required', 'file', 'image', 'mimes:jpeg,png,jpg,webp', 'max:2048'],
         ], [
             'foto.required' => 'File foto wajib diunggah.',
@@ -106,7 +145,14 @@ class ProfileController extends Controller
             'foto.max' => 'Ukuran foto maksimal 2MB.',
         ]);
 
-        $file = $request->file('foto');
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
         $path = $file->store('avatars', 'public');
 
         DB::transaction(function () use ($user, $path) {
@@ -129,7 +175,7 @@ class ProfileController extends Controller
         $user->load([
             'roles:id,name',
             'employee.unit:id,name,code',
-            'employee.position:id,name,level',
+            'employee.position:id,name,level_jabatan',
             'employee.division:id,name,code',
         ]);
 
@@ -201,11 +247,14 @@ class ProfileController extends Controller
         return [
             'id' => $user->id,
             'name' => $user->name,
+            'fullName' => $employee?->nama_lengkap ?? $user->name,
             'email' => $user->email,
             'phone' => $user->phone ?? $employee?->no_hp,
             'roles' => $roles,
             'permissions' => $permissions,
             'foto' => $fotoUrl,
+            'avatar' => $fotoUrl,
+            'unit' => $employee?->unit?->name,
             'employee' => $employee ? [
                 'id' => $employee->id,
                 'niy' => $employee->niy,

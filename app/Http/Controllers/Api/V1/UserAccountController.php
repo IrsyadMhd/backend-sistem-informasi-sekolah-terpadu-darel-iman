@@ -70,6 +70,7 @@ class UserAccountController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $validated = $request->validate($this->rules());
 
         $user = DB::transaction(function () use ($validated) {
@@ -106,21 +107,30 @@ class UserAccountController extends Controller
     public function update(Request $request, User $user): JsonResponse
     {
         $this->assertUserAccess($request->user(), $user);
-        $validated = $request->validate($this->rules($user, false));
+        $isUnitOnlyManager = $this->accessScope->canManageUnitAccess($request->user())
+            && ! $this->accessScope->canManageGlobalAccess($request->user());
+        $validated = $request->validate($isUnitOnlyManager
+            ? ['role' => ['required', 'string', Rule::exists(Role::class, 'name')]]
+            : $this->rules($user, false));
+        $this->accessScope->assertRoleAssignmentAllowed($request->user(), $validated['role']);
 
-        $removingOwnAdminAccess = $request->user()->is($user)
+        $removingOwnAdminAccess = $request->user()->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin'])
+            && $request->user()->is($user)
             && ((! ($validated['is_active'] ?? $user->is_active))
                 || (($validated['role'] ?? $user->getRoleNames()->first()) !== 'Super Admin'));
 
         abort_if($removingOwnAdminAccess, 422, 'Super Admin tidak dapat menonaktifkan atau mencabut role dirinya sendiri.');
 
-        DB::transaction(function () use ($user, $validated) {
-            $user->fill([
-                'name' => $validated['name'],
-                'email' => strtolower($validated['email']),
-                'phone' => $validated['phone'] ?? null,
-                'is_active' => $validated['is_active'] ?? $user->is_active,
-            ])->save();
+        DB::transaction(function () use ($user, $validated, $isUnitOnlyManager) {
+            if (! $isUnitOnlyManager) {
+                $user->fill([
+                    'name' => $validated['name'],
+                    'email' => strtolower($validated['email']),
+                    'phone' => $validated['phone'] ?? null,
+                    'is_active' => $validated['is_active'] ?? $user->is_active,
+                ])->save();
+            }
+
             $user->syncRoles([$validated['role']]);
 
             if (! $user->is_active) {
@@ -137,6 +147,7 @@ class UserAccountController extends Controller
 
     public function resetPassword(Request $request, User $user): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $this->assertUserAccess($request->user(), $user);
         $validated = $request->validate([
             'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->letters()->numbers()->symbols()],
@@ -161,6 +172,7 @@ class UserAccountController extends Controller
 
     public function destroy(Request $request, User $user): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $this->assertUserAccess($request->user(), $user);
         abort_if($request->user()->is($user), 422, 'Anda tidak dapat menghapus akun yang sedang digunakan.');
 
@@ -187,16 +199,12 @@ class UserAccountController extends Controller
 
     private function isGlobalAdmin(User $user): bool
     {
-        return $user->hasAnyRole([
-            'Super Admin', 'super_admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
-            'pengurus_yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan',
-            'Bendahara Yayasan', 'bendahara_yayasan',
-        ]);
+        return $this->accessScope->hasGlobalScope($user);
     }
 
     private function assertUserAccess(User $authUser, User $targetUser): void
     {
-        if ($this->isGlobalAdmin($authUser) || $authUser->is($targetUser)) {
+        if ($this->accessScope->canManageGlobalAccess($authUser)) {
             return;
         }
 
@@ -204,7 +212,9 @@ class UserAccountController extends Controller
         $targetUnitId = $targetUser->employee?->unit_id ?? $targetUser->student?->unit_id;
 
         abort_unless(
-            $targetUnitId && $accessibleUnitIds->contains($targetUnitId),
+            $this->accessScope->canManageUnitAccess($authUser)
+                && $targetUnitId
+                && $accessibleUnitIds->contains($targetUnitId),
             403,
             'Akun pengguna berada di luar cakupan unit pendidikan Anda.'
         );
@@ -251,4 +261,3 @@ class UserAccountController extends Controller
         ];
     }
 }
-

@@ -29,16 +29,18 @@ class HakAksesController extends Controller
      */
     public function indexRoles(Request $request): JsonResponse
     {
+        $this->assertCanViewAccessManagement($request);
         $search = $request->get('search', '');
 
         $query = Role::withCount(['permissions', 'users'])
             ->orderBy('name');
 
         if ($search) {
-            $query->where('name', 'ilike', "%{$search}%");
+            $likeOp = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where('name', $likeOp, "%{$search}%");
         }
 
-        $roles = $query->get()->map(fn ($r) => [
+        $roles = $query->with('permissions')->get()->map(fn ($r) => [
             'id' => $r->id,
             'name' => $r->name,
             'guard_name' => $r->guard_name,
@@ -61,6 +63,7 @@ class HakAksesController extends Controller
      */
     public function storeRole(Request $request): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $validated = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:100', 'unique:roles,name'],
             'guard_name' => ['nullable', 'string', 'max:50'],
@@ -98,8 +101,9 @@ class HakAksesController extends Controller
     /**
      * Detail Role beserta permissions-nya.
      */
-    public function showRole(string $id): JsonResponse
+    public function showRole(Request $request, string $id): JsonResponse
     {
+        $this->assertCanViewAccessManagement($request);
         $role = Role::with('permissions')->findOrFail($id);
 
         return response()->json([
@@ -120,6 +124,7 @@ class HakAksesController extends Controller
      */
     public function updateRole(Request $request, string $id): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $role = Role::findOrFail($id);
 
         $validated = $request->validate([
@@ -155,8 +160,9 @@ class HakAksesController extends Controller
     /**
      * Hapus Role.
      */
-    public function destroyRole(string $id): JsonResponse
+    public function destroyRole(Request $request, string $id): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $role = Role::findOrFail($id);
 
         if ($role->users()->count() > 0) {
@@ -184,12 +190,14 @@ class HakAksesController extends Controller
      */
     public function indexPermissions(Request $request): JsonResponse
     {
+        $this->assertCanViewAccessManagement($request);
         $search = $request->get('search', '');
 
         $query = Permission::orderBy('name');
 
         if ($search) {
-            $query->where('name', 'ilike', "%{$search}%");
+            $likeOp = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where('name', $likeOp, "%{$search}%");
         }
 
         $permissions = $query->get();
@@ -220,6 +228,7 @@ class HakAksesController extends Controller
      */
     public function storePermission(Request $request): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $validated = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:150', 'unique:permissions,name'],
             'guard_name' => ['nullable', 'string', 'max:50'],
@@ -247,8 +256,9 @@ class HakAksesController extends Controller
     /**
      * Hapus Permission.
      */
-    public function destroyPermission(string $id): JsonResponse
+    public function destroyPermission(Request $request, string $id): JsonResponse
     {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
         $permission = Permission::findOrFail($id);
         $name = $permission->name;
         $permission->delete();
@@ -264,6 +274,7 @@ class HakAksesController extends Controller
      */
     public function stats(Request $request): JsonResponse
     {
+        $this->assertCanViewAccessManagement($request);
         $scopedEmployeesCount = $this->accessScope->accessibleEmployees($request->user())->count();
 
         return response()->json([
@@ -287,6 +298,7 @@ class HakAksesController extends Controller
      */
     public function indexPegawaiHakAkses(Request $request): JsonResponse
     {
+        $this->assertCanViewAccessManagement($request);
         $search = $request->get('search', '');
         $unitId = $request->get('unit_id', '');
         $jabatanId = $request->get('jabatan_id', '');
@@ -381,7 +393,13 @@ class HakAksesController extends Controller
             'password' => ['nullable', 'string', Password::min(8)->mixedCase()->letters()->numbers()->symbols()],
         ]);
 
-        $employee = $this->accessScope->accessibleEmployees($request->user())->findOrFail($employeeId);
+        $employee = $this->accessScope->accessibleEmployees($request->user())->whereKey($employeeId)->first();
+        abort_unless($employee, 403, 'Pegawai berada di luar cakupan unit akun.');
+        $this->accessScope->assertRoleAssignmentAllowed(
+            $request->user(),
+            $validated['role_name'],
+            $validated['permissions'] ?? []
+        );
 
         try {
             DB::transaction(function () use ($employee, $validated) {
@@ -426,5 +444,9 @@ class HakAksesController extends Controller
             ], 500);
         }
     }
-}
 
+    private function assertCanViewAccessManagement(Request $request): void
+    {
+        $this->accessScope->assertAccessManagement($request->user());
+    }
+}

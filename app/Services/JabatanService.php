@@ -20,6 +20,10 @@ class JabatanService
             ->withCount('employees')
             ->filter($filters);
 
+        if (array_key_exists('allowed_unit_ids', $filters)) {
+            $query->whereIn('unit_sekolah_id', $filters['allowed_unit_ids']);
+        }
+
         $allowedSorts = ['code', 'name', 'level_jabatan', 'urutan', 'created_at', 'is_active'];
         if (! in_array($orderBy, $allowedSorts)) {
             $orderBy = 'urutan';
@@ -32,14 +36,19 @@ class JabatanService
     /**
      * Dapatkan ringkasan statistik master jabatan.
      */
-    public function dapatkanStatistik(): array
+    public function dapatkanStatistik(array $filters = []): array
     {
-        $total = Position::count();
-        $aktif = Position::where('is_active', true)->count();
-        $nonaktif = Position::where('is_active', false)->count();
-        $tampilStruktur = Position::where('tampil_struktur', true)->count();
-        $bolehLogin = Position::where('boleh_login', true)->count();
-        $trash = Position::onlyTrashed()->count();
+        $query = fn () => Position::query()->when(
+            array_key_exists('allowed_unit_ids', $filters),
+            fn ($q) => $q->whereIn('unit_sekolah_id', $filters['allowed_unit_ids'])
+        );
+
+        $total = $query()->count();
+        $aktif = $query()->where('is_active', true)->count();
+        $nonaktif = $query()->where('is_active', false)->count();
+        $tampilStruktur = $query()->where('tampil_struktur', true)->count();
+        $bolehLogin = $query()->where('boleh_login', true)->count();
+        $trash = $query()->onlyTrashed()->count();
 
         return [
             'total_jabatan' => $total,
@@ -54,9 +63,10 @@ class JabatanService
     /**
      * Dapatkan opsi pilihan master data untuk dropdown form.
      */
-    public function dapatkanOpsiMaster(): array
+    public function dapatkanOpsiMaster(?array $allowedUnitIds = null): array
     {
         $units = EducationUnit::select('id', 'name', 'code', 'level')
+            ->when($allowedUnitIds !== null, fn ($query) => $query->whereIn('id', $allowedUnitIds))
             ->orderBy('name')
             ->get()
             ->map(fn ($u) => [
@@ -67,6 +77,7 @@ class JabatanService
 
         // Atasan langsung diambil dari tabel pegawai
         $pegawaiList = Employee::with(['position'])
+            ->when($allowedUnitIds !== null, fn ($query) => $query->whereIn('unit_id', $allowedUnitIds))
             ->where('status', 'Aktif')
             ->orderBy('nama_lengkap')
             ->get(['id', 'nama_lengkap', 'niy', 'jabatan_id'])
@@ -314,9 +325,15 @@ class JabatanService
      */
     public function eksporData(array $filters = []): array
     {
-        return Position::with(['unitSekolah', 'atasanLangsung', 'atasanPegawai', 'roleSistem'])
+        $query = Position::with(['unitSekolah', 'atasanLangsung', 'atasanPegawai', 'roleSistem'])
             ->withCount('employees')
-            ->filter($filters)
+            ->filter($filters);
+
+        if (array_key_exists('allowed_unit_ids', $filters)) {
+            $query->whereIn('unit_sekolah_id', $filters['allowed_unit_ids']);
+        }
+
+        return $query
             ->orderBy('urutan')
             ->get()
             ->map(function ($j) {

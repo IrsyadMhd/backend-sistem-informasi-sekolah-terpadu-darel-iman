@@ -486,11 +486,15 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('can:dashboard.kepala-sekolah.view');
     Route::get('/dashboard/divisi-pendidikan', [DivisiPendidikanDashboardController::class, 'index'])
         ->middleware('can:dashboard.divisi-pendidikan.view');
+    Route::get('/dashboard/divisi-pendidikan/kpi/{type}', [DivisiPendidikanDashboardController::class, 'kpiDetail'])
+        ->middleware('can:dashboard.divisi-pendidikan.view');
     Route::get('/dashboard/waka-kurikulum', [WakaKurikulumDashboardController::class, 'index'])
         ->middleware('can:dashboard.waka-kurikulum.view');
     Route::get('/dashboard/waka-kesiswaan', [WakaKesiswaanDashboardController::class, 'index'])
         ->middleware('can:dashboard.waka-kesiswaan.view');
     Route::get('/dashboard/tata-usaha', [TataUsahaDashboardController::class, 'index'])
+        ->middleware('can:dashboard.tata-usaha.view');
+    Route::get('/dashboard/tata-usaha/kpi/{type}', [TataUsahaDashboardController::class, 'kpiDetail'])
         ->middleware('can:dashboard.tata-usaha.view');
     Route::get('/dashboard/wali-kelas', [WaliKelasDashboardController::class, 'index'])
         ->middleware('can:dashboard.guru.view');
@@ -623,15 +627,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/jabatan/import', [JabatanController::class, 'import'])
         ->middleware('permission:master.create|master.update|sistem.master_data');
     Route::post('/jabatan/{id}/restore', [JabatanController::class, 'restore'])
-        ->middleware('permission:master.update|sistem.master_data');
+        ->middleware('permission:master.update|employee.position.manage|sistem.master_data');
     Route::apiResource('jabatan', JabatanController::class)->only(['index', 'show'])
         ->middleware('permission:master.view|sistem.master_data');
     Route::apiResource('jabatan', JabatanController::class)->only(['store'])
         ->middleware('permission:master.create|sistem.master_data');
     Route::apiResource('jabatan', JabatanController::class)->only(['update'])
-        ->middleware('permission:master.update|sistem.master_data');
+        ->middleware('permission:master.update|employee.position.manage|sistem.master_data');
     Route::apiResource('jabatan', JabatanController::class)->only(['destroy'])
-        ->middleware('permission:master.delete|sistem.master_data');
+        ->middleware('permission:master.delete|employee.position.manage|sistem.master_data');
 
     // Rute Master Jenis Unit Pendidikan & Mata Pelajaran
     Route::prefix('master')->group(function () {
@@ -760,7 +764,7 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Rute Master Hak Akses (Role & Permission — Spatie)
-    Route::prefix('hak-akses')->middleware('can:sistem.hak_akses')->group(function () {
+    Route::prefix('hak-akses')->middleware('permission:sistem.hak_akses|employee.role_access.manage')->group(function () {
         Route::get('/stats', [HakAksesController::class, 'stats']);
 
         // Role CRUD
@@ -1181,6 +1185,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::prefix('portal')->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student')->group(function () {
             Route::get('/dashboard', [StudentParentPortalController::class, 'dashboard']);
             Route::get('/children', [StudentParentPortalController::class, 'children']);
+            Route::put('/children/{childId}/password', [StudentParentPortalController::class, 'updateChildPassword'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
              Route::get('/profile', [StudentParentPortalController::class, 'profile']);
              Route::get('/attendance-qr', [StudentParentPortalController::class, 'attendanceQr']);
              Route::get('/schedules', [StudentParentPortalController::class, 'schedules']);

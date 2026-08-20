@@ -25,30 +25,63 @@ class LmsUjianSeeder extends Seeder
             return;
         }
 
-        $ujian = LmsUjian::updateOrCreate(
-            ['judul_ujian' => 'Ujian Harian CBT — Pendidikan Pancasila Kelas X'],
-            [
-                'kisi_kisi_id' => $kisi->id,
-                'kelas_id' => $kelas->id,
-                'semester_id' => $semester->id,
-                'guru_id' => $guru?->id,
-                'instruksi' => 'Kerjakan seluruh butir soal dengan jujur dan teliti. Waktu akan berjalan otomatis saat tombol Mulai Ujian diklik.',
-                'waktu_mulai' => now()->subHours(2),
-                'waktu_selesai' => now()->addDays(2),
-                'durasi_menit' => 45,
-                'acak_soal' => true,
-                'acak_jawaban' => true,
-                'tampilkan_nilai_langsung' => true,
-                'nilai_kkm' => 75.0,
-                'max_attempt' => 1,
-                'status' => 'berlangsung',
-            ]
-        );
+        $kelases = Kelas::all();
+        if ($kelases->isEmpty()) {
+            $kelases = collect([$kelas]);
+        }
+
+        foreach ($kelases as $kls) {
+            $ujianPai = LmsUjian::updateOrCreate(
+                [
+                    'judul_ujian' => 'Ujian Harian CBT — Pendidikan Agama Islam (PAI) '.$kls->nama_kelas,
+                    'kelas_id' => $kls->id,
+                ],
+                [
+                    'kisi_kisi_id' => $kisi->id,
+                    'kelas_id' => $kls->id,
+                    'semester_id' => $semester->id,
+                    'guru_id' => $guru?->id,
+                    'instruksi' => 'Kerjakan seluruh butir soal Pendidikan Agama Islam (PAI) dengan jujur dan teliti.',
+                    'waktu_mulai' => now()->startOfDay(),
+                    'waktu_selesai' => '2026-12-31 23:59:59',
+                    'durasi_menit' => 45,
+                    'acak_soal' => true,
+                    'acak_jawaban' => true,
+                    'tampilkan_nilai_langsung' => true,
+                    'nilai_kkm' => 75.0,
+                    'max_attempt' => 3,
+                    'status' => 'berlangsung',
+                ]
+            );
+
+            $ujianPancasila = LmsUjian::updateOrCreate(
+                [
+                    'judul_ujian' => 'Ujian Harian CBT — Pendidikan Pancasila '.$kls->nama_kelas,
+                    'kelas_id' => $kls->id,
+                ],
+                [
+                    'kisi_kisi_id' => $kisi->id,
+                    'kelas_id' => $kls->id,
+                    'semester_id' => $semester->id,
+                    'guru_id' => $guru?->id,
+                    'instruksi' => 'Kerjakan seluruh butir soal Pendidikan Pancasila dengan jujur dan teliti.',
+                    'waktu_mulai' => now()->startOfDay(),
+                    'waktu_selesai' => '2026-12-31 23:59:59',
+                    'durasi_menit' => 45,
+                    'acak_soal' => true,
+                    'acak_jawaban' => true,
+                    'tampilkan_nilai_langsung' => true,
+                    'nilai_kkm' => 75.0,
+                    'max_attempt' => 3,
+                    'status' => 'berlangsung',
+                ]
+            );
+        }
 
         if ($siswa) {
             LmsUjianSesi::updateOrCreate(
                 [
-                    'ujian_id' => $ujian->id,
+                    'ujian_id' => $ujianPai->id,
                     'siswa_id' => $siswa->id,
                 ],
                 [

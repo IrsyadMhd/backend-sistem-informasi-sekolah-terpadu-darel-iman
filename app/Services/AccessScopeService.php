@@ -7,6 +7,8 @@ use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\ParentModel;
+use App\Models\Position;
+use App\Models\Role;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,16 +17,245 @@ use Illuminate\Support\Facades\Schema;
 
 class AccessScopeService
 {
+    private const GLOBAL_SCOPE_ROLES = [
+        'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
+        'Admin', 'admin',
+        'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+        'pengurus_yayasan', 'Pengurus Yayasan',
+        'Sekretaris Yayasan', 'sekretaris_yayasan',
+        'Bendahara Yayasan', 'bendahara_yayasan',
+    ];
+
+    private const GLOBAL_ACCESS_MANAGER_ROLES = [
+        'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
+        'Admin', 'admin',
+        'pengurus_yayasan', 'Pengurus Yayasan', 'pengurus-yayasan',
+    ];
+
+    private const UNIT_ACCESS_MANAGER_ROLES = [
+        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
+        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan', 'kepala-bidang-pendidikan',
+        'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
+    ];
+
+    private const GLOBAL_ROLE_NAMES = [
+        'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
+        'Admin', 'admin',
+        'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+        'pengurus_yayasan', 'Pengurus Yayasan',
+        'Sekretaris Yayasan', 'sekretaris_yayasan',
+        'Bendahara Yayasan', 'bendahara_yayasan',
+    ];
+
+    private const GLOBAL_ACCESS_PERMISSIONS = [
+        'sistem.hak_akses',
+        'sistem.master_data',
+        'sistem.pengaturan',
+        'permission.manage',
+        'role.manage',
+        'employee.view_all',
+        'employee.create',
+        'employee.delete',
+        'employee.import',
+        'unit.view_all',
+        'unit.create',
+        'unit.update',
+        'unit.delete',
+        'master.create',
+        'master.update',
+        'master.delete',
+    ];
+
+    /**
+     * Role yang boleh melihat seluruh cakupan data organisasi.
+     */
+    public function hasGlobalScope(User $user): bool
+    {
+        return $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES);
+    }
+
+    /**
+     * Hanya role ini yang boleh mengubah definisi akses global dan seluruh
+     * data pegawai/unit.
+     */
+    public function canManageGlobalAccess(User $user): bool
+    {
+        return $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES);
+    }
+
+    /**
+     * Pengelola unit boleh mengatur assignment lokal, tetapi tidak definisi
+     * role/permission global.
+     */
+    public function canManageUnitAccess(User $user): bool
+    {
+        return $this->hasAnyRole($user, self::UNIT_ACCESS_MANAGER_ROLES);
+    }
+
+    public function canManageAccess(User $user): bool
+    {
+        return $this->canManageGlobalAccess($user) || $this->canManageUnitAccess($user);
+    }
+
+    public function assertGlobalAccessManagement(User $user): void
+    {
+        abort_unless(
+            $this->canManageGlobalAccess($user),
+            403,
+            'Hanya Super Admin, Admin, dan Pengurus Yayasan yang dapat mengubah akses global.'
+        );
+    }
+
+    public function assertAccessManagement(User $user): void
+    {
+        abort_unless(
+            $this->canManageAccess($user),
+            403,
+            'Akun tidak memiliki kewenangan untuk mengelola hak akses.'
+        );
+    }
+
+    /**
+     * Cegah pengelola unit memberikan role atau permission yang membuka
+     * kewenangan global kepada pegawai.
+     */
+    public function assertRoleAssignmentAllowed(User $user, string $roleName, array $permissions = []): void
+    {
+        $this->assertAccessManagement($user);
+
+        if ($this->canManageGlobalAccess($user)) {
+            return;
+        }
+
+        abort_if(
+            $this->hasAnyRoleName($roleName, self::GLOBAL_ROLE_NAMES),
+            403,
+            'Pengelola unit tidak dapat menetapkan role global.'
+        );
+
+        $globalPermission = collect($permissions)->first(
+            fn ($permission) => in_array((string) $permission, self::GLOBAL_ACCESS_PERMISSIONS, true)
+        );
+
+        abort_if(
+            $globalPermission !== null,
+            403,
+            'Pengelola unit tidak dapat menetapkan permission global.'
+        );
+    }
+
+    /**
+     * Query posisi yang terafiliasi dengan unit pengelola. Posisi global tidak
+     * dipakai untuk assignment lokal agar tidak terjadi perubahan lintas unit.
+     */
+    public function accessiblePositions(User $user): Builder
+    {
+        if ($this->canManageGlobalAccess($user)) {
+            return Position::query();
+        }
+
+        $unitIds = $this->accessibleEducationUnits($user)->pluck('id');
+
+        if ($unitIds->isEmpty()) {
+            return Position::query()->whereRaw('1 = 0');
+        }
+
+        return Position::query()->where(function ($query) use ($unitIds) {
+            $query->whereIn('unit_sekolah_id', $unitIds)
+                ->orWhere(function ($local) {
+                    $local->whereNull('unit_sekolah_id')
+                        ->where('satuan_kerja', 'Unit Pendidikan')
+                        ->whereNotIn('scope_akses', ['semua_unit', 'bidang_pendidikan'])
+                        ->where('level_jabatan', '>', 2);
+                });
+        });
+    }
+
+    public function assertPositionAssignment(User $user, ?string $positionId): void
+    {
+        if (! $positionId || $this->canManageGlobalAccess($user)) {
+            return;
+        }
+
+        abort_unless(
+            $this->canManageUnitAccess($user)
+                && $this->accessiblePositions($user)->whereKey($positionId)->exists(),
+            403,
+            'Jabatan berada di luar cakupan unit akun.'
+        );
+    }
+
+    /**
+     * Mutation pegawai penuh bersifat global. Pengelola unit hanya boleh
+     * mengubah assignment jabatan pada pegawai di unitnya sendiri.
+     */
+    public function assertEmployeeAssignment(User $user, Employee $employee, ?string $positionId = null): void
+    {
+        $this->assertAccessManagement($user);
+
+        abort_unless(
+            $this->accessibleEmployees($user)->whereKey($employee->id)->exists(),
+            403,
+            'Pegawai berada di luar cakupan unit akun.'
+        );
+
+        $this->assertPositionAssignment($user, $positionId);
+    }
+
+    public function assertGlobalEmployeeMutation(User $user): void
+    {
+        $this->assertGlobalAccessManagement($user);
+    }
+
+    /**
+     * Scope posisi master untuk operasi definisi jabatan. Pengelola unit hanya
+     * dapat mengubah posisi yang benar-benar diberi unit pendidikan.
+     */
+    public function assertPositionDefinitionMutation(User $user, ?Position $position, array $payload = []): void
+    {
+        if ($this->canManageGlobalAccess($user)) {
+            return;
+        }
+
+        abort_unless(
+            $this->canManageUnitAccess($user),
+            403,
+            'Hanya pengelola unit yang dapat mengubah jabatan unit.'
+        );
+
+        $unitId = $payload['unit_sekolah_id'] ?? $position?->unit_sekolah_id;
+        $level = (int) ($payload['level_jabatan'] ?? $position?->level_jabatan ?? 0);
+        $scope = (string) ($payload['scope_akses'] ?? $position?->scope_akses ?? '');
+        $satuanKerja = (string) ($payload['satuan_kerja'] ?? $position?->satuan_kerja ?? '');
+        $roleId = $payload['role_sistem_id'] ?? $position?->role_sistem_id;
+
+        abort_unless(
+            $unitId && $this->accessibleEducationUnits($user)->whereKey($unitId)->exists(),
+            403,
+            'Jabatan harus terkait unit pendidikan dalam cakupan akun.'
+        );
+
+        abort_if(
+            $level <= 2 || $satuanKerja !== 'Unit Pendidikan' || in_array($scope, ['semua_unit', 'bidang_pendidikan'], true),
+            403,
+            'Pengelola unit tidak dapat mengubah jabatan atau cakupan global.'
+        );
+
+        if ($roleId) {
+            $roleName = Role::query()->whereKey($roleId)->value('name');
+            abort_if(
+                $roleName && $this->hasAnyRoleName($roleName, self::GLOBAL_ROLE_NAMES),
+                403,
+                'Pengelola unit tidak dapat mengaitkan jabatan dengan role global.'
+            );
+        }
+    }
     /**
      * Scope query Unit Pendidikan yang berhak diakses user.
      */
     public function accessibleEducationUnits(User $user): Builder
     {
-        if ($this->hasAnyRole($user, [
-            'Super Admin', 'super_admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
-            'pengurus_yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan',
-            'Bendahara Yayasan', 'bendahara_yayasan',
-        ])) {
+        if ($this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
             return EducationUnit::query();
         }
 
@@ -88,7 +319,7 @@ class AccessScopeService
             return EducationUnit::query()->whereIn('id', $parentUnitIds);
         }
 
-        return EducationUnit::query();
+        return EducationUnit::query()->whereRaw('1 = 0');
     }
 
     /**
@@ -194,11 +425,7 @@ class AccessScopeService
      */
     public function accessibleEmployees(User $user): Builder
     {
-        if ($this->hasAnyRole($user, [
-            'Super Admin', 'super_admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
-            'pengurus_yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan',
-            'Bendahara Yayasan', 'bendahara_yayasan',
-        ])) {
+        if ($this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
             return Employee::query();
         }
 
@@ -266,6 +493,13 @@ class AccessScopeService
         $actual = $user->getRoleNames()->map($normalize);
 
         return collect($roles)->map($normalize)->intersect($actual)->isNotEmpty();
+    }
+
+    private function hasAnyRoleName(string $actualRole, array $roles): bool
+    {
+        $normalize = static fn (string $role): string => strtolower((string) preg_replace('/[\s_-]+/', '', $role));
+
+        return in_array($normalize($actualRole), collect($roles)->map($normalize)->all(), true);
     }
 
     /**

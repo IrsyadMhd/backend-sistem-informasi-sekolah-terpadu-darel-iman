@@ -414,6 +414,10 @@ class StudentParentPortalController extends Controller
 
     public function submitAssignment(Request $request, string $assignmentId): JsonResponse
     {
+        if (! Str::isUuid($assignmentId)) {
+            return response()->json(['success' => false, 'message' => 'Penugasan tidak ditemukan.'], 404);
+        }
+
         $request->validate([
             'jawaban_teks' => 'nullable|string',
             'file_lampiran' => 'nullable|file|max:10240',
@@ -735,6 +739,10 @@ class StudentParentPortalController extends Controller
 
     public function updateSchoolInformationState(Request $request, string $informationId): JsonResponse
     {
+        if (! Str::isUuid($informationId)) {
+            return response()->json(['success' => false, 'message' => 'Informasi tidak ditemukan.'], 404);
+        }
+
         $student = $this->getStudentContext($request);
         abort_unless($student, 404, 'Data siswa tidak ditemukan.');
         $item = $this->schoolInformationQuery($request, $student)->whereKey($informationId)->firstOrFail();
@@ -856,6 +864,10 @@ class StudentParentPortalController extends Controller
 
     public function signStudentNote(Request $request, string $noteId): JsonResponse
     {
+        if (! Str::isUuid($noteId)) {
+            return response()->json(['success' => false, 'message' => 'Catatan siswa tidak ditemukan.'], 404);
+        }
+
         $user = $request->user();
         $student = $this->getStudentContext($request);
         if (! $student) {
@@ -934,6 +946,10 @@ class StudentParentPortalController extends Controller
 
     public function downloadReport(Request $request, string $id)
     {
+        if (! Str::isUuid($id)) {
+            return response()->json(['success' => false, 'message' => 'Rapor tidak tersedia.'], 404);
+        }
+
         $student = $this->getStudentContext($request);
         $report = $student ? LmsRapor::with(['siswa', 'kelas', 'semester', 'tahunAjaran', 'waliKelas'])
             ->where('siswa_id', $student->id)->whereIn('status_rapor', ['published', 'diterbitkan'])->find($id) : null;
@@ -1141,6 +1157,10 @@ class StudentParentPortalController extends Controller
     public function startExam(Request $request, string $id): JsonResponse
 
     {
+        if (! Str::isUuid($id)) {
+            return response()->json(['success' => false, 'message' => 'Ujian tidak tersedia untuk kelas Anda.'], 404);
+        }
+
         $student = $this->getAuthenticatedStudent($request);
         if (! $student) {
             return response()->json(['success' => false, 'message' => 'Akun siswa tidak valid.'], 403);
@@ -1174,6 +1194,10 @@ class StudentParentPortalController extends Controller
 
     public function saveExamAnswers(Request $request, string $sesiId): JsonResponse
     {
+        if (! Str::isUuid($sesiId)) {
+            return response()->json(['success' => false, 'message' => 'Sesi ujian tidak ditemukan atau bukan milik Anda.'], 403);
+        }
+
         $request->validate(['jawaban' => ['present', 'array', 'max:500']]);
         $student = $this->getAuthenticatedStudent($request);
         $session = $student ? LmsUjianSesi::with('ujian')->where('id', $sesiId)->where('siswa_id', $student->id)->first() : null;
@@ -1196,6 +1220,10 @@ class StudentParentPortalController extends Controller
 
     public function finishExam(Request $request, string $sesiId): JsonResponse
     {
+        if (! Str::isUuid($sesiId)) {
+            return response()->json(['success' => false, 'message' => 'Sesi ujian tidak ditemukan atau bukan milik Anda.'], 403);
+        }
+
         $student = $this->getAuthenticatedStudent($request);
         $session = $student ? LmsUjianSesi::with('ujian')->where('id', $sesiId)->where('siswa_id', $student->id)->first() : null;
         if (! $session || $session->status !== 'proses') {
@@ -1475,6 +1503,37 @@ class StudentParentPortalController extends Controller
             'success' => true,
             'message' => 'Pesan berhasil dikirim.',
             'data' => $message->load(['sender:id,name', 'recipient:id,name']),
+        ]);
+    }
+
+    public function updateChildPassword(Request $request, string $childId): JsonResponse
+    {
+        $request->validate([
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        $student = Student::where('id', $childId)->first();
+        if (! $student) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data anak tidak ditemukan.',
+            ], 404);
+        }
+
+        if ($student->user_id) {
+            $user = \App\Models\User::find($student->user_id);
+            if ($user) {
+                $user->update(['password' => \Illuminate\Support\Facades\Hash::make($request->password)]);
+            }
+        }
+
+        $metadata = is_array($student->metadata) ? $student->metadata : [];
+        $metadata['login_password_updated_at'] = now()->toIso8601String();
+        $student->update(['metadata' => $metadata]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password login untuk anak (' . $student->full_name . ') berhasil diperbarui.',
         ]);
     }
 }

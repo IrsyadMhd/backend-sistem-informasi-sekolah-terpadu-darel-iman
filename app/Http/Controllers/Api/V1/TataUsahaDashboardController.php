@@ -35,4 +35,24 @@ class TataUsahaDashboardController extends Controller
             'data' => $data,
         ]);
     }
+
+    public function kpiDetail(Request $request, string $type): JsonResponse
+    {
+        $user = $request->user();
+
+        if (! $user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized access.',
+            ], 401);
+        }
+
+        $data = $this->service->getKpiDetail($user, $type, $request->all());
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Detail KPI berhasil dimuat.',
+            'data' => $data,
+        ]);
+    }
 }

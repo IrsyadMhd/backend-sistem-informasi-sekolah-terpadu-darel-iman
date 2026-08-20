@@ -11,7 +11,8 @@ class EnsureFoundationReadOnly
 {
     /**
      * Middleware untuk memproteksi endpoint operasional dari aksi penulisan (POST/PUT/PATCH/DELETE)
-     * khusus untuk role Pengurus Yayasan / monitoring eksekutif.
+     * khusus untuk role yayasan monitoring; Pengurus Yayasan mendapat
+     * pengecualian terbatas pada modul personel dan hak akses global.
      */
     public function handle(Request $request, Closure $next): Response
     {
@@ -34,10 +35,20 @@ class EnsureFoundationReadOnly
                     $isAllowedProfile = $request->is('api/foundation/profile', 'api/foundation/profile/*', 'api/profile');
                     $isAllowedNotification = $request->is('api/foundation/notifications', 'api/foundation/notifications/*', 'api/notifications');
 
-                    if (! $isAllowedProfile && ! $isAllowedNotification) {
+                    $isAllowedGlobalPersonnel = RoleName::userHasAny($user, ['Pengurus Yayasan', 'pengurus_yayasan'])
+                        && $request->is(
+                            'api/hak-akses',
+                            'api/hak-akses/*',
+                            'api/employees',
+                            'api/employees/*',
+                            'api/jabatan',
+                            'api/jabatan/*'
+                        );
+
+                    if (! $isAllowedProfile && ! $isAllowedNotification && ! $isAllowedGlobalPersonnel) {
                         return response()->json([
                             'status' => 'error',
-                            'message' => 'Akses ditolak. Role Pengurus Yayasan bersifat Read-Only Monitoring dan tidak memiliki akses mutasi data operasional.',
+                            'message' => 'Akses ditolak. Role yayasan monitoring tidak memiliki akses mutasi data operasional.',
                         ], 403);
                     }
                 }

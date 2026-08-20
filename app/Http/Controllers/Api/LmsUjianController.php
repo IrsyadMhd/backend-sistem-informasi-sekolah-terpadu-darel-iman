@@ -13,6 +13,7 @@ use App\Services\LmsUjianService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Str;
 
 class LmsUjianController extends Controller
 {
@@ -230,6 +231,13 @@ class LmsUjianController extends Controller
             }
         }
 
+        if (! Str::isUuid($id)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ujian tidak ditemukan.',
+            ], 404);
+        }
+
         $ujian = LmsUjian::query()->find($id);
         if (! $ujian) {
             return response()->json([
@@ -290,6 +298,13 @@ class LmsUjianController extends Controller
 
     public function submitAnswers(Request $request, string $sesiId): JsonResponse
     {
+        if (! Str::isUuid($sesiId)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi ujian tidak ditemukan atau bukan milik Anda.',
+            ], 403);
+        }
+
         $sesi = LmsUjianSesi::find($sesiId);
         if (! $this->canAccessSession($request, $sesi)) {
             return response()->json([
@@ -316,6 +331,13 @@ class LmsUjianController extends Controller
 
     public function finishSession(Request $request, string $sesiId): JsonResponse
     {
+        if (! Str::isUuid($sesiId)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi ujian tidak ditemukan atau bukan milik Anda.',
+            ], 403);
+        }
+
         $sesi = LmsUjianSesi::find($sesiId);
         if (! $this->canAccessSession($request, $sesi)) {
             return response()->json([

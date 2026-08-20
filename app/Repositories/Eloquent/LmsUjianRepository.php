@@ -99,6 +99,10 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
 
     public function findById(string $id, bool $withTrashed = false): ?LmsUjian
     {
+        if (! Str::isUuid($id)) {
+            return null;
+        }
+
         $query = LmsUjian::with([
             'kisiKisi',
             'kisiKisi.subject',
@@ -123,6 +127,10 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
 
     public function update(string $id, array $data): ?LmsUjian
     {
+        if (! Str::isUuid($id)) {
+            return null;
+        }
+
         $ujian = LmsUjian::find($id);
         if (! $ujian) {
             return null;
@@ -135,6 +143,10 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
 
     public function delete(string $id): bool
     {
+        if (! Str::isUuid($id)) {
+            return false;
+        }
+
         $ujian = LmsUjian::find($id);
         if (! $ujian) {
             return false;
@@ -145,6 +157,10 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
 
     public function restore(string $id): bool
     {
+        if (! Str::isUuid($id)) {
+            return false;
+        }
+
         $ujian = LmsUjian::withTrashed()->find($id);
         if (! $ujian || ! $ujian->trashed()) {
             return false;
@@ -155,6 +171,10 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
 
     public function duplicate(string $id): ?LmsUjian
     {
+        if (! Str::isUuid($id)) {
+            return null;
+        }
+
         $existing = LmsUjian::find($id);
         if (! $existing) {
             return null;
@@ -205,11 +225,19 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
     // CBT Session & Auto Scoring Implementation
     public function findSesiById(string $sesiId): ?LmsUjianSesi
     {
+        if (! Str::isUuid($sesiId)) {
+            return null;
+        }
+
         return LmsUjianSesi::with(['ujian.kisiKisi.bankSoal', 'siswa', 'jawaban.soal'])->find($sesiId);
     }
 
     public function getSesiByUjianId(string $ujianId): Collection
     {
+        if (! Str::isUuid($ujianId)) {
+            return new Collection();
+        }
+
         return LmsUjianSesi::with(['siswa', 'jawaban'])
             ->where('ujian_id', $ujianId)
             ->orderBy('created_at', 'desc')
@@ -218,6 +246,10 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
 
     public function getSesiBySiswa(string $ujianId, string $siswaId): ?LmsUjianSesi
     {
+        if (! Str::isUuid($ujianId) || ! Str::isUuid($siswaId)) {
+            return null;
+        }
+
         return LmsUjianSesi::with(['jawaban'])
             ->where('ujian_id', $ujianId)
             ->where('siswa_id', $siswaId)

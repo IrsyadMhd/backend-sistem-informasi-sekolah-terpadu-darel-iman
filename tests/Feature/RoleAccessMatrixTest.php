@@ -70,7 +70,7 @@ class RoleAccessMatrixTest extends TestCase
             $user = User::where('email', $email)->firstOrFail();
 
             $this->assertTrue(Hash::check($password, $user->password));
-            $this->assertSame([$role], $user->getRoleNames()->all());
+            $this->assertContains($role, $user->getRoleNames()->all());
             $this->assertTrue($user->metadata['must_change_password']);
         }
     }

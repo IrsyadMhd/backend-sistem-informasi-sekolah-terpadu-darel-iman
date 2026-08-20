@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Services\AccessScopeService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,6 +16,13 @@ class UpdateEmployeeRequest extends FormRequest
     public function rules(): array
     {
         $employeeId = $this->route('employee') ?? $this->route('id');
+
+        $accessScope = app(AccessScopeService::class);
+        if ($this->user() && $accessScope->canManageUnitAccess($this->user()) && ! $accessScope->canManageGlobalAccess($this->user())) {
+            return [
+                'jabatan_id' => ['required', 'uuid', 'exists:positions,id'],
+            ];
+        }
 
         return [
             'niy' => ['nullable', 'string', 'max:50', Rule::unique('employees', 'niy')->ignore($employeeId)],

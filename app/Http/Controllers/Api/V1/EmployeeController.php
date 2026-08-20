@@ -27,7 +27,7 @@ class EmployeeController extends Controller
         $emp = Employee::where('user_id', $request->user()->id)->first();
         $userUnitId = $emp?->unit_id ?? data_get($request->user()->metadata, 'education_unit_id') ?? data_get($request->user()->metadata, 'unit_id');
 
-        $isGlobalUser = $request->user()->hasAnyRole(['Super Admin', 'Ketua Yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Kepala Bidang Pendidikan']);
+        $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
 
         if (empty($filters['unit_id']) && ! $isGlobalUser && $userUnitId) {
             $filters['unit_id'] = $userUnitId;
@@ -54,7 +54,7 @@ class EmployeeController extends Controller
         $emp = Employee::where('user_id', $request->user()->id)->first();
         $userUnitId = $emp?->unit_id ?? data_get($request->user()->metadata, 'education_unit_id') ?? data_get($request->user()->metadata, 'unit_id');
 
-        $isGlobalUser = $request->user()->hasAnyRole(['Super Admin', 'Ketua Yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Kepala Bidang Pendidikan']);
+        $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
 
         if (empty($filters['unit_id']) && ! $isGlobalUser && $userUnitId) {
             $filters['unit_id'] = $userUnitId;
@@ -95,9 +95,8 @@ class EmployeeController extends Controller
 
     public function store(StoreEmployeeRequest $request)
     {
+        $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
         $data = $request->validated();
-        $this->assertUnitScope($request, $data['unit_id'] ?? null);
-        $this->assertPositionScope($request, $data['jabatan_id'] ?? null);
         $employee = $this->employeeService->create($data);
 
         return response()->json([
@@ -109,10 +108,17 @@ class EmployeeController extends Controller
 
     public function update(UpdateEmployeeRequest $request, string $id)
     {
-        $this->scopedEmployee($request, $id);
+        $employee = $this->scopedEmployee($request, $id);
         $data = $request->validated();
-        $this->assertUnitScope($request, $data['unit_id'] ?? null);
-        $this->assertPositionScope($request, $data['jabatan_id'] ?? null);
+
+        if (! $this->accessScopeService->canManageGlobalAccess($request->user())) {
+            $this->accessScopeService->assertEmployeeAssignment(
+                $request->user(),
+                $employee,
+                $data['jabatan_id'] ?? null
+            );
+        }
+
         $employee = $this->employeeService->update($id, $data);
 
         return response()->json([
@@ -124,6 +130,7 @@ class EmployeeController extends Controller
 
     public function destroy(Request $request, string $id)
     {
+        $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
         $this->scopedEmployee($request, $id);
         $this->employeeService->delete($id);
 
@@ -136,18 +143,13 @@ class EmployeeController extends Controller
     public function positions(Request $request)
     {
         $user = $request->user();
-        $isFoundationUser = $user && $user->hasAnyRole([
-            'Super Admin', 'super_admin',
-            'Ketua Yayasan', 'ketua_yayasan',
-            'Pengurus Yayasan', 'pengurus_yayasan',
-            'Sekretaris Yayasan', 'sekretaris_yayasan',
-            'Bendahara Yayasan', 'bendahara_yayasan',
-            'Kepala Bidang Pendidikan', 'divisi_pendidikan',
-        ]);
+        if ($this->accessScopeService->canManageUnitAccess($user) && ! $this->accessScopeService->canManageGlobalAccess($user)) {
+            $query = $this->accessScopeService->accessiblePositions($user);
+        } else {
+            $query = \App\Models\Position::query();
+        }
 
-        $query = \App\Models\Position::query();
-
-        if (! $isFoundationUser) {
+        if (! $this->accessScopeService->hasGlobalScope($user) && ! $this->accessScopeService->canManageUnitAccess($user)) {
             $query->whereNotIn('level_jabatan', [1, 2])
                   ->where(function ($q) {
                       $q->whereNull('scope_akses')
@@ -165,6 +167,7 @@ class EmployeeController extends Controller
 
     public function assignTeaching(Request $request, string $id)
     {
+        $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
         $this->scopedEmployee($request, $id);
         $request->validate([
             'teachings' => 'required|array',
@@ -186,6 +189,8 @@ class EmployeeController extends Controller
 
     public function import(Request $request)
     {
+        $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
+
         return response()->json([
             'status' => 'success',
             'message' => 'Proses import data pegawai berhasil dilakukan',
@@ -208,40 +213,4 @@ class EmployeeController extends Controller
             ->firstOrFail();
     }
 
-    private function assertUnitScope(Request $request, ?string $unitId): void
-    {
-        if (! $unitId) {
-            return;
-        }
-
-        abort_unless(
-            $this->accessScopeService->accessibleEducationUnits($request->user())->whereKey($unitId)->exists(),
-            403,
-            'Unit pegawai berada di luar cakupan akun.'
-        );
-    }
-
-    private function assertPositionScope(Request $request, ?string $positionId): void
-    {
-        if (! $positionId) {
-            return;
-        }
-
-        $user = $request->user();
-        $isFoundationUser = $user && $user->hasAnyRole([
-            'Super Admin', 'super_admin',
-            'Ketua Yayasan', 'ketua_yayasan',
-            'Pengurus Yayasan', 'pengurus_yayasan',
-            'Sekretaris Yayasan', 'sekretaris_yayasan',
-            'Bendahara Yayasan', 'bendahara_yayasan',
-            'Kepala Bidang Pendidikan', 'divisi_pendidikan',
-        ]);
-
-        if (! $isFoundationUser) {
-            $pos = \App\Models\Position::find($positionId);
-            if ($pos && in_array((int) $pos->level_jabatan, [1, 2], true)) {
-                abort(403, 'Kepala Sekolah tidak memiliki hak akses untuk menentukan atau mengubah posisi Pengurus Yayasan dan Divisi Pendidikan.');
-            }
-        }
-    }
 }
