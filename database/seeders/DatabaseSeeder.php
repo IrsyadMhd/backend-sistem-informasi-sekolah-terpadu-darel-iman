@@ -38,6 +38,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             SuperAdminAcceptanceSeeder::class,
             ModulSemesterSeeder::class,
+            JadwalPelajaranSeeder::class,
             QrCredentialSeeder::class,
             PemantauanDivisiSeeder::class,
             PengumumanSekolahSeeder::class,

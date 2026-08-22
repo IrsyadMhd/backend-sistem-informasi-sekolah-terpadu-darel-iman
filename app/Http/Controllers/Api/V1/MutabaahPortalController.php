@@ -15,8 +15,9 @@ class MutabaahPortalController extends Controller
     public function children(Request $request): JsonResponse
     {
         $this->allow($request, 'mutabaah.daily.view');
+        $filters = $request->only(['unit_id', 'class_id', 'search']);
 
-        return $this->ok('Daftar anak berhasil dimuat.', $this->service->children($request->user()));
+        return $this->ok('Daftar anak berhasil dimuat.', $this->service->children($request->user(), $filters));
     }
 
     public function parentOverview(Request $request, string $studentId): JsonResponse

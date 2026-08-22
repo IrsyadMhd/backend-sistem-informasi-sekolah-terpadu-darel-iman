@@ -45,7 +45,9 @@ class LmsMateriResource extends JsonResource
             'link' => $this->link,
             'urutan' => (int) ($this->urutan ?? 1),
             'status' => $this->status ?? ($this->is_published ? 'aktif' : 'draft'),
+            'ringkasan' => $this->ringkasan,
             'catatan' => $this->catatan,
+            'bobot' => (int) ($this->bobot ?? 0),
             'media' => $this->whenLoaded('media'),
             'created_by' => $this->created_by,
             'creator' => $this->whenLoaded('creator', function () {

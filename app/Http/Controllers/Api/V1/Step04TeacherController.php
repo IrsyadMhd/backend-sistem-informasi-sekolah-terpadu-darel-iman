@@ -84,10 +84,21 @@ class Step04TeacherController extends Controller
     public function monitoring(Request $request): JsonResponse
     {
         $date = ($request->date('date') ?: now())->startOfDay();
+        $params = $request->only([
+            'period',
+            'date',
+            'start_date',
+            'end_date',
+            'month',
+            'year',
+            'semester_id',
+            'academic_year_id',
+            'unit_id',
+        ]);
 
         return response()->json([
             'success' => true,
-            'data' => $this->monitoring->overview($request->user(), $date),
+            'data' => $this->monitoring->overview($request->user(), $date, $params),
         ]);
     }
 }

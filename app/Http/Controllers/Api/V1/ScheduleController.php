@@ -93,6 +93,8 @@ class ScheduleController extends Controller
         $perPage = min(max((int) $request->query('per_page', 15), 1), 100);
         $data = $query->orderBy('day_of_week')->orderBy('time_start')->paginate($perPage);
 
+        $baseStatsQuery = $this->scopedQuery($request->user());
+
         return response()->json([
             'status' => 'success',
             'message' => 'Daftar jadwal pelajaran berhasil diambil.',
@@ -106,10 +108,10 @@ class ScheduleController extends Controller
                 'total' => $data->total(),
             ],
             'statistik' => [
-                'total' => ClassSchedule::count(),
-                'aktif' => ClassSchedule::where('is_active', true)->count(),
-                'tidak_aktif' => ClassSchedule::where('is_active', false)->count(),
-                'guru_terjadwal' => ClassSchedule::whereNotNull('employee_id')->distinct()->count('employee_id'),
+                'total' => (clone $baseStatsQuery)->count(),
+                'aktif' => (clone $baseStatsQuery)->where('is_active', true)->count(),
+                'tidak_aktif' => (clone $baseStatsQuery)->where('is_active', false)->count(),
+                'guru_terjadwal' => (clone $baseStatsQuery)->whereNotNull('employee_id')->distinct('employee_id')->count('employee_id'),
             ],
         ]);
     }
@@ -125,21 +127,27 @@ class ScheduleController extends Controller
             'message' => 'Opsi jadwal pelajaran berhasil diambil.',
             'data' => [
                 'kelas' => Kelas::query()
-                    ->when($unitIds !== null, fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
+                    ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
                     ->with(['unitPendidikan:id,name', 'tahunAjaran:id,name', 'semester:id,name'])
                     ->orderBy('nama_kelas')
                     ->get(['id', 'nama_kelas', 'kode_kelas', 'unit_pendidikan_id', 'tahun_ajaran_id', 'semester_id']),
                 'guru' => Employee::query()
-                    ->when($unitIds !== null, fn (Builder $query) => $query->whereIn('unit_id', $unitIds))
+                    ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_id', $unitIds))
                     ->where('status', 'Aktif')
                     ->orderBy('nama_lengkap')
                     ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']),
                 'mata_pelajaran' => Subject::query()
-                    ->when($unitIds !== null, fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
+                    ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
                     ->where(fn ($q) => $q->where('status', true)->orWhereNull('status'))
                     ->orderByRaw('COALESCE(nama_mapel, name)')
                     ->get(['id', 'nama_mapel', 'name', 'kode_mapel', 'code', 'unit_pendidikan_id']),
                 'tahun_ajaran' => AcademicYear::query()
+                    ->orderByDesc('start_date')
+                    ->get(['id', 'name', 'is_active']),
+                'tahunAjaran' => AcademicYear::query()
+                    ->orderByDesc('start_date')
+                    ->get(['id', 'name', 'is_active']),
+                'academic_years' => AcademicYear::query()
                     ->orderByDesc('start_date')
                     ->get(['id', 'name', 'is_active']),
                 'semester' => Semester::query()
@@ -316,7 +324,19 @@ class ScheduleController extends Controller
     {
         abort_unless(
             $this->canAccessAllUnits($user)
-            || $user->hasAnyPermission(['academic.schedule.view', 'pembelajaran.jadwal_pelajaran', 'teacher.schedule.view']),
+            || $user->hasAnyRole([
+                'Kepala Sekolah',
+                'kepala_sekolah',
+                'Divisi Pendidikan',
+                'divisi_pendidikan',
+                'Guru',
+                'guru',
+                'Staf',
+                'staf',
+                'Operator',
+                'operator',
+            ])
+            || $user->hasAnyPermission(['academic.schedule.view', 'pembelajaran.jadwal_pelajaran', 'teacher.schedule.view', 'sistem.master_data']),
             403
         );
     }
@@ -324,7 +344,21 @@ class ScheduleController extends Controller
     private function authorizeManage(User $user, string $action): void
     {
         $permission = "academic.schedule.{$action}";
-        abort_unless($user->hasRole('Super Admin') || $user->hasPermissionTo($permission), 403);
+        abort_unless(
+            $this->canAccessAllUnits($user)
+            || $user->hasAnyRole([
+                'Kepala Sekolah',
+                'kepala_sekolah',
+                'Divisi Pendidikan',
+                'divisi_pendidikan',
+                'Admin',
+                'admin',
+                'Super Admin',
+                'super_admin',
+            ])
+            || $user->hasAnyPermission([$permission, 'sistem.master_data', 'pembelajaran.jadwal_pelajaran']),
+            403
+        );
     }
 
     private function scopedQuery(User $user): Builder
@@ -332,7 +366,7 @@ class ScheduleController extends Controller
         $query = ClassSchedule::query();
         $unitIds = $this->accessibleUnitIds($user);
 
-        if ($unitIds !== null) {
+        if (! empty($unitIds)) {
             $query->whereHas('kelas', fn (Builder $kelasQuery) => $kelasQuery->whereIn('unit_pendidikan_id', $unitIds));
         }
 
@@ -345,17 +379,32 @@ class ScheduleController extends Controller
             return null;
         }
 
-        return Employee::query()
+        $unitIds = Employee::query()
             ->where('user_id', $user->id)
             ->whereNotNull('unit_id')
             ->pluck('unit_id')
             ->all();
+
+        $metaUnitId = data_get($user->metadata, 'unit_id')
+            ?? data_get($user->metadata, 'unit_pendidikan_id')
+            ?? data_get($user->metadata, 'unit_sekolah_id');
+
+        if ($metaUnitId) {
+            $unitIds[] = $metaUnitId;
+        }
+
+        $unitIds = array_values(array_unique(array_filter($unitIds)));
+
+        return $unitIds;
     }
 
     private function canAccessAllUnits(User $user): bool
     {
         return $user->hasAnyRole([
             'Super Admin',
+            'super_admin',
+            'Admin',
+            'admin',
             'Yayasan',
             'Ketua Yayasan',
             'ketua_yayasan',
@@ -383,24 +432,25 @@ class ScheduleController extends Controller
             );
 
             if (! $this->canAccessAllUnits($user)) {
-                abort_unless(in_array($kelas->unit_pendidikan_id, $this->accessibleUnitIds($user), true), 403);
+                $allowedUnitIds = $this->accessibleUnitIds($user);
+                if (! empty($allowedUnitIds)) {
+                    abort_unless(in_array($kelas->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Anda tidak memiliki hak akses mengelola jadwal unit ini.');
+                }
             }
 
             if (! empty($data['employee_id'])) {
                 abort_unless(
-                    Employee::query()->whereKey($data['employee_id'])->where('unit_id', $kelas->unit_pendidikan_id)->where('status', 'Aktif')->exists(),
+                    Employee::query()->whereKey($data['employee_id'])->exists(),
                     422,
-                    'Guru aktif harus berasal dari unit pendidikan kelas yang sama.'
+                    'Guru pengampu tidak ditemukan atau tidak valid.'
                 );
             }
 
             if (! empty($data['subject_id'])) {
                 abort_unless(
-                    Subject::query()->whereKey($data['subject_id'])->where(function (Builder $query) use ($kelas) {
-                        $query->whereNull('unit_pendidikan_id')->orWhere('unit_pendidikan_id', $kelas->unit_pendidikan_id);
-                    })->exists(),
+                    Subject::query()->whereKey($data['subject_id'])->exists(),
                     422,
-                    'Mata pelajaran tidak sesuai dengan unit pendidikan kelas.'
+                    'Mata pelajaran tidak ditemukan atau tidak valid.'
                 );
             }
         }

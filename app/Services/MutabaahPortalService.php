@@ -16,25 +16,65 @@ use Illuminate\Support\Facades\Schema;
 
 class MutabaahPortalService
 {
-    public function children(User $user)
+    public function children(User $user, array $filters = [])
     {
         $parent = ParentModel::where('user_id', $user->id)->first();
-        abort_unless($parent, 403, 'Akun belum terhubung dengan data orang tua.');
+        if ($parent) {
+            return $this->parentStudents($parent)->with(['educationUnit:id,name', 'kelas:id,name', 'schoolClass:id,name'])
+                ->orderBy('full_name')->get()->map(fn (Student $student) => [
+                    'id' => $student->id, 'name' => $student->full_name, 'nis' => $student->nis,
+                    'photo' => data_get($student->metadata, 'photo'), 'unit' => $student->educationUnit?->name,
+                    'class_name' => $student->kelas?->name || $student->schoolClass?->name,
+                    'unit_id' => $student->unit_id,
+                    'class_id' => $student->kelas_id || $student->class_id,
+                ]);
+        }
 
-        return $this->parentStudents($parent)->with(['educationUnit:id,name', 'schoolClass:id,name'])
-            ->orderBy('full_name')->get()->map(fn (Student $student) => [
+        // Fallback untuk Kepala Sekolah / Admin / Teacher / Musyrif / TU: tampilkan seluruh santri aktif dari database
+        $query = Student::with(['educationUnit:id,name', 'kelas:id,name', 'schoolClass:id,name'])
+            ->where(function ($q) {
+                $q->where('is_active', true)->orWhereNull('is_active');
+            });
+
+        if (! empty($filters['unit_id'])) {
+            $unitId = $filters['unit_id'];
+            $query->where('unit_id', $unitId);
+        }
+        if (! empty($filters['class_id'])) {
+            $classId = $filters['class_id'];
+            $query->where(function ($q) use ($classId) {
+                $q->where('kelas_id', $classId)->orWhere('class_id', $classId);
+            });
+        }
+        if (! empty($filters['search'])) {
+            $search = $filters['search'];
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                    ->orWhere('nis', 'like', "%{$search}%");
+            });
+        }
+
+        return $query->orderBy('full_name')
+            ->limit(100)
+            ->get()
+            ->map(fn (Student $student) => [
                 'id' => $student->id, 'name' => $student->full_name, 'nis' => $student->nis,
                 'photo' => data_get($student->metadata, 'photo'), 'unit' => $student->educationUnit?->name,
-                'class_name' => $student->schoolClass?->name,
+                'class_name' => $student->kelas?->name || $student->schoolClass?->name,
+                'unit_id' => $student->unit_id,
+                'class_id' => $student->kelas_id || $student->class_id,
             ]);
     }
 
     public function parentStudent(User $user, string $studentId): Student
     {
         $parent = ParentModel::where('user_id', $user->id)->first();
-        abort_unless($parent, 403, 'Akun belum terhubung dengan data orang tua.');
+        if ($parent) {
+            return $this->parentStudents($parent)->with(['educationUnit:id,name', 'schoolClass:id,name'])->findOrFail($studentId);
+        }
 
-        return $this->parentStudents($parent)->with(['educationUnit:id,name', 'schoolClass:id,name'])->findOrFail($studentId);
+        // Fallback untuk Admin / Teacher / TU: cari santri langsung berdasarkan ID
+        return Student::with(['educationUnit:id,name', 'schoolClass:id,name'])->findOrFail($studentId);
     }
 
     public function ownStudent(User $user): Student
@@ -117,8 +157,7 @@ class MutabaahPortalService
 
     private function visibleHeaders(string $studentId)
     {
-        return DB::table('mutabaah_daily_headers as h')->where('h.student_id', $studentId)->whereNull('h.deleted_at')
-            ->whereIn('h.status', ['finalized', 'parent_reviewed', 'parent_signed', 'follow_up']);
+        return DB::table('mutabaah_daily_headers as h')->where('h.student_id', $studentId)->whereNull('h.deleted_at');
     }
 
     private function periodSummary(string $studentId, Carbon $from, Carbon $to): array

@@ -25,6 +25,9 @@ class SimpanMateriRequest extends FormRequest
             'link' => 'nullable|string|max:500',
             'urutan' => 'nullable|integer|min:1',
             'status' => 'nullable|string|max:30',
+            'ringkasan' => 'nullable|string',
+            'catatan' => 'nullable|string',
+            'bobot' => 'nullable|integer|min:0',
         ];
     }
 

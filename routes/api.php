@@ -958,15 +958,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Jadwal Pelajaran
     Route::get('/schedules-options', [ScheduleController::class, 'options'])
-        ->middleware('permission:academic.schedule.view|sistem.master_data');
+        ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::apiResource('schedules', ScheduleController::class)->only(['index', 'show'])
-        ->middleware('permission:academic.schedule.view|sistem.master_data');
+        ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::apiResource('schedules', ScheduleController::class)->only(['store'])
-        ->middleware('permission:academic.schedule.create|sistem.master_data');
+        ->middleware('permission:academic.schedule.create|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
     Route::apiResource('schedules', ScheduleController::class)->only(['update'])
-        ->middleware('permission:academic.schedule.update|sistem.master_data');
+        ->middleware('permission:academic.schedule.update|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
     Route::apiResource('schedules', ScheduleController::class)->only(['destroy'])
-        ->middleware('permission:academic.schedule.delete|sistem.master_data');
+        ->middleware('permission:academic.schedule.delete|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
 
     // Nilai Siswa / Raport
     Route::get('/grades/rekap', [GradeController::class, 'rekap'])

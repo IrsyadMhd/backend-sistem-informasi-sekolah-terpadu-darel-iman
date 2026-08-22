@@ -139,7 +139,43 @@ class KelasService
             return [];
         }
 
-        $siswa = Student::where('kelas_id', $kelasId)->get();
+        $siswa = Student::where(function ($q) use ($kelasId) {
+            $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId);
+        })->where(function ($q) {
+            $q->where('is_active', true)->orWhereNull('is_active');
+        })->orderBy('full_name')->get();
+
+        $siswaIds = $siswa->pluck('id')->toArray();
+        $logsByStudent = \App\Models\TahfizhDailyLog::whereIn('student_id', $siswaIds)
+            ->whereNotNull('hafalan_surah_number')
+            ->orderBy('record_date', 'desc')
+            ->get()
+            ->groupBy('student_id');
+
+        $siswaMapped = $siswa->map(function ($st) use ($logsByStudent) {
+            $stLogs = $logsByStudent->get($st->id) ?? collect();
+            $latestLog = $stLogs->first();
+
+            $totalAyats = $stLogs->sum(function ($l) {
+                if ($l->hafalan_ayah_start && $l->hafalan_ayah_end) {
+                    return max((int)$l->hafalan_ayah_end - (int)$l->hafalan_ayah_start + 1, 0);
+                }
+                return (int)($l->hafalan_baris ?? 0);
+            });
+            $uniqueSurahs = $stLogs->pluck('hafalan_surah_number')->filter()->unique()->count();
+            $progressPct = $totalAyats > 0 ? round(($totalAyats / 6236) * 100, 2) : 0;
+
+            $stArray = $st->toArray();
+            $stArray['total_ayats_memorized'] = $totalAyats;
+            $stArray['total_surahs_memorized'] = $uniqueSurahs;
+            $stArray['hafalan_surah_terakhir'] = $latestLog->hafalan_surah_name ?? null;
+            $stArray['hafalan_ayat_terakhir'] = ($latestLog && $latestLog->hafalan_ayah_start) 
+                ? "{$latestLog->hafalan_ayah_start} - {$latestLog->hafalan_ayah_end}" 
+                : null;
+            $stArray['progress_percentage'] = $progressPct;
+
+            return $stArray;
+        });
 
         return [
             'kelas' => [
@@ -149,7 +185,7 @@ class KelasService
                 'kapasitas' => $kelas->kapasitas,
                 'jumlah_siswa' => $siswa->count(),
             ],
-            'siswa' => $siswa,
+            'siswa' => $siswaMapped,
         ];
     }
 
