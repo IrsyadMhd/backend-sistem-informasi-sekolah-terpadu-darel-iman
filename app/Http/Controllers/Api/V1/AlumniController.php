@@ -163,4 +163,178 @@ class AlumniController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Tambah data alumni baru
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $request->validate([
+            'full_name' => 'required|string|max:255',
+            'unit_id' => 'required|exists:education_units,id',
+            'nis' => 'nullable|string|max:50',
+            'nisn' => 'nullable|string|max:50',
+            'tahun_lulus' => 'required|string|max:10',
+            'status_lanjutan' => 'nullable|string|max:255',
+            'perguruan_tinggi' => 'nullable|string|max:255',
+            'pekerjaan' => 'nullable|string|max:255',
+            'catatan' => 'nullable|string',
+        ]);
+
+        $metadata = [
+            'is_alumni' => true,
+            'status_siswa' => 'alumni',
+            'status_alumni' => 'alumni',
+            'tahun_lulus' => $request->input('tahun_lulus'),
+            'status_lanjutan' => $request->input('status_lanjutan', 'Kuliah'),
+            'perguruan_tinggi' => $request->input('perguruan_tinggi', ''),
+            'tujuan_kelulusan' => $request->input('perguruan_tinggi', ''),
+            'pekerjaan' => $request->input('pekerjaan', ''),
+            'catatan_alumni' => $request->input('catatan', ''),
+        ];
+
+        $student = Student::create([
+            'full_name' => $request->input('full_name'),
+            'nis' => $request->input('nis', ''),
+            'nisn' => $request->input('nisn', ''),
+            'unit_id' => $request->input('unit_id'),
+            'is_active' => false,
+            'metadata' => $metadata,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data alumni baru berhasil ditambahkan.',
+            'data' => $student->load(['educationUnit']),
+        ], 201);
+    }
+
+    /**
+     * Update data alumni & tujuan lanjut sekolah
+     */
+    public function update(Request $request, string $id): JsonResponse
+    {
+        $student = Student::findOrFail($id);
+
+        if ($request->has('full_name') && $request->input('full_name')) {
+            $student->full_name = $request->input('full_name');
+        }
+        if ($request->has('nis')) {
+            $student->nis = $request->input('nis');
+        }
+        if ($request->has('nisn')) {
+            $student->nisn = $request->input('nisn');
+        }
+        if ($request->has('unit_id') && $request->input('unit_id')) {
+            $student->unit_id = $request->input('unit_id');
+        }
+
+        $metadata = is_array($student->metadata) ? $student->metadata : (json_decode($student->metadata, true) ?: []);
+
+        if ($request->has('status_lanjutan')) {
+            $metadata['status_lanjutan'] = $request->input('status_lanjutan');
+        }
+        if ($request->has('perguruan_tinggi')) {
+            $metadata['perguruan_tinggi'] = $request->input('perguruan_tinggi');
+            $metadata['tujuan_kelulusan'] = $request->input('perguruan_tinggi');
+        }
+        if ($request->has('pekerjaan')) {
+            $metadata['pekerjaan'] = $request->input('pekerjaan');
+        }
+        if ($request->has('tahun_lulus')) {
+            $metadata['tahun_lulus'] = $request->input('tahun_lulus');
+        }
+        if ($request->has('tujuan_kelulusan')) {
+            $metadata['tujuan_kelulusan'] = $request->input('tujuan_kelulusan');
+        }
+        if ($request->has('catatan')) {
+            $metadata['catatan_alumni'] = $request->input('catatan');
+        }
+
+        $student->metadata = $metadata;
+        $student->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data alumni & tujuan lanjut sekolah berhasil diperbarui.',
+            'data' => $student->fresh(['educationUnit', 'schoolClass']),
+        ]);
+    }
+
+    /**
+     * Memproses pindah unit (mutasi internal) dan menghapus/memindahkan asosiasi data dari unit asal
+     */
+    public function pindahUnit(Request $request, string $id): JsonResponse
+    {
+        $request->validate([
+            'target_unit_id' => 'required|exists:education_units,id',
+        ]);
+
+        $student = Student::findOrFail($id);
+        $oldUnitId = $student->unit_id;
+        $newUnitId = $request->input('target_unit_id');
+
+        $metadata = is_array($student->metadata) ? $student->metadata : (json_decode($student->metadata, true) ?: []);
+        $metadata['mutasi_type'] = 'masuk_unit_baru';
+        $metadata['unit_asal_id'] = $oldUnitId;
+        $metadata['tgl_mutasi'] = now()->toDateTimeString();
+        $metadata['catatan_mutasi'] = $request->input('alasan', 'Pindah unit internal');
+
+        $student->unit_id = $newUnitId;
+        $student->metadata = $metadata;
+        $student->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Siswa/alumni berhasil dipindahkan ke unit baru dan dilepas dari unit asal.',
+            'data' => $student->fresh(['educationUnit', 'schoolClass']),
+        ]);
+    }
+
+    /**
+     * Memproses mutasi keluar ke sekolah lain dan menghapus/menonaktifkan data dari unit bersangkutan
+     */
+    public function pindahKeluar(Request $request, string $id): JsonResponse
+    {
+        $student = Student::findOrFail($id);
+
+        $metadata = is_array($student->metadata) ? $student->metadata : (json_decode($student->metadata, true) ?: []);
+        $metadata['mutasi_type'] = 'keluar';
+        $metadata['status_siswa'] = 'mutasi_keluar';
+        $metadata['sekolah_tujuan'] = $request->input('sekolah_tujuan', 'Sekolah Lain');
+        $metadata['tgl_mutasi'] = now()->toDateTimeString();
+        $metadata['alasan_keluar'] = $request->input('alasan', 'Pindah keluar ke sekolah lain');
+
+        $student->is_active = false;
+
+        // Jika opsi hapus_dari_unit dicentang, hapus unit_id dari record bersangkutan
+        if ($request->boolean('hapus_dari_unit', true)) {
+            $metadata['unit_asal_dilepas'] = $student->unit_id;
+            $student->unit_id = null;
+        }
+
+        $student->metadata = $metadata;
+        $student->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data mutasi keluar berhasil diproses dan dilepas dari unit bersangkutan.',
+            'data' => $student->fresh(),
+        ]);
+    }
+
+    /**
+     * Hapus data alumni dari unit
+     */
+    public function destroy(string $id): JsonResponse
+    {
+        $student = Student::findOrFail($id);
+        $student->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data alumni berhasil dihapus.',
+        ]);
+    }
 }
+

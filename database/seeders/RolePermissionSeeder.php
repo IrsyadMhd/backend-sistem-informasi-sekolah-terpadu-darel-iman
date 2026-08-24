@@ -115,11 +115,24 @@ class RolePermissionSeeder extends Seeder
             'dashboard.guru.view',
             'dashboard.guru-tahfizh.view',
             'dashboard.guru-bk.view',
+            'dashboard.musyrif.view',
             'dashboard.operator.view',
             'dashboard.pemantauan.lihat',
             'dashboard.pemantauan.kelola',
             'divisi.monitoring',
             'divisi.laporan_bulanan',
+
+            // Keasramaan & Ke-Musyrif-an (Dormitory & Boarding Management)
+            'dormitory.view',
+            'dormitory.manage',
+            'mutabaah.boarding.input',
+            'mutabaah.school_hours.input',
+            'discipline.point.view',
+            'discipline.point.manage',
+            'clinic.health.view',
+            'clinic.health.manage',
+            'dormitory.permission.approve',
+            'dormitory.deposit.manage',
 
             // Dashboard Pengurus Yayasan (Foundation Monitoring)
             'foundation.dashboard.view',
@@ -752,12 +765,27 @@ class RolePermissionSeeder extends Seeder
             )));
         }
 
-        foreach (['Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah'] as $roleName) {
+        foreach (['Guru Tahfizh', 'guru_tahfizh'] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],
                 $teacherPortalCommon,
                 ['teacher.tahfizh.view', 'teacher.tahfizh.create', 'teacher.tahfizh.update',
                     'teacher.mutabaah.view', 'teacher.mutabaah.create', 'teacher.mutabaah.update'],
+            )));
+        }
+
+        foreach (['Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah'] as $roleName) {
+            $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
+                $rolePermissionMap[$roleName] ?? ['dashboard.view'],
+                $teacherPortalCommon,
+                ['teacher.tahfizh.view', 'teacher.tahfizh.create', 'teacher.tahfizh.update',
+                    'teacher.mutabaah.view', 'teacher.mutabaah.create', 'teacher.mutabaah.update',
+                    'dashboard.musyrif.view', 'dormitory.view', 'dormitory.manage',
+                    'mutabaah.boarding.input', 'mutabaah.school_hours.input',
+                    'discipline.point.view', 'discipline.point.manage',
+                    'clinic.health.view', 'clinic.health.manage',
+                    'dormitory.permission.approve', 'dormitory.deposit.manage',
+                    'worship_attendance.view', 'worship_attendance.scan', 'worship_attendance.verify', 'worship_attendance.session.manage', 'worship_attendance.private_status.view'],
             )));
         }
 
@@ -863,6 +891,7 @@ class RolePermissionSeeder extends Seeder
             'dashboard.pemantauan.lihat' => ['Admin'],
             'dashboard.guru.view' => ['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran', 'Wali Kelas', 'walas', 'wali_kelas', 'Guru PAI', 'Pembimbing', 'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah', 'Guru BK', 'guru_bk'],
             'dashboard.guru-tahfizh.view' => ['Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah'],
+            'dashboard.musyrif.view' => ['Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah'],
             'dashboard.guru-bk.view' => ['Guru BK', 'guru_bk'],
             'teacher.dashboard.view' => ['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran', 'Wali Kelas', 'walas', 'wali_kelas', 'Guru PAI', 'Pembimbing', 'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah', 'Guru BK', 'guru_bk'],
         ];

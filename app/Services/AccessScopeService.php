@@ -335,6 +335,7 @@ class AccessScopeService
             'Divisi Program Khusus', 'divisi_pendidikan', 'Kepala Sekolah', 'kepala_sekolah',
             'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan',
             'Tata Usaha', 'TU', 'tata_usaha', 'Guru BK', 'guru_bk',
+            'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah', 'Guru', 'guru',
         ])) {
             $unitIds = $this->accessibleEducationUnits($user)->pluck('id');
             return Kelas::query()->whereIn('unit_pendidikan_id', $unitIds);
@@ -350,19 +351,28 @@ class AccessScopeService
             $homeroomRombelIds = Kelas::query()->where('wali_kelas_id', $employee->id)->pluck('id');
             $allIds = $teachingRombelIds->merge($homeroomRombelIds)->unique();
 
-            return Kelas::query()->whereIn('id', $allIds);
+            if ($allIds->isNotEmpty()) {
+                return Kelas::query()->whereIn('id', $allIds);
+            }
+
+            // Fallback ke rombel di unit pegawai jika tidak ada pengajaran/walikelas spesifik
+            if ($employee->unit_id) {
+                return Kelas::query()->where('unit_pendidikan_id', $employee->unit_id);
+            }
         }
 
         $student = Student::query()->where('user_id', $user->id)->first();
-        if ($student && $student->kelas_id) {
-            return Kelas::query()->whereKey($student->kelas_id);
+        if ($student && ($student->kelas_id || $student->class_id)) {
+            $targetClassId = $student->kelas_id ?? $student->class_id;
+            return Kelas::query()->whereKey($targetClassId);
         }
 
         $parent = ParentModel::query()->where('user_id', $user->id)->first();
         if ($parent) {
             $childRombelIds = Student::query()
                 ->where(fn ($q) => $q->where('parent_id', $parent->id)->orWhereHas('parentsPivot', fn ($p) => $p->whereKey($parent->id)))
-                ->pluck('kelas_id')
+                ->get()
+                ->map(fn ($s) => $s->kelas_id ?? $s->class_id)
                 ->filter()
                 ->unique();
 
@@ -385,6 +395,7 @@ class AccessScopeService
             'Divisi Program Khusus', 'divisi_pendidikan', 'Kepala Sekolah', 'kepala_sekolah',
             'Waka Kesiswaan', 'waka_kesiswaan', 'Tata Usaha', 'TU', 'tata_usaha',
             'Guru BK', 'guru_bk',
+            'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah', 'Guru', 'guru',
         ])) {
             $unitIds = $this->accessibleEducationUnits($user)->pluck('id');
             return Student::query()->whereIn('unit_id', $unitIds);

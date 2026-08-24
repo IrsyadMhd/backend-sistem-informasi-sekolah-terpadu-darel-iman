@@ -69,9 +69,19 @@ class User extends Authenticatable
         return $this->hasMany(LoginEvent::class, 'user_id');
     }
 
+    public function latestLoginEvent()
+    {
+        return $this->hasOne(LoginEvent::class, 'user_id')->latestOfMany('created_at');
+    }
+
     public function devices()
     {
         return $this->hasMany(UserDevice::class, 'user_id');
+    }
+
+    public function latestDevice()
+    {
+        return $this->hasOne(UserDevice::class, 'user_id')->latestOfMany('last_active_at');
     }
 
     public function userDevices()

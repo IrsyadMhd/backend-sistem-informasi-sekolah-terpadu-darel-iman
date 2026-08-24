@@ -93,8 +93,8 @@ class TeacherMonitoringService
                 'kelas.unitPendidikan',
                 'academicYear',
                 'semester',
-                'employee.user.devices',
-                'employee.user.loginEvents',
+                'employee.user.latestDevice',
+                'employee.user.latestLoginEvent',
                 'employee.unit',
             ])
             ->whereNotNull('employee_id')
@@ -123,7 +123,7 @@ class TeacherMonitoringService
         if (!empty($unitId)) {
             $schedulesQuery->where(function (Builder $query) use ($unitId) {
                 $query->whereHas('employee', fn (Builder $q) => $q->where('unit_id', $unitId))
-                    ->orWhereHas('kelas', fn (Builder $q) => $q->where('unit_pendidikan_id', $unitId));
+                    ->orWhereHas('kelas', fn (Builder $q) => $q->whereIn('unit_pendidikan_id', (array) $unitId));
             });
         }
 
@@ -133,6 +133,28 @@ class TeacherMonitoringService
 
         $schedules = $schedulesQuery->orderBy('time_start')->get();
         $scheduleIds = $schedules->pluck('id');
+
+        if ($scheduleIds->isEmpty()) {
+            return [
+                'period' => $period,
+                'date' => $targetDate->toDateString(),
+                'range' => ['start_date' => $startDate->toDateString(), 'end_date' => $endDate->toDateString()],
+                'summary' => [
+                    'scheduled_today' => 0,
+                    'checked_in' => 0,
+                    'not_checked_in' => 0,
+                    'late' => 0,
+                    'active' => 0,
+                    'completed' => 0,
+                ],
+                'rows' => [],
+                'master_data' => [
+                    'academic_years' => $academicYears,
+                    'semesters' => $semesters,
+                    'education_units' => $educationUnits,
+                ],
+            ];
+        }
 
         // Ambil Data Presensi & Sesi Mengajar pada Rentang Tanggal
         $attendances = TeachingAttendance::query()
@@ -156,8 +178,8 @@ class TeacherMonitoringService
                 $user = $employee?->user;
                 $attendance = $attendancesBySchedule->get($schedule->id);
                 $session = $sessionsBySchedule->get($schedule->id) ?: $attendance?->session;
-                $lastDeviceSeen = $user?->devices?->sortByDesc('last_active_at')->first()?->last_active_at;
-                $lastLogin = $user?->loginEvents?->sortByDesc('created_at')->first()?->created_at;
+                $lastDeviceSeen = $user?->latestDevice?->last_active_at ? Carbon::parse($user->latestDevice->last_active_at) : null;
+                $lastLogin = $user?->latestLoginEvent?->created_at ? Carbon::parse($user->latestLoginEvent->created_at) : null;
                 $lastActivity = collect([$lastDeviceSeen, $attendance?->check_in_at, $session?->session_started_at, $session?->session_closed_at, $lastLogin])
                     ->filter()
                     ->map(fn ($value) => $value instanceof Carbon ? $value : Carbon::parse($value))
@@ -221,8 +243,8 @@ class TeacherMonitoringService
                 $lastAttendance = $schedAttendances->sortByDesc('check_in_at')->first();
                 $lastSession = $schedSessions->sortByDesc('session_started_at')->first();
 
-                $lastDeviceSeen = $user?->devices?->sortByDesc('last_active_at')->first()?->last_active_at;
-                $lastLogin = $user?->loginEvents?->sortByDesc('created_at')->first()?->created_at;
+                $lastDeviceSeen = $user?->latestDevice?->last_active_at ? Carbon::parse($user->latestDevice->last_active_at) : null;
+                $lastLogin = $user?->latestLoginEvent?->created_at ? Carbon::parse($user->latestLoginEvent->created_at) : null;
                 $lastActivity = collect([$lastDeviceSeen, $lastAttendance?->check_in_at, $lastSession?->session_started_at, $lastSession?->session_closed_at, $lastLogin])
                     ->filter()
                     ->map(fn ($value) => $value instanceof Carbon ? $value : Carbon::parse($value))

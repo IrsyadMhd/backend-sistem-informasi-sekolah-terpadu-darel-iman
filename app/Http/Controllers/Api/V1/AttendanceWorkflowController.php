@@ -851,6 +851,16 @@ class AttendanceWorkflowController extends Controller
             });
         })
             ->when($request->filled('student_id'), fn ($q) => $q->where('siswa_id', $request->string('student_id')->toString()))
+            ->when($request->filled('month'), function ($q) use ($request) {
+                $monthStr = $request->string('month')->toString();
+                if (preg_match('/^\d{4}-\d{2}$/', $monthStr)) {
+                    try {
+                        $start = \Carbon\Carbon::parse($monthStr . '-01')->startOfMonth()->toDateString();
+                        $end = \Carbon\Carbon::parse($monthStr . '-01')->endOfMonth()->toDateString();
+                        $q->whereDate('tanggal', '>=', $start)->whereDate('tanggal', '<=', $end);
+                    } catch (\Throwable $e) {}
+                }
+            })
             ->when($request->filled('date_from'), fn ($q) => $q->whereDate('tanggal', '>=', $request->date('date_from')))
             ->when($request->filled('date_to'), fn ($q) => $q->whereDate('tanggal', '<=', $request->date('date_to')))
             ->when($request->filled('status'), fn ($q) => $q->where('status_hadir', $request->string('status')->toString()))

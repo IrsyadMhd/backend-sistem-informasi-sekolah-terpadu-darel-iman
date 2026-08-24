@@ -260,6 +260,7 @@ use App\Http\Controllers\Api\V1\MutabaahAnalyticsController;
 use App\Http\Controllers\Api\V1\MutabaahDailyController;
 use App\Http\Controllers\Api\V1\MutabaahEnterpriseController;
 use App\Http\Controllers\Api\V1\MutabaahPortalController;
+use App\Http\Controllers\Api\V1\MusyrifModuleController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\ScheduleController;
@@ -890,6 +891,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/assignments', fn () => app(FeaturePlaceholderController::class)('assignments'));
     Route::get('/alumni', [AlumniController::class, 'index']);
     Route::get('/alumni/stats', [AlumniController::class, 'stats']);
+    Route::post('/alumni', [AlumniController::class, 'store']);
+    Route::put('/alumni/{id}', [AlumniController::class, 'update']);
+    Route::post('/alumni/{id}/pindah-unit', [AlumniController::class, 'pindahUnit']);
+    Route::post('/alumni/{id}/pindah-keluar', [AlumniController::class, 'pindahKeluar']);
+    Route::delete('/alumni/{id}', [AlumniController::class, 'destroy']);
 
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
@@ -1247,11 +1253,30 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
         });
 
-        // Employee Chat Dedicated Routes (/api/employee/chat/*)
-        Route::prefix('employee/chat')->middleware('role:Guru|Guru Mata Pelajaran|Guru PAI|Pembimbing|Wali Kelas|Guru Tahfizh|Musyrif|Musyrifah|Musyrif / Musyrifah|Guru BK|Kepala Sekolah|Tata Usaha|TU|Operator|Divisi Pendidikan|Waka Kurikulum|Waka Kesiswaan|Wakil Kepala Sekolah|Admin|Super Admin|Pengurus Yayasan|Ketua Yayasan|Sekretaris Yayasan|Bendahara Yayasan')->group(function () {
-            Route::get('/contacts', [EmployeeChatController::class, 'employeeContacts']);
-            Route::get('/conversations', [EmployeeChatController::class, 'employeeConversations']);
-            Route::get('/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
-            Route::post('/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
+        // Dedicated Musyrif & Boarding Module Routes (/api/v1/musyrif/*)
+        Route::prefix('musyrif')->middleware('role:Musyrif|musyrif|Musyrifah|Musyrif / Musyrifah|Pengasuh|Wali Asrama|Pembimbing|Super Admin|Admin|super_admin')->group(function () {
+            // Master Santri, Presensi Sholat 5 Waktu & Setoran Hafalan Harian
+            Route::get('/students', [MusyrifModuleController::class, 'students']);
+            Route::post('/worship-attendance', [MusyrifModuleController::class, 'storeWorshipAttendance']);
+            Route::get('/tahfizh/last-log', [MusyrifModuleController::class, 'lastLog']);
+            Route::post('/tahfizh', [MusyrifModuleController::class, 'storeSetoranTahfizh']);
+
+            // Ujian Tasmi' / Tahfizh Sekali Duduk
+            Route::get('/exams', [MusyrifModuleController::class, 'indexExams']);
+            Route::post('/exams', [MusyrifModuleController::class, 'storeExam']);
+
+            // Bank Poin Kedisiplinan & Ledger
+            Route::get('/discipline-categories', [MusyrifModuleController::class, 'indexDisciplineCategories']);
+            Route::get('/point-transactions', [MusyrifModuleController::class, 'indexPointTransactions']);
+            Route::post('/point-transactions', [MusyrifModuleController::class, 'storePointTransaction']);
+
+            // Klinik & Log Kesehatan Santri
+            Route::get('/clinic-logs', [MusyrifModuleController::class, 'indexClinicLogs']);
+            Route::post('/clinic-logs', [MusyrifModuleController::class, 'storeClinicLog']);
+
+            // Penitipan Barang Berharga Asrama (HP/Laptop)
+            Route::get('/deposits', [MusyrifModuleController::class, 'indexDeposits']);
+            Route::post('/deposits', [MusyrifModuleController::class, 'storeDeposit']);
+            Route::patch('/deposits/{id}/retrieve', [MusyrifModuleController::class, 'retrieveDeposit']);
         });
     });

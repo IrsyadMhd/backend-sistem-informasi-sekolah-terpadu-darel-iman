@@ -236,9 +236,30 @@ class KelasController extends Controller
             $query->withTrashed();
         }
 
-        return $query
-            ->whereKey($id)
-            ->firstOrFail();
+        $kelas = (clone $query)->where(function ($q) use ($id) {
+            $q->where('id', $id)->orWhere('kode_kelas', $id);
+        })->first();
+
+        if ($kelas) {
+            return $kelas;
+        }
+
+        $legacyClass = \App\Models\SchoolClass::find($id);
+        if ($legacyClass) {
+            $matchedKelas = Kelas::where('nama_kelas', $legacyClass->name)
+                ->orWhere('kode_kelas', $legacyClass->code ?? $legacyClass->name)
+                ->first();
+            if ($matchedKelas) {
+                return $matchedKelas;
+            }
+            $fallback = new Kelas();
+            $fallback->id = $legacyClass->id;
+            $fallback->nama_kelas = $legacyClass->name;
+            $fallback->kode_kelas = $legacyClass->code ?? $legacyClass->name;
+            return $fallback;
+        }
+
+        return $query->whereKey($id)->firstOrFail();
     }
 
     private function accessibleRombelIds(Request $request, bool $withTrashed = false): array

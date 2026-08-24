@@ -136,11 +136,33 @@ class KelasService
     {
         $kelas = $this->kelasRepository->cariBerdasarkanId($kelasId);
         if (! $kelas) {
-            return [];
+            $legacyClass = \App\Models\SchoolClass::find($kelasId);
+            if (! $legacyClass) {
+                return [];
+            }
+            $kelas = new Kelas();
+            $kelas->id = $legacyClass->id;
+            $kelas->nama_kelas = $legacyClass->name;
+            $kelas->kode_kelas = $legacyClass->code ?? $legacyClass->name;
+            $kelas->kapasitas = $legacyClass->capacity ?? 30;
         }
 
-        $siswa = Student::where(function ($q) use ($kelasId) {
-            $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId);
+        $matchingKelasIds = [$kelasId];
+        if (! empty($kelas->nama_kelas)) {
+            $tblIds = Kelas::where('nama_kelas', $kelas->nama_kelas)
+                ->orWhere('kode_kelas', $kelas->nama_kelas)
+                ->pluck('id')
+                ->toArray();
+            $legacyIds = \App\Models\SchoolClass::where('name', $kelas->nama_kelas)
+                ->orWhere('code', $kelas->nama_kelas)
+                ->pluck('id')
+                ->toArray();
+            $matchingKelasIds = array_values(array_unique(array_filter(array_merge($matchingKelasIds, $tblIds, $legacyIds))));
+        }
+
+        $siswa = Student::where(function ($q) use ($matchingKelasIds) {
+            $q->whereIn('kelas_id', $matchingKelasIds)
+              ->orWhereIn('class_id', $matchingKelasIds);
         })->where(function ($q) {
             $q->where('is_active', true)->orWhereNull('is_active');
         })->orderBy('full_name')->get();

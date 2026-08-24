@@ -44,10 +44,10 @@ class DashboardPemantauanController extends Controller
 
         $cacheKey = "dashboard_pemantauan_ringkasan_{$hariIni}";
 
-        $cachedData = Cache::remember($cacheKey, 30, function () use ($hariIni, $awalMinggu) {
+        $cachedData = Cache::remember($cacheKey, 120, function () use ($hariIni, $awalMinggu) {
             if (Schema::hasTable('attendances')) {
                 $attendanceCounts = DB::table('attendances')
-                    ->whereDate('attendance_date', $hariIni)
+                    ->where('attendance_date', $hariIni)
                     ->selectRaw("
                         COUNT(*) as total,
                         SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) as terlambat,
