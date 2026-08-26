@@ -25,7 +25,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-class LmsSesi6AssessmentAndReportTest extends TestCase
+class LmsAssessmentAndReportTest extends TestCase
 {
     use RefreshDatabase;
 

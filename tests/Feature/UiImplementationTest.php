@@ -10,7 +10,7 @@ use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-class Step13RUiImplementationTest extends TestCase
+class UiImplementationTest extends TestCase
 {
     use RefreshDatabase;
 

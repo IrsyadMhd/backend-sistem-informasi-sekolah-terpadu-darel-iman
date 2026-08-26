@@ -19,7 +19,7 @@ use Illuminate\Support\Str;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
-class Step12UserManagementAndCardTest extends TestCase
+class UserManagementAndCardTest extends TestCase
 {
     use RefreshDatabase;
 

@@ -11,6 +11,15 @@ class SimpanTahunAjaranRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('name')) {
+            $name = trim((string) $this->name);
+            $name = preg_replace('/\s+/', ' ', $name);
+            $this->merge(['name' => $name]);
+        }
+    }
+
     public function rules(): array
     {
         return [

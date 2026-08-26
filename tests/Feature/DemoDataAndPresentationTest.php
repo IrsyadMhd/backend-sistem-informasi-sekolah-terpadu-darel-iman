@@ -19,7 +19,7 @@ use Database\Seeders\QrCredentialSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-class Step14DemoDataAndPresentationTest extends TestCase
+class DemoDataAndPresentationTest extends TestCase
 {
     use RefreshDatabase;
 

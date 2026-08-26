@@ -11,6 +11,24 @@ class SimpanTujuanPembelajaranRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('nama_tp')) {
+            $nama = trim((string) $this->nama_tp);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_tp'] = $nama;
+        }
+        if ($this->has('kode_tp')) {
+            $kode = trim((string) $this->kode_tp);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_tp'] = $kode !== '' ? strtoupper($kode) : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

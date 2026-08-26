@@ -11,6 +11,24 @@ class SimpanJabatanRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('kode_jabatan')) {
+            $kode = trim((string) $this->kode_jabatan);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_jabatan'] = $kode !== '' ? strtoupper($kode) : null;
+        }
+        if ($this->has('nama_jabatan')) {
+            $nama = trim((string) $this->nama_jabatan);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_jabatan'] = $nama;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

@@ -11,6 +11,15 @@ class SimpanMediaRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('nama_file')) {
+            $nama = trim((string) $this->nama_file);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $this->merge(['nama_file' => $nama]);
+        }
+    }
+
     public function rules(): array
     {
         return [

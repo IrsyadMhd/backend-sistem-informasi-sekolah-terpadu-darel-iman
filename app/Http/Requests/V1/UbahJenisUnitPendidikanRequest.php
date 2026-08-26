@@ -13,6 +13,29 @@ class UbahJenisUnitPendidikanRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('kode_jenis')) {
+            $kode = trim((string) $this->kode_jenis);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_jenis'] = strtoupper($kode);
+        }
+        if ($this->has('nama_jenis')) {
+            $nama = trim((string) $this->nama_jenis);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_jenis'] = $nama;
+        }
+        if ($this->has('singkatan')) {
+            $singkatan = trim((string) $this->singkatan);
+            $singkatan = preg_replace('/\s+/', ' ', $singkatan);
+            $updates['singkatan'] = $singkatan !== '' ? $singkatan : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         $id = $this->route('jenis_unit') ?? $this->route('id');

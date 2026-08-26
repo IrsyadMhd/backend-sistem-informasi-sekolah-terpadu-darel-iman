@@ -11,6 +11,15 @@ class UpdateLmsKisiKisiRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('judul_kisi')) {
+            $judul = trim((string) $this->judul_kisi);
+            $judul = preg_replace('/\s+/', ' ', $judul);
+            $this->merge(['judul_kisi' => $judul]);
+        }
+    }
+
     public function rules(): array
     {
         return [

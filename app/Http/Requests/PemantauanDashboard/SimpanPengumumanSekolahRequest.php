@@ -11,6 +11,23 @@ class SimpanPengumumanSekolahRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('judul_pengumuman')) {
+            $judul = trim((string) $this->judul_pengumuman);
+            $judul = preg_replace('/\s+/', ' ', $judul);
+            $updates['judul_pengumuman'] = $judul;
+        }
+        if ($this->has('isi_pengumuman')) {
+            $isi = trim((string) $this->isi_pengumuman);
+            $updates['isi_pengumuman'] = $isi;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

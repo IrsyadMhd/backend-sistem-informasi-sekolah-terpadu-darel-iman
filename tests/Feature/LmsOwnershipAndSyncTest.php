@@ -22,7 +22,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
-class LmsSesi4OwnershipAndSyncTest extends TestCase
+class LmsOwnershipAndSyncTest extends TestCase
 {
     use RefreshDatabase;
 

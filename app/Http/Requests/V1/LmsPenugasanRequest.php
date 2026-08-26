@@ -15,9 +15,20 @@ class LmsPenugasanRequest extends FormRequest
     {
         $mergeData = [];
 
-        if ($this->has('judul') && ! $this->has('judul_tugas')) {
-            $mergeData['judul_tugas'] = $this->input('judul');
+        if ($this->has('judul')) {
+            $j = trim((string) $this->input('judul'));
+            $j = preg_replace('/\s+/', ' ', $j);
+            $mergeData['judul'] = $j;
+            if (! $this->has('judul_tugas')) {
+                $mergeData['judul_tugas'] = $j;
+            }
         }
+        if ($this->has('judul_tugas')) {
+            $jt = trim((string) $this->input('judul_tugas'));
+            $jt = preg_replace('/\s+/', ' ', $jt);
+            $mergeData['judul_tugas'] = $jt;
+        }
+
         if ($this->has('tipe') && ! $this->has('tipe_tugas')) {
             $mergeData['tipe_tugas'] = $this->input('tipe');
         }

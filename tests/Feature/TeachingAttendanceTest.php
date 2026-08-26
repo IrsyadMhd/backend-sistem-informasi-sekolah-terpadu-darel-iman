@@ -20,7 +20,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class Step04TeachingAttendanceTest extends TestCase
+class TeachingAttendanceTest extends TestCase
 {
     use RefreshDatabase;
 

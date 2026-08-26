@@ -11,6 +11,29 @@ class StoreEmployeeRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('nama_lengkap')) {
+            $nama = trim((string) $this->nama_lengkap);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_lengkap'] = $nama;
+        }
+        if ($this->has('niy')) {
+            $niy = trim((string) $this->niy);
+            $niy = preg_replace('/\s+/', ' ', $niy);
+            $updates['niy'] = $niy !== '' ? $niy : null;
+        }
+        if ($this->has('nik')) {
+            $nik = trim((string) $this->nik);
+            $nik = preg_replace('/\s+/', ' ', $nik);
+            $updates['nik'] = $nik !== '' ? $nik : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

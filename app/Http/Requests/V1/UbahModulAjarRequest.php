@@ -11,6 +11,24 @@ class UbahModulAjarRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('judul_modul')) {
+            $judul = trim((string) $this->judul_modul);
+            $judul = preg_replace('/\s+/', ' ', $judul);
+            $updates['judul_modul'] = $judul;
+        }
+        if ($this->has('kode_modul')) {
+            $kode = trim((string) $this->kode_modul);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_modul'] = $kode !== '' ? strtoupper($kode) : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

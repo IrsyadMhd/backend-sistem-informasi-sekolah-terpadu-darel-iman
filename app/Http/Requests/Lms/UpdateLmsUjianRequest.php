@@ -12,6 +12,15 @@ class UpdateLmsUjianRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('judul_ujian')) {
+            $judul = trim((string) $this->judul_ujian);
+            $judul = preg_replace('/\s+/', ' ', $judul);
+            $this->merge(['judul_ujian' => $judul]);
+        }
+    }
+
     public function rules(): array
     {
         return [

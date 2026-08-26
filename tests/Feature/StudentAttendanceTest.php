@@ -23,7 +23,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class Step05StudentAttendanceTest extends TestCase
+class StudentAttendanceTest extends TestCase
 {
     use RefreshDatabase;
 

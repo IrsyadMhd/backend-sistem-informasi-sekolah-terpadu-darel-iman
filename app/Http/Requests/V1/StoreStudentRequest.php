@@ -12,6 +12,29 @@ class StoreStudentRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('full_name')) {
+            $nama = trim((string) $this->full_name);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['full_name'] = $nama;
+        }
+        if ($this->has('nis')) {
+            $nis = trim((string) $this->nis);
+            $nis = preg_replace('/\s+/', ' ', $nis);
+            $updates['nis'] = $nis;
+        }
+        if ($this->has('nisn')) {
+            $nisn = trim((string) $this->nisn);
+            $nisn = preg_replace('/\s+/', ' ', $nisn);
+            $updates['nisn'] = $nisn !== '' ? $nisn : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         $studentId = $this->route('student') ?? $this->route('id');

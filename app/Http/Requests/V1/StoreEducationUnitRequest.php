@@ -13,8 +13,19 @@ class StoreEducationUnitRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        if ($this->has('code') && trim((string) $this->code) === '') {
-            $this->merge(['code' => null]);
+        $updates = [];
+        if ($this->has('code')) {
+            $code = trim((string) $this->code);
+            $code = preg_replace('/\s+/', ' ', $code);
+            $updates['code'] = $code !== '' ? $code : null;
+        }
+        if ($this->has('name')) {
+            $name = trim((string) $this->name);
+            $name = preg_replace('/\s+/', ' ', $name);
+            $updates['name'] = $name;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
         }
     }
 
@@ -26,7 +37,7 @@ class StoreEducationUnitRequest extends FormRequest
         return [
             'jenis_unit_id' => ['nullable', 'string'],
             'code' => ['nullable', 'string', 'max:30', 'unique:education_units,code'],
-            'name' => ['required', 'string', 'max:120'],
+            'name' => ['required', 'string', 'max:120', 'unique:education_units,name'],
             'level' => ['nullable', 'string', 'max:50'],
             'description' => ['nullable', 'string'],
             'is_active' => ['nullable', 'boolean'],
@@ -39,6 +50,7 @@ class StoreEducationUnitRequest extends FormRequest
         return [
             'name.required' => 'Nama Unit Pendidikan wajib diisi.',
             'name.max' => 'Nama Unit Pendidikan maksimal 120 karakter.',
+            'name.unique' => 'Nama Unit Pendidikan sudah digunakan, gunakan nama lain.',
             'code.unique' => 'Kode Unit Pendidikan sudah digunakan, gunakan kode lain.',
         ];
     }

@@ -340,4 +340,131 @@ class StudentController extends Controller
 
         return [$canAccessAllUnits, $unitId, $employee];
     }
+
+    public function export(Request $request): JsonResponse
+    {
+        [$canAccessAllUnits, $unitId] = $this->scopeForUser($request->user());
+        $requestedUnitId = $request->query('unit_id') ?? $request->query('unit_pendidikan_id');
+        $effectiveUnitId = $requestedUnitId ?: $unitId;
+
+        $query = Student::query()
+            ->with(['educationUnit', 'schoolClass'])
+            ->when(! $canAccessAllUnits && $effectiveUnitId, fn ($q) => $q->where('unit_id', $effectiveUnitId))
+            ->when($requestedUnitId, fn ($q) => $q->where('unit_id', $requestedUnitId));
+
+        if ($request->filled('search')) {
+            $search = (string) $request->query('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                  ->orWhere('nis', 'like', "%{$search}%")
+                  ->orWhere('nisn', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->filled('kelas_id')) {
+            $query->where('kelas_id', $request->query('kelas_id'));
+        }
+
+        $students = $query->orderBy('full_name', 'asc')->get();
+
+        $rows = $students->map(function ($std, $idx) {
+            return [
+                'no' => $idx + 1,
+                'nis' => $std->nis ?? '-',
+                'nisn' => $std->nisn ?? '-',
+                'nama_lengkap' => $std->full_name,
+                'jenis_kelamin' => $std->gender === 'female' ? 'Perempuan' : 'Laki-Laki',
+                'unit_pendidikan' => $std->educationUnit?->name ?? '-',
+                'kelas' => $std->schoolClass?->nama_kelas ?? '-',
+                'status' => $std->is_active ? 'Aktif' : 'Nonaktif',
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data siswa berhasil diexport.',
+            'data' => $rows,
+        ]);
+    }
+
+    public function import(Request $request): JsonResponse
+    {
+        $rows = $request->input('data', []);
+        if (! is_array($rows) || empty($rows)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Payload data impor siswa tidak boleh kosong.',
+            ], 422);
+        }
+
+        $berhasil = 0;
+        $gagal = 0;
+        $duplikat = 0;
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
+            $nama = trim($row['full_name'] ?? $row['nama_lengkap'] ?? $row['nama'] ?? '');
+            $nis = trim($row['nis'] ?? '');
+            $nisn = trim($row['nisn'] ?? '');
+
+            if (empty($nama) || empty($nis)) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: Nama lengkap dan NIS siswa wajib diisi.";
+                continue;
+            }
+
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $nis = preg_replace('/\s+/', ' ', $nis);
+
+            if (Student::query()->where('nis', $nis)->exists()) {
+                $duplikat++;
+                $errors[] = "Baris {$rowNum}: NIS '{$nis}' sudah terdaftar.";
+                continue;
+            }
+
+            try {
+                Student::query()->create([
+                    'nis' => $nis,
+                    'nisn' => $nisn ?: null,
+                    'full_name' => $nama,
+                    'gender' => in_array(strtolower($row['gender'] ?? $row['jenis_kelamin'] ?? ''), ['female', 'p', 'perempuan']) ? 'female' : 'male',
+                    'unit_id' => $row['unit_id'] ?? null,
+                    'kelas_id' => $row['kelas_id'] ?? null,
+                    'is_active' => true,
+                ]);
+                $berhasil++;
+            } catch (\Exception $e) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Duplikat/Skip: {$duplikat}, Gagal: {$gagal}.",
+            'data' => [
+                'total' => count($rows),
+                'berhasil' => $berhasil,
+                'duplikat' => $duplikat,
+                'gagal' => $gagal,
+                'errors' => $errors,
+            ],
+        ]);
+    }
+
+    public function template(): JsonResponse
+    {
+        return response()->json([
+            'headers' => ['nis', 'nisn', 'full_name', 'gender', 'unit_id', 'kelas_id'],
+            'sample' => [
+                'nis' => '20261001',
+                'nisn' => '0012345678',
+                'full_name' => 'Muhammad Abdullah',
+                'gender' => 'male',
+                'unit_id' => '',
+                'kelas_id' => '',
+            ],
+        ]);
+    }
 }

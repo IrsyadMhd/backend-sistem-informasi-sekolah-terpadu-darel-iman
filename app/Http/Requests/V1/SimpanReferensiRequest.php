@@ -13,10 +13,27 @@ class SimpanReferensiRequest extends FormRequest
 
     public function prepareForValidation(): void
     {
+        $updates = [];
         if ($this->has('modul_ajar_id') && ($this->modul_ajar_id === '' || strtolower((string) $this->modul_ajar_id) === 'umum' || strtolower((string) $this->modul_ajar_id) === 'null')) {
-            $this->merge([
-                'modul_ajar_id' => null,
-            ]);
+            $updates['modul_ajar_id'] = null;
+        }
+        if ($this->has('judul')) {
+            $judul = trim((string) $this->judul);
+            $judul = preg_replace('/\s+/', ' ', $judul);
+            $updates['judul'] = $judul;
+        }
+        if ($this->has('penulis')) {
+            $penulis = trim((string) $this->penulis);
+            $penulis = preg_replace('/\s+/', ' ', $penulis);
+            $updates['penulis'] = $penulis !== '' ? $penulis : null;
+        }
+        if ($this->has('penerbit')) {
+            $penerbit = trim((string) $this->penerbit);
+            $penerbit = preg_replace('/\s+/', ' ', $penerbit);
+            $updates['penerbit'] = $penerbit !== '' ? $penerbit : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
         }
     }
 

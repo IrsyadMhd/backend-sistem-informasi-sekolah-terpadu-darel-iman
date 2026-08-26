@@ -11,6 +11,24 @@ class UbahCapaianPembelajaranRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('nama_cp')) {
+            $nama = trim((string) $this->nama_cp);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_cp'] = $nama;
+        }
+        if ($this->has('kode_cp')) {
+            $kode = trim((string) $this->kode_cp);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_cp'] = $kode !== '' ? strtoupper($kode) : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

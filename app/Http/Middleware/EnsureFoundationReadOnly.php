@@ -32,7 +32,7 @@ class EnsureFoundationReadOnly
 
                 if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
                     // Izinkan mutation hanya pada profil pribadi dan notifikasi pribadi yayasan
-                    $isAllowedProfile = $request->is('api/foundation/profile', 'api/foundation/profile/*', 'api/profile');
+                    $isAllowedProfile = $request->is('api/foundation/profile', 'api/foundation/profile/*', 'api/profile', 'api/profile/*');
                     $isAllowedNotification = $request->is('api/foundation/notifications', 'api/foundation/notifications/*', 'api/notifications');
 
                     $isAllowedGlobalPersonnel = RoleName::userHasAny($user, ['Pengurus Yayasan', 'pengurus_yayasan'])

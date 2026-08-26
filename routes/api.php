@@ -48,6 +48,9 @@ use App\Http\Controllers\Api\V1\LmsModulAjarController;
 use App\Http\Controllers\Api\V1\LmsPengumpulanTugasController;
 use App\Http\Controllers\Api\V1\LmsPenugasanController;
 Route::get('/seed-sdit1-data', function () {
+    if (! app()->environment('local', 'testing')) {
+        abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole('Super Admin'), 403, 'Development seed endpoints are disabled in production.');
+    }
     try {
         $unit = \App\Models\EducationUnit::where('code', 'SDIT-01')->first()
             ?? \App\Models\EducationUnit::where('name', 'LIKE', '%SDIT 1%')->first()
@@ -160,6 +163,9 @@ Route::get('/seed-sdit1-data', function () {
 });
 
 Route::get('/seed-all-units', function (\Illuminate\Http\Request $request) {
+    if (! app()->environment('local', 'testing')) {
+        abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole('Super Admin'), 403, 'Development seed endpoints are disabled in production.');
+    }
     set_time_limit(300);
     ini_set('memory_limit', '512M');
     if ($request->query('check')) {
@@ -558,6 +564,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:employee.view|employee.view_all|foundation.employee.view|sistem.master_data');
     Route::get('/employees/export', [EmployeeController::class, 'export'])
         ->middleware('permission:employee.export|foundation.employee.view|sistem.master_data');
+    Route::get('/employees/import-template', [EmployeeController::class, 'template'])
+        ->middleware('permission:employee.view|employee.view_all|sistem.master_data');
     Route::get('/employees', [EmployeeController::class, 'index'])
         ->middleware('permission:employee.view|employee.view_all|foundation.employee.view|sistem.master_data');
     Route::get('/employees/{employee}', [EmployeeController::class, 'show'])
@@ -576,6 +584,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/students/dashboard', [StudentController::class, 'dashboard'])
         ->middleware('permission:student.view|student.view_all|kesiswaan.data_lengkap_siswa|foundation.student.view|sistem.master_data');
+    Route::get('/students/export', [StudentController::class, 'export'])
+        ->middleware('permission:student.view|student.view_all|kesiswaan.data_lengkap_siswa|foundation.student.view|sistem.master_data');
+    Route::get('/students/import-template', [StudentController::class, 'template'])
+        ->middleware('permission:student.view|student.view_all|sistem.master_data');
+    Route::post('/students/import', [StudentController::class, 'import'])
+        ->middleware('permission:student.create|sistem.master_data');
     Route::apiResource('students', StudentController::class)->only(['index', 'show'])
         ->middleware('permission:student.view|student.view_all|kesiswaan.data_lengkap_siswa|foundation.student.view|sistem.master_data');
     Route::apiResource('students', StudentController::class)->only(['store'])
@@ -586,6 +600,12 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:student.delete|sistem.master_data');
     Route::get('/student-card-settings', [\App\Http\Controllers\Api\V1\StudentCardSettingController::class, 'show']);
     Route::post('/student-card-settings', [\App\Http\Controllers\Api\V1\StudentCardSettingController::class, 'store']);
+    Route::get('/education-units/export', [EducationUnitController::class, 'export'])
+        ->middleware('permission:unit.view|unit.view_all|foundation.unit.view|sistem.master_data');
+    Route::get('/education-units/import-template', [EducationUnitController::class, 'template'])
+        ->middleware('permission:unit.view|unit.view_all|sistem.master_data');
+    Route::post('/education-units/import', [EducationUnitController::class, 'import'])
+        ->middleware('permission:unit.create|unit.update|sistem.master_data');
     Route::apiResource('education-units', EducationUnitController::class)->only(['index', 'show'])
         ->middleware('permission:unit.view|unit.view_all|foundation.unit.view|sistem.master_data');
     Route::apiResource('education-units', EducationUnitController::class)->only(['store'])
@@ -889,6 +909,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/mutabaah', fn () => app(FeaturePlaceholderController::class)('mutabaah'));
     Route::get('/materials', fn () => app(FeaturePlaceholderController::class)('materials'));
     Route::get('/assignments', fn () => app(FeaturePlaceholderController::class)('assignments'));
+    Route::get('/alumni/export', [AlumniController::class, 'export']);
+    Route::get('/alumni/import-template', [AlumniController::class, 'template']);
+    Route::post('/alumni/import', [AlumniController::class, 'import']);
     Route::get('/alumni', [AlumniController::class, 'index']);
     Route::get('/alumni/stats', [AlumniController::class, 'stats']);
     Route::post('/alumni', [AlumniController::class, 'store']);

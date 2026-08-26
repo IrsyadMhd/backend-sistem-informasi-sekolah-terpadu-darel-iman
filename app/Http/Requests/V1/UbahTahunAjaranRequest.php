@@ -12,6 +12,15 @@ class UbahTahunAjaranRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('name')) {
+            $name = trim((string) $this->name);
+            $name = preg_replace('/\s+/', ' ', $name);
+            $this->merge(['name' => $name]);
+        }
+    }
+
     public function rules(): array
     {
         $id = $this->route('id') ?? $this->route('tahun_ajaran');

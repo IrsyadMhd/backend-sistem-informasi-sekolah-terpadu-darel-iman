@@ -187,21 +187,140 @@ class EmployeeController extends Controller
         ]);
     }
 
+    public function export(Request $request)
+    {
+        $filters = $request->only(['search', 'unit_id', 'jabatan_id', 'status_pegawai', 'status', 'jenis_kelamin']);
+        $employees = $this->accessScopeService
+            ->accessibleEmployees($request->user())
+            ->with(['unit', 'position'])
+            ->when(! empty($filters['search']), function ($q) use ($filters) {
+                $search = $filters['search'];
+                $q->where(function ($inner) use ($search) {
+                    $inner->where('nama_lengkap', 'like', "%{$search}%")
+                        ->orWhere('niy', 'like', "%{$search}%")
+                        ->orWhere('nik', 'like', "%{$search}%")
+                        ->orWhere('email', 'like', "%{$search}%");
+                });
+            })
+            ->when(! empty($filters['unit_id']), fn ($q) => $q->where('unit_id', $filters['unit_id']))
+            ->when(! empty($filters['jabatan_id']), fn ($q) => $q->where('jabatan_id', $filters['jabatan_id']))
+            ->when(! empty($filters['status_pegawai']), fn ($q) => $q->where('status_pegawai', $filters['status_pegawai']))
+            ->when(! empty($filters['status']), fn ($q) => $q->where('status', $filters['status']))
+            ->orderBy('nama_lengkap', 'asc')
+            ->get();
+
+        $rows = $employees->map(function ($emp, $idx) {
+            return [
+                'no' => $idx + 1,
+                'niy' => $emp->niy ?? '-',
+                'nik' => $emp->nik ?? '-',
+                'nama_lengkap' => $emp->nama_lengkap,
+                'jenis_kelamin' => $emp->jenis_kelamin === 'L' ? 'Laki-Laki' : 'Perempuan',
+                'unit_pendidikan' => $emp->unit?->name ?? '-',
+                'jabatan' => $emp->position?->name ?? '-',
+                'status_pegawai' => $emp->status_pegawai ?? '-',
+                'no_hp' => $emp->no_hp ?? '-',
+                'email' => $emp->email ?? '-',
+                'alamat' => $emp->alamat ?? '-',
+                'tanggal_masuk' => $emp->tanggal_masuk ?? '-',
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data pegawai berhasil diexport.',
+            'data' => $rows,
+        ]);
+    }
+
     public function import(Request $request)
     {
         $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
 
+        $rows = $request->input('data', []);
+        if (! is_array($rows) || empty($rows)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Payload data impor pegawai tidak boleh kosong.',
+            ], 422);
+        }
+
+        $berhasil = 0;
+        $gagal = 0;
+        $duplikat = 0;
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
+            $nama = trim($row['nama_lengkap'] ?? $row['nama'] ?? '');
+            $niy = trim($row['niy'] ?? '');
+            $nik = trim($row['nik'] ?? '');
+            $email = trim($row['email'] ?? '');
+
+            if (empty($nama)) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: Nama lengkap pegawai wajib diisi.";
+                continue;
+            }
+
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            if (! empty($niy)) {
+                $niy = preg_replace('/\s+/', ' ', $niy);
+                if (Employee::query()->where('niy', $niy)->exists()) {
+                    $duplikat++;
+                    $errors[] = "Baris {$rowNum}: NIY '{$niy}' sudah terdaftar.";
+                    continue;
+                }
+            }
+
+            try {
+                Employee::query()->create([
+                    'niy' => $niy ?: null,
+                    'nik' => $nik ?: null,
+                    'nama_lengkap' => $nama,
+                    'jenis_kelamin' => in_array(strtoupper($row['jenis_kelamin'] ?? 'L'), ['P', 'PEREMPUAN']) ? 'P' : 'L',
+                    'unit_id' => $row['unit_id'] ?? null,
+                    'jabatan_id' => $row['jabatan_id'] ?? null,
+                    'status_pegawai' => $row['status_pegawai'] ?? 'Tetap',
+                    'no_hp' => $row['no_hp'] ?? null,
+                    'email' => $email ?: null,
+                    'alamat' => $row['alamat'] ?? null,
+                    'status' => $row['status'] ?? 'Aktif',
+                ]);
+                $berhasil++;
+            } catch (\Exception $e) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
+            }
+        }
+
         return response()->json([
             'status' => 'success',
-            'message' => 'Proses import data pegawai berhasil dilakukan',
+            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Duplikat/Skip: {$duplikat}, Gagal: {$gagal}.",
+            'data' => [
+                'total' => count($rows),
+                'berhasil' => $berhasil,
+                'duplikat' => $duplikat,
+                'gagal' => $gagal,
+                'errors' => $errors,
+            ],
         ]);
     }
 
-    public function export(Request $request)
+    public function template()
     {
         return response()->json([
-            'status' => 'success',
-            'message' => 'Data pegawai berhasil diexport',
+            'headers' => ['niy', 'nik', 'nama_lengkap', 'jenis_kelamin', 'status_pegawai', 'no_hp', 'email', 'alamat'],
+            'sample' => [
+                'niy' => 'PEG-2026-001',
+                'nik' => '1371012345670001',
+                'nama_lengkap' => 'Ustadz Ahmad Farhan, S.Pd',
+                'jenis_kelamin' => 'L',
+                'status_pegawai' => 'Guru Tetap',
+                'no_hp' => '081234567890',
+                'email' => 'ahmad.farhan@school.local',
+                'alamat' => 'Kota Padang',
+            ],
         ]);
     }
 

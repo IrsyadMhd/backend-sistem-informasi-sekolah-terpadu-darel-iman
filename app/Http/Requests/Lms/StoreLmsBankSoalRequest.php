@@ -12,6 +12,15 @@ class StoreLmsBankSoalRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('kode_soal')) {
+            $kode = trim((string) $this->kode_soal);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $this->merge(['kode_soal' => $kode !== '' ? strtoupper($kode) : null]);
+        }
+    }
+
     public function rules(): array
     {
         return [

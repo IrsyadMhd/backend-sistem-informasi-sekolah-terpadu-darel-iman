@@ -11,6 +11,15 @@ class LmsDiskusiRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('judul')) {
+            $judul = trim((string) $this->judul);
+            $judul = preg_replace('/\s+/', ' ', $judul);
+            $this->merge(['judul' => $judul]);
+        }
+    }
+
     public function rules(): array
     {
         return [

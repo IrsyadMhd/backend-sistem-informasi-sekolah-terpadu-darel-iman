@@ -11,6 +11,15 @@ class LmsAktivitasBelajarRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->has('nama_aktivitas')) {
+            $nama = trim((string) $this->nama_aktivitas);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $this->merge(['nama_aktivitas' => $nama]);
+        }
+    }
+
     public function rules(): array
     {
         return [

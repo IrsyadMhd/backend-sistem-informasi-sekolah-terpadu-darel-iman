@@ -11,6 +11,24 @@ class SimpanModulSemesterRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('nama_modul')) {
+            $nama = trim((string) $this->nama_modul);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_modul'] = $nama;
+        }
+        if ($this->has('kode_modul')) {
+            $kode = trim((string) $this->kode_modul);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_modul'] = $kode !== '' ? strtoupper($kode) : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     public function rules(): array
     {
         return [

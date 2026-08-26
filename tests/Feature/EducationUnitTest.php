@@ -172,4 +172,66 @@ class EducationUnitTest extends TestCase
             'id' => $unit->id,
         ]);
     }
+
+    public function test_validasi_nama_unit_pendidikan_harus_unik(): void
+    {
+        EducationUnit::query()->create([
+            'code' => 'SDIT-01',
+            'name' => 'SDIT 1 Dar el-Iman',
+            'level' => 'SDIT',
+            'is_active' => true,
+        ]);
+
+        $payload = [
+            'code' => 'SDIT-02',
+            'name' => 'SDIT 1 Dar el-Iman',
+            'level' => 'SDIT',
+            'is_active' => true,
+        ];
+
+        $response = $this->actingAs($this->user)
+            ->postJson('/api/education-units', $payload);
+
+        $response->assertStatus(422)
+            ->assertJsonValidationErrors(['name']);
+    }
+
+    public function test_normalisasi_input_nama_dan_kode_unit_pendidikan(): void
+    {
+        $payload = [
+            'code' => '  unit-norm-01  ',
+            'name' => '   SDIT   3   Dar   el-Iman   Norm   ',
+            'level' => 'SDIT',
+            'is_active' => true,
+        ];
+
+        $response = $this->actingAs($this->user)
+            ->postJson('/api/education-units', $payload);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.code', 'unit-norm-01')
+            ->assertJsonPath('data.name', 'SDIT 3 Dar el-Iman Norm');
+    }
+
+    public function test_dapat_mengimpor_dan_mengespor_unit_pendidikan(): void
+    {
+        $importPayload = [
+            'data' => [
+                ['kode' => 'IMP-U01', 'nama' => 'Unit Impor 1', 'tingkat' => 'SDIT'],
+                ['kode' => 'IMP-U02', 'nama' => 'Unit Impor 2', 'tingkat' => 'SMPIT'],
+            ],
+        ];
+
+        $importRes = $this->actingAs($this->user)
+            ->postJson('/api/education-units/import', $importPayload);
+
+        $importRes->assertStatus(200)
+            ->assertJsonPath('data.berhasil', 2);
+
+        $exportRes = $this->actingAs($this->user)
+            ->getJson('/api/education-units/export?search=Unit Impor 1');
+
+        $exportRes->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+    }
 }

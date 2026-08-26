@@ -16,6 +16,24 @@ class SimpanMasterKurikulumRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        $updates = [];
+        if ($this->has('nama_kurikulum')) {
+            $nama = trim((string) $this->nama_kurikulum);
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $updates['nama_kurikulum'] = $nama;
+        }
+        if ($this->has('kode_kurikulum')) {
+            $kode = trim((string) $this->kode_kurikulum);
+            $kode = preg_replace('/\s+/', ' ', $kode);
+            $updates['kode_kurikulum'] = $kode !== '' ? strtoupper($kode) : null;
+        }
+        if (! empty($updates)) {
+            $this->merge($updates);
+        }
+    }
+
     /**
      * Get the validation rules that apply to the request.
      *

@@ -336,5 +336,152 @@ class AlumniController extends Controller
             'message' => 'Data alumni berhasil dihapus.',
         ]);
     }
+
+    public function export(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
+        $accessibleUnitIds = $accessScopeService->accessibleEducationUnits($user)->pluck('id');
+
+        $query = Student::with(['educationUnit', 'schoolClass'])
+            ->where(function ($q) {
+                $q->where('is_active', false)
+                  ->orWhere('metadata->is_alumni', true)
+                  ->orWhere('metadata->status_siswa', 'alumni')
+                  ->orWhere('metadata->status_alumni', 'alumni')
+                  ->orWhere('metadata->status_alumni', 'Tamat')
+                  ->orWhere('metadata->status_alumni', 'Lulus')
+                  ->orWhereNotNull('metadata->tahun_lulus')
+                  ->orWhereNotNull('metadata->mutasi_type');
+            });
+
+        if (! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty()) {
+            $query->whereIn('unit_id', $accessibleUnitIds);
+        }
+
+        if ($request->filled('search')) {
+            $search = (string) $request->query('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                  ->orWhere('nis', 'like', "%{$search}%")
+                  ->orWhere('nisn', 'like', "%{$search}%");
+            });
+        }
+
+        $alumniList = $query->orderBy('full_name', 'asc')->get();
+
+        $rows = $alumniList->map(function ($std, $idx) {
+            $meta = is_array($std->metadata) ? $std->metadata : (json_decode($std->metadata, true) ?: []);
+            return [
+                'no' => $idx + 1,
+                'nis' => $std->nis ?? '-',
+                'nisn' => $std->nisn ?? '-',
+                'nama_lengkap' => $std->full_name,
+                'jenis_kelamin' => $std->gender === 'female' ? 'Perempuan' : 'Laki-Laki',
+                'unit_pendidikan' => $std->educationUnit?->name ?? '-',
+                'tahun_lulus' => $meta['tahun_lulus'] ?? $std->tahun_masuk ?? '-',
+                'tujuan_kelulusan' => $meta['tujuan_kelulusan'] ?? $meta['perguruan_tinggi'] ?? '-',
+                'status_lanjutan' => $meta['status_lanjutan'] ?? $meta['pekerjaan'] ?? 'Kuliah',
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Data alumni berhasil diexport.',
+            'data' => $rows,
+        ]);
+    }
+
+    public function import(Request $request): JsonResponse
+    {
+        $rows = $request->input('data', []);
+        if (! is_array($rows) || empty($rows)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Payload data impor alumni tidak boleh kosong.',
+            ], 422);
+        }
+
+        $berhasil = 0;
+        $gagal = 0;
+        $duplikat = 0;
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
+            $nama = trim($row['full_name'] ?? $row['nama_lengkap'] ?? $row['nama'] ?? '');
+            $nis = trim($row['nis'] ?? '');
+
+            if (empty($nama) || empty($nis)) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: Nama lengkap dan NIS alumni wajib diisi.";
+                continue;
+            }
+
+            $nama = preg_replace('/\s+/', ' ', $nama);
+            $nis = preg_replace('/\s+/', ' ', $nis);
+
+            $student = Student::query()->where('nis', $nis)->first();
+
+            try {
+                if ($student) {
+                    $meta = is_array($student->metadata) ? $student->metadata : (json_decode($student->metadata, true) ?: []);
+                    $meta['is_alumni'] = true;
+                    $meta['status_alumni'] = 'alumni';
+                    $meta['status_siswa'] = 'alumni';
+                    $meta['tahun_lulus'] = $row['tahun_lulus'] ?? date('Y');
+                    $meta['tujuan_kelulusan'] = $row['tujuan_kelulusan'] ?? '-';
+                    $student->metadata = $meta;
+                    $student->is_active = false;
+                    $student->save();
+                    $berhasil++;
+                } else {
+                    Student::query()->create([
+                        'nis' => $nis,
+                        'full_name' => $nama,
+                        'gender' => in_array(strtolower($row['gender'] ?? 'L'), ['female', 'p', 'perempuan']) ? 'female' : 'male',
+                        'is_active' => false,
+                        'metadata' => [
+                            'is_alumni' => true,
+                            'status_alumni' => 'alumni',
+                            'status_siswa' => 'alumni',
+                            'tahun_lulus' => $row['tahun_lulus'] ?? date('Y'),
+                            'tujuan_kelulusan' => $row['tujuan_kelulusan'] ?? '-',
+                        ],
+                    ]);
+                    $berhasil++;
+                }
+            } catch (\Exception $e) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Proses impor alumni selesai. Berhasil: {$berhasil}, Gagal: {$gagal}.",
+            'data' => [
+                'total' => count($rows),
+                'berhasil' => $berhasil,
+                'duplikat' => $duplikat,
+                'gagal' => $gagal,
+                'errors' => $errors,
+            ],
+        ]);
+    }
+
+    public function template(): JsonResponse
+    {
+        return response()->json([
+            'headers' => ['nis', 'full_name', 'gender', 'tahun_lulus', 'tujuan_kelulusan'],
+            'sample' => [
+                'nis' => '20221001',
+                'full_name' => 'Ahmad Rabbani',
+                'gender' => 'male',
+                'tahun_lulus' => '2025',
+                'tujuan_kelulusan' => 'Universitas Indonesia - Teknik Informatika',
+            ],
+        ]);
+    }
 }
 

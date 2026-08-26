@@ -125,4 +125,44 @@ class JenisUnitPendidikanTest extends TestCase
             'id' => $jenisUnit->id,
         ]);
     }
+
+    public function test_normalisasi_input_kode_dan_nama_jenis_unit(): void
+    {
+        $payload = [
+            'kode_jenis' => ' sdit-norm ',
+            'nama_jenis' => '  Sekolah   Dasar   Islam   Terpadu   Norm  ',
+            'singkatan' => ' SDIT ',
+            'jenjang' => 'SD',
+            'urutan' => 1,
+        ];
+
+        $response = $this->actingAs($this->user)
+            ->postJson('/api/master/jenis-unit', $payload);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.kode_jenis', 'SDIT-NORM')
+            ->assertJsonPath('data.nama_jenis', 'Sekolah Dasar Islam Terpadu Norm');
+    }
+
+    public function test_dapat_mengimpor_dan_mengespor_jenis_unit(): void
+    {
+        $importPayload = [
+            'data' => [
+                ['kode_jenis' => 'IMP-01', 'nama_jenis' => 'Jenis Import 1', 'jenjang' => 'SD', 'urutan' => 10],
+                ['kode_jenis' => 'IMP-02', 'nama_jenis' => 'Jenis Import 2', 'jenjang' => 'SMP', 'urutan' => 11],
+            ],
+        ];
+
+        $importRes = $this->actingAs($this->user)
+            ->postJson('/api/master/jenis-unit/import', $importPayload);
+
+        $importRes->assertStatus(200)
+            ->assertJsonPath('data.berhasil', 2);
+
+        $exportRes = $this->actingAs($this->user)
+            ->getJson('/api/master/jenis-unit/export?search=IMP-01');
+
+        $exportRes->assertStatus(200)
+            ->assertJsonPath('status', 'success');
+    }
 }
