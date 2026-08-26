@@ -8,6 +8,7 @@ use App\Models\Semester;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 
 class PortalStudentContextService
 {
@@ -24,23 +25,31 @@ class PortalStudentContextService
         // Pilihan anak aktif melalui header atau query parameter
         $selectedChildId = $request->header('X-Child-Id')
             ?? $request->query('child_id')
-            ?? $request->input('child_id');
+            ?? $request->input('child_id')
+            ?? $request->query('child')
+            ?? $request->input('child');
 
-        if ($selectedChildId) {
+        if ($selectedChildId && Str::isUuid($selectedChildId)) {
             $parent = ParentModel::query()->where('user_id', $user->id)->first();
             if ($parent) {
-                return $this->parentStudentsQuery($parent)
+                $child = $this->parentStudentsQuery($parent)
                     ->with(['kelas', 'educationUnit'])
                     ->whereKey($selectedChildId)
                     ->where('is_active', true)
                     ->first();
+                if ($child) {
+                    return $child;
+                }
             }
 
-            return Student::query()
+            $child = Student::query()
                 ->with(['kelas', 'educationUnit'])
                 ->where('user_id', $user->id)
                 ->whereKey($selectedChildId)
                 ->first();
+            if ($child) {
+                return $child;
+            }
         }
 
         // Cek relasi langsung siswa

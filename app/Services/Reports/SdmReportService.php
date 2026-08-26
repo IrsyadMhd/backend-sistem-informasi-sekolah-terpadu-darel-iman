@@ -42,10 +42,17 @@ class SdmReportService
         if (!empty($filters['status_aktif']) && $filters['status_aktif'] !== 'all') {
             if ($filters['status_aktif'] === 'aktif') {
                 $employeeQuery->where(function ($q) {
-                    $q->where('status', 'aktif')->orWhere('status', 'Active')->orWhereNull('status');
+                    $q->whereRaw('LOWER(status) = ?', ['aktif'])
+                      ->orWhereRaw('LOWER(status) = ?', ['active'])
+                      ->orWhere('status', '1')
+                      ->orWhereNull('status');
                 });
             } else {
-                $employeeQuery->where('status', '!=', 'aktif')->where('status', '!=', 'Active')->whereNotNull('status');
+                $employeeQuery->where(function ($q) {
+                    $q->whereRaw('LOWER(status) != ?', ['aktif'])
+                      ->whereRaw('LOWER(status) != ?', ['active'])
+                      ->where('status', '!=', '1');
+                });
             }
         }
         if (!empty($filters['jenis_kelamin']) && $filters['jenis_kelamin'] !== 'all') {
@@ -86,24 +93,40 @@ class SdmReportService
         $totalGuru = $guruQuery->count();
         $totalNonGuru = max(0, $totalSdm - $totalGuru);
 
-        // Status Aktif / Nonaktif
+        // Status Aktif / Nonaktif (Case-insensitive for PostgreSQL)
         $aktifQuery = (clone $employeeQuery)->where(function ($q) {
-            $q->where('status', 'aktif')->orWhere('status', 'Active')->orWhereNull('status');
+            $q->whereRaw('LOWER(status) = ?', ['aktif'])
+              ->orWhereRaw('LOWER(status) = ?', ['active'])
+              ->orWhere('status', '1')
+              ->orWhereNull('status');
         });
         $totalAktif = $aktifQuery->count();
         $totalNonaktif = max(0, $totalSdm - $totalAktif);
 
-        // Kepegawaian Detail
-        $guruTetap = (clone $guruQuery)->whereIn('status_pegawai', ['Tetap', 'Guru Tetap', 'PNS', 'PNS DPK'])->count();
+        // Kepegawaian Detail (Case-insensitive)
+        $guruTetap = (clone $guruQuery)->where(function ($q) {
+            $q->whereRaw('LOWER(status_pegawai) LIKE ?', ['%tetap%'])
+              ->orWhereRaw('LOWER(status_pegawai) LIKE ?', ['%pns%']);
+        })->count();
         $guruTidakTetap = max(0, $totalGuru - $guruTetap);
 
         $nonGuruQuery = (clone $employeeQuery)->whereNot($teacherScope);
-        $pegawaiTetap = (clone $nonGuruQuery)->whereIn('status_pegawai', ['Tetap', 'Pegawai Tetap', 'PNS'])->count();
+        $pegawaiTetap = (clone $nonGuruQuery)->where(function ($q) {
+            $q->whereRaw('LOWER(status_pegawai) LIKE ?', ['%tetap%'])
+              ->orWhereRaw('LOWER(status_pegawai) LIKE ?', ['%pns%']);
+        })->count();
         $pegawaiTidakTetap = max(0, $totalNonGuru - $pegawaiTetap);
 
-        // Gender
-        $lakiLaki = (clone $employeeQuery)->whereIn('jenis_kelamin', ['L', 'Laki-Laki', 'Male', 'male', 'l'])->count();
-        $perempuan = (clone $employeeQuery)->whereIn('jenis_kelamin', ['P', 'Perempuan', 'Female', 'female', 'p'])->count();
+        // Gender (Case-insensitive)
+        $lakiLaki = (clone $employeeQuery)->where(function ($q) {
+            $q->whereRaw('LOWER(jenis_kelamin) LIKE ?', ['l%'])
+              ->orWhereRaw('LOWER(jenis_kelamin) LIKE ?', ['male%']);
+        })->count();
+        $perempuan = (clone $employeeQuery)->where(function ($q) {
+            $q->whereRaw('LOWER(jenis_kelamin) LIKE ?', ['p%'])
+              ->orWhereRaw('LOWER(jenis_kelamin) LIKE ?', ['female%'])
+              ->orWhereRaw('LOWER(jenis_kelamin) LIKE ?', ['perempuan%']);
+        })->count();
 
         // SDM Baru / Keluar within selected period
         $sdmBaru = 0;
@@ -247,23 +270,32 @@ class SdmReportService
             ->orderBy($sortBy, $sortDir)
             ->paginate($perPage, ['*'], 'page', $page);
 
-        $formattedDetails = collect($paginated->items())->map(function ($emp) {
+        $formattedDetails = collect($paginated->items())->map(function ($emp) use ($period) {
             $posName = $emp->position->name ?? '';
-            $isGuru = $emp->teacherBridge !== null
+            $isGuru = $emp->teacher !== null
                 || $emp->teachings->isNotEmpty()
                 || str_contains(strtolower($posName), 'guru')
                 || str_contains(strtolower($posName), 'pendidik')
                 || in_array($emp->position?->level_jabatan, [8, 9]);
+
+            $isBaru = false;
+            if (!empty($period['start_date']) && !empty($period['end_date']) && $emp->tanggal_masuk) {
+                $isBaru = $emp->tanggal_masuk->between($period['start_date'], $period['end_date']);
+            }
+
             return [
                 'id' => $emp->id,
                 'niy' => $emp->niy ?? $emp->nik ?? '-',
                 'nama' => $emp->nama_lengkap,
                 'jenis_sdm' => $isGuru ? 'Guru' : 'Pegawai Non-Guru',
+                'is_guru' => $isGuru,
+                'is_baru' => $isBaru,
                 'unit' => $emp->unit->name ?? '-',
                 'unit_code' => $emp->unit->code ?? '-',
                 'jabatan' => $emp->position->name ?? '-',
                 'divisi_mapel' => $isGuru ? ($emp->teachings->pluck('subject.name')->implode(', ') ?: ($emp->division->name ?? '-')) : ($emp->division->name ?? '-'),
                 'status_kepegawaian' => $emp->status_pegawai ?? 'Tetap',
+                'jenis_kelamin' => $emp->jenis_kelamin ?? 'L',
                 'tanggal_masuk' => $emp->tanggal_masuk ? $emp->tanggal_masuk->format('d M Y') : '-',
                 'status' => ucfirst($emp->status ?? 'aktif'),
             ];
