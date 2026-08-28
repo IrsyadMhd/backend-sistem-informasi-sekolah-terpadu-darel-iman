@@ -169,6 +169,8 @@ class DataDummySiswaSeeder extends Seeder
         ];
 
         $unitPendidikanId = EducationUnit::query()->orderBy('code')->value('id');
+        $kelasMap = [];
+        $legacyKelasMap = [];
 
         foreach ($daftarKelas as $kelas) {
             $modelKelas = Kelas::query()->updateOrCreate(
@@ -184,21 +186,39 @@ class DataDummySiswaSeeder extends Seeder
                 ]
             );
 
-            DB::table('classes')->updateOrInsert(
-                [
+            $legacyClass = DB::table('classes')
+                ->where('academic_year_id', $tahunAjaranId)
+                ->where('semester_id', $semesterId)
+                ->where('name', $kelas['name'])
+                ->first();
+
+            if ($legacyClass) {
+                $legacyClassId = $legacyClass->id;
+                DB::table('classes')->where('id', $legacyClassId)->update([
+                    'level' => (string) $kelas['level'],
+                    'deleted_at' => null,
+                    'updated_at' => now(),
+                ]);
+            } else {
+                // The canonical tbl_kelas ID may already belong to an older
+                // legacy class. Never overwrite that historical row.
+                $legacyClassId = DB::table('classes')->where('id', $modelKelas->id)->exists()
+                    ? (string) Str::uuid()
+                    : $modelKelas->id;
+
+                DB::table('classes')->insert([
+                    'id' => $legacyClassId,
                     'academic_year_id' => $tahunAjaranId,
                     'semester_id' => $semesterId,
                     'name' => $kelas['name'],
-                ],
-                [
-                    'id' => $modelKelas->id,
                     'level' => (string) $kelas['level'],
-                    'updated_at' => now(),
                     'created_at' => now(),
-                ]
-            );
+                    'updated_at' => now(),
+                ]);
+            }
 
             $kelasMap[$kelas['name']] = $modelKelas->id;
+            $legacyKelasMap[$kelas['name']] = $legacyClassId;
         }
 
         $daftarSiswa = [
@@ -660,7 +680,7 @@ class DataDummySiswaSeeder extends Seeder
                     'user_id' => $studentUser->id,
                     'unit_id' => $unitPendidikanId,
                     'parent_id' => $parent?->id,
-                    'class_id' => $kelasMap[$siswa['class_name']] ?? null,
+                    'class_id' => $legacyKelasMap[$siswa['class_name']] ?? null,
                     'kelas_id' => $kelasMap[$siswa['class_name']] ?? null,
                     'full_name' => $siswa['full_name'],
                     'gender' => $siswa['gender'],
@@ -712,7 +732,12 @@ class DataDummySiswaSeeder extends Seeder
         ];
 
         foreach ($allUnitsForStudents as $uIndex => $unitObj) {
-            $unitKelas = Kelas::where('unit_pendidikan_id', $unitObj->id)->first();
+            $unitKelas = Kelas::query()
+                ->where('unit_pendidikan_id', $unitObj->id)
+                ->where('tahun_ajaran_id', $tahunAjaranId)
+                ->where('semester_id', $semesterId)
+                ->orderBy('id')
+                ->first();
             $className = $unitKelas ? ($unitKelas->nama_kelas.' '.$unitObj->code) : ('Kelas 1 '.$unitObj->code);
 
             if (! $unitKelas) {
@@ -728,16 +753,24 @@ class DataDummySiswaSeeder extends Seeder
                 ]);
             }
 
-            $existingClass = DB::table('classes')->where('id', $unitKelas->id)->first()
-                ?? DB::table('classes')->where('academic_year_id', $tahunAjaranId)
-                    ->where('semester_id', $semesterId)
-                    ->where('name', $className)
-                    ->first();
+            $existingClass = DB::table('classes')
+                ->where('academic_year_id', $tahunAjaranId)
+                ->where('semester_id', $semesterId)
+                ->where('name', $className)
+                ->first();
 
             if ($existingClass) {
                 $classId = $existingClass->id;
+                DB::table('classes')->where('id', $classId)->update([
+                    'level' => (string) ($unitKelas->tingkat ?? '1'),
+                    'deleted_at' => null,
+                    'updated_at' => now(),
+                ]);
             } else {
-                $classId = $unitKelas->id;
+                $classId = DB::table('classes')->where('id', $unitKelas->id)->exists()
+                    ? (string) Str::uuid()
+                    : $unitKelas->id;
+
                 DB::table('classes')->insert([
                     'id' => $classId,
                     'academic_year_id' => $tahunAjaranId,
