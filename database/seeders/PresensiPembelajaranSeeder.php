@@ -24,10 +24,25 @@ class PresensiPembelajaranSeeder extends Seeder
         $subject = Subject::query()->where(fn ($query) => $query
             ->where('status', true)
             ->orWhereNull('status'))->orderBy('id')->first();
-        $schoolClass = SchoolClass::query()
-            ->whereIn('id', Student::query()->active()->whereNotNull('class_id')->select('class_id'))
+        $sampleStudent = Student::query()
+            ->active()
+            ->whereNotNull('class_id')
+            ->whereNotNull('kelas_id')
             ->orderBy('id')
             ->first();
+        $schoolClass = $sampleStudent?->class_id
+            ? SchoolClass::query()->find($sampleStudent->class_id)
+            : null;
+        $kelas = $sampleStudent?->kelas_id
+            ? Kelas::query()->find($sampleStudent->kelas_id)
+            : null;
+
+        if (! $schoolClass) {
+            $schoolClass = SchoolClass::query()
+                ->whereIn('id', Student::query()->active()->whereNotNull('class_id')->select('class_id'))
+                ->orderBy('id')
+                ->first();
+        }
 
         if (! $teacher || ! $teacher->user || ! $subject || ! $schoolClass) {
             $this->command->warn(
@@ -40,7 +55,7 @@ class PresensiPembelajaranSeeder extends Seeder
         $students = Student::query()
             ->active()
             ->where('class_id', $schoolClass->id)
-            ->orderBy('full_name')
+            ->orderBy('id')
             ->limit(15)
             ->get();
 
@@ -50,13 +65,14 @@ class PresensiPembelajaranSeeder extends Seeder
             return;
         }
 
-        $kelas = Kelas::query()
+        $kelas ??= Kelas::query()
             ->where('tahun_ajaran_id', $schoolClass->academic_year_id)
             ->where('semester_id', $schoolClass->semester_id)
             ->where(function ($query) use ($schoolClass) {
                 $query->where('nama_kelas', $schoolClass->name)
                     ->orWhere('kode_kelas', $schoolClass->name);
             })
+            ->orderBy('id')
             ->first();
 
         $semester = $schoolClass->semester_id

@@ -81,8 +81,7 @@ class MutabaahEnterpriseSeeder extends Seeder
         }
 
         $semester = Semester::query()->where('academic_year_id', $academicYear->id)
-            ->where('is_active', true)->first()
-            ?? Semester::query()->where('academic_year_id', $academicYear->id)->orderBy('sequence')->first();
+            ->orderByDesc('is_active')->orderBy('sequence')->first();
         if (! $semester) {
             $this->command?->warn("Kategori dan agenda berhasil dibuat, tetapi template dilewati: semester untuk {$academicYear->name} belum tersedia.");
 

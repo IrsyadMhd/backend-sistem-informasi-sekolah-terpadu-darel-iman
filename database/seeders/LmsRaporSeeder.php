@@ -14,20 +14,27 @@ class LmsRaporSeeder extends Seeder
 {
     public function run(): void
     {
-        $semester = Semester::first();
-        $academicYear = AcademicYear::first();
-        $kelas = Kelas::first();
+        $academicYear = AcademicYear::query()->where('is_active', true)->orderByDesc('start_date')->first()
+            ?? AcademicYear::query()->orderByDesc('start_date')->first();
+        $semester = $academicYear
+            ? Semester::query()
+                ->where('academic_year_id', $academicYear->id)
+                ->orderByDesc('is_active')
+                ->orderBy('sequence')
+                ->first()
+            : null;
+        $kelas = Kelas::query()->orderBy('id')->first();
 
-        if (! $semester || ! $academicYear) {
+        if (! $semester || ! $academicYear || ! $kelas) {
             return;
         }
 
-        $students = Student::take(5)->get();
+        $students = Student::query()->orderBy('id')->take(5)->get();
         if ($students->isEmpty()) {
             return;
         }
 
-        $wali = Employee::first();
+        $wali = Employee::query()->orderBy('id')->first();
 
         /** @var LmsRaporService $service */
         $service = app(LmsRaporService::class);

@@ -15,9 +15,16 @@ class MasterKurikulumSeeder extends Seeder
      */
     public function run(): void
     {
-        $units = EducationUnit::all();
-        $tahunAktif = AcademicYear::where('is_active', true)->first() ?? AcademicYear::first();
-        $semesterAktif = Semester::where('is_active', true)->first() ?? Semester::first();
+        $units = EducationUnit::query()->orderBy('code')->get();
+        $tahunAktif = AcademicYear::query()->where('is_active', true)->orderByDesc('start_date')->first()
+            ?? AcademicYear::query()->orderByDesc('start_date')->first();
+        $semesterAktif = $tahunAktif
+            ? Semester::query()
+                ->where('academic_year_id', $tahunAktif->id)
+                ->orderByDesc('is_active')
+                ->orderBy('sequence')
+                ->first()
+            : null;
 
         if ($units->isEmpty() || ! $tahunAktif) {
             return;

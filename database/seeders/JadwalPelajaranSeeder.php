@@ -9,10 +9,10 @@ use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\Semester;
 use App\Models\Subject;
+use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 
 class JadwalPelajaranSeeder extends Seeder
 {
@@ -20,7 +20,7 @@ class JadwalPelajaranSeeder extends Seeder
     {
         // 1. Dapatkan atau Buat Tahun Ajaran Aktif
         $tahunAjaran = AcademicYear::query()->where('is_active', true)->first();
-        if (!$tahunAjaran) {
+        if (! $tahunAjaran) {
             $tahunAjaran = AcademicYear::query()->firstOrCreate([
                 'name' => '2025/2026',
             ], [
@@ -31,14 +31,24 @@ class JadwalPelajaranSeeder extends Seeder
             ]);
         }
 
-        // 2. Dapatkan atau Buat Semester Ganjil & Genap
+        // 2. Dapatkan atau Buat Semester Ganjil & Genap. Dates must follow
+        // the selected academic year; hard-coded dates can put the semester
+        // outside the active year and make downstream fixtures disappear.
+        $yearStart = Carbon::parse($tahunAjaran->start_date);
+        $yearEnd = Carbon::parse($tahunAjaran->end_date);
+        $ganjilEnd = $yearStart->copy()->addMonths(5)->endOfMonth();
+        if ($ganjilEnd->gt($yearEnd)) {
+            $ganjilEnd = $yearEnd->copy();
+        }
+        $genapStart = $ganjilEnd->copy()->addDay();
+
         $semesterGanjil = Semester::query()->updateOrCreate([
             'academic_year_id' => $tahunAjaran->id,
             'sequence' => 1,
         ], [
             'name' => 'Ganjil',
-            'start_date' => '2025-07-01',
-            'end_date' => '2025-12-31',
+            'start_date' => $yearStart->toDateString(),
+            'end_date' => $ganjilEnd->toDateString(),
             'is_active' => true,
             'metadata' => ['source' => 'JadwalPelajaranSeeder'],
         ]);
@@ -48,17 +58,17 @@ class JadwalPelajaranSeeder extends Seeder
             'sequence' => 2,
         ], [
             'name' => 'Genap',
-            'start_date' => '2026-01-01',
-            'end_date' => '2026-06-30',
+            'start_date' => $genapStart->toDateString(),
+            'end_date' => $yearEnd->toDateString(),
             'is_active' => false,
             'metadata' => ['source' => 'JadwalPelajaranSeeder'],
         ]);
 
         // 3. Ambil / Pastikan Unit Pendidikan Tersedia
-        $units = EducationUnit::all();
+        $units = EducationUnit::query()->orderBy('code')->get();
 
         // 4. Ambil / Pastikan Guru / Pegawai Tersedia (Dinamis)
-        $guruList = Employee::all();
+        $guruList = Employee::query()->orderBy('id')->get();
         if ($guruList->isEmpty()) {
             $namaGuruDummy = [
                 'Ustadz Abdullah Faqih, S.Pd.I',
@@ -70,12 +80,12 @@ class JadwalPelajaranSeeder extends Seeder
                 'Ustadz Muhammad Rizky, S.Pd',
                 'Ustadz Ibrahim Al-Hafiz, S.Ag',
             ];
-            $guruList = new Collection();
+            $guruList = new Collection;
             foreach ($namaGuruDummy as $index => $nama) {
                 $employee = Employee::create([
                     'nama_lengkap' => $nama,
-                    'niy' => 'NIY-' . str_pad($index + 1, 4, '0', STR_PAD_LEFT),
-                    'email' => 'guru' . ($index + 1) . '@dareliman.sch.id',
+                    'niy' => 'NIY-'.str_pad($index + 1, 4, '0', STR_PAD_LEFT),
+                    'email' => 'guru'.($index + 1).'@dareliman.sch.id',
                     'status' => 'Aktif',
                     'jenis_kelamin' => $index % 2 === 0 ? 'L' : 'P',
                 ]);
@@ -84,7 +94,7 @@ class JadwalPelajaranSeeder extends Seeder
         }
 
         // 5. Ambil / Pastikan Mata Pelajaran Tersedia (Dinamis)
-        $mapelList = Subject::all();
+        $mapelList = Subject::query()->orderBy('id')->get();
         if ($mapelList->isEmpty()) {
             $mapelDummy = [
                 ['code' => 'PAI-01', 'name' => 'Pendidikan Agama Islam', 'kelompok' => 'A', 'category' => 'Wajib'],
@@ -96,7 +106,7 @@ class JadwalPelajaranSeeder extends Seeder
                 ['code' => 'BIG-01', 'name' => 'Bahasa Inggris', 'kelompok' => 'B', 'category' => 'Wajib'],
                 ['code' => 'BAR-01', 'name' => 'Bahasa Arab', 'kelompok' => 'B', 'category' => 'Muatan Lokal SIT'],
             ];
-            $mapelList = new Collection();
+            $mapelList = new Collection;
             foreach ($mapelDummy as $m) {
                 $subject = Subject::create([
                     'kode_mapel' => $m['code'],
@@ -111,9 +121,12 @@ class JadwalPelajaranSeeder extends Seeder
         }
 
         // 6. Ambil / Pastikan Kelas & Rombel Tersedia (Dinamis)
-        $kelasList = Kelas::query()->where('tahun_ajaran_id', $tahunAjaran->id)->get();
+        $kelasList = Kelas::query()
+            ->where('tahun_ajaran_id', $tahunAjaran->id)
+            ->orderBy('id')
+            ->get();
         if ($kelasList->isEmpty()) {
-            $kelasList = Kelas::all();
+            $kelasList = Kelas::query()->orderBy('id')->get();
         }
         if ($kelasList->isEmpty()) {
             $kelasDummy = [
@@ -125,7 +138,7 @@ class JadwalPelajaranSeeder extends Seeder
                 ['kode' => '1A-SD', 'nama' => 'I Abu Bakar', 'tingkat' => '1', 'jenjang' => 'SD'],
             ];
             $unitFirst = $units->first();
-            $kelasList = new Collection();
+            $kelasList = new Collection;
             foreach ($kelasDummy as $k) {
                 $kelasObj = Kelas::create([
                     'kode_kelas' => $k['kode'],
@@ -136,7 +149,7 @@ class JadwalPelajaranSeeder extends Seeder
                     'tahun_ajaran_id' => $tahunAjaran->id,
                     'semester_id' => $semesterGanjil->id,
                     'kapasitas' => 30,
-                    'ruangan' => 'Ruang ' . $k['tingkat'] . 'A',
+                    'ruangan' => 'Ruang '.$k['tingkat'].'A',
                     'status' => 'Aktif',
                 ]);
                 $kelasList->push($kelasObj);
@@ -191,7 +204,7 @@ class JadwalPelajaranSeeder extends Seeder
                             'metadata' => [
                                 'source' => 'JadwalPelajaranSeeder',
                                 'semester' => 'Ganjil',
-                                'room' => $kelas->ruangan ?: 'Ruang Belajar ' . $kelas->nama_kelas,
+                                'room' => $kelas->ruangan ?: 'Ruang Belajar '.$kelas->nama_kelas,
                                 'dummy' => false,
                             ],
                         ]);
@@ -214,7 +227,7 @@ class JadwalPelajaranSeeder extends Seeder
                             'metadata' => [
                                 'source' => 'JadwalPelajaranSeeder',
                                 'semester' => 'Genap',
-                                'room' => $kelas->ruangan ?: 'Ruang Belajar ' . $kelas->nama_kelas,
+                                'room' => $kelas->ruangan ?: 'Ruang Belajar '.$kelas->nama_kelas,
                                 'dummy' => false,
                             ],
                         ]);

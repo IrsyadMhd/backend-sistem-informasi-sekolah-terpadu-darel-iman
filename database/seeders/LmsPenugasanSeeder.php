@@ -24,8 +24,8 @@ class LmsPenugasanSeeder extends Seeder
         $kelases = Kelas::orderBy('id')->get();
         $gurus = Employee::orderBy('id')->get();
         $students = Student::orderBy('id')->get();
-        $semesters = Semester::orderBy('id')->get();
-        $academicYears = AcademicYear::orderBy('id')->get();
+        $semesters = Semester::query()->orderByDesc('is_active')->orderBy('sequence')->get();
+        $academicYears = AcademicYear::query()->orderByDesc('is_active')->orderByDesc('start_date')->get();
         $adminUser = User::orderBy('id')->first();
 
         if ($modulAjarList->isEmpty()) {
@@ -82,8 +82,12 @@ class LmsPenugasanSeeder extends Seeder
             $subject = $subjects->isNotEmpty() ? ($subjects->firstWhere('id', $modul->mata_pelajaran_id) ?? $subjects->first()) : null;
             $kelas = $kelases->isNotEmpty() ? ($kelases->firstWhere('id', $modul->kelas_id) ?? $kelases->first()) : null;
             $guru = $gurus->isNotEmpty() ? ($gurus->firstWhere('id', $modul->guru_id) ?? $gurus->first()) : null;
-            $semester = $semesters->first();
-            $tahunAjaran = $academicYears->first();
+            $semester = $semesters->firstWhere('id', $modul->semester_id)
+                ?? $semesters->first(fn ($item) => $item->is_active)
+                ?? $semesters->first();
+            $tahunAjaran = $academicYears->firstWhere('id', $modul->tahun_ajaran_id)
+                ?? $academicYears->first(fn ($item) => $item->is_active)
+                ?? $academicYears->first();
 
             if (! $subject || ! $kelas || ! $guru || ! $semester || ! $tahunAjaran) {
                 continue;

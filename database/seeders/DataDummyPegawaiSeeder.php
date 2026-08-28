@@ -9,12 +9,14 @@ use App\Models\Position;
 use App\Models\User;
 use App\Support\PhoneNormalizer;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+use Spatie\Permission\Models\Role;
 
 class DataDummyPegawaiSeeder extends Seeder
 {
     public function run(): void
     {
-        $units = EducationUnit::all();
+        $units = EducationUnit::query()->orderBy('code')->get();
         $positions = Position::all();
 
         $defaultUnitId = $units->first()?->id;
@@ -689,10 +691,10 @@ class DataDummyPegawaiSeeder extends Seeder
         }
 
         // === Pastikan setiap dari 15 Unit Pendidikan memiliki Pegawai yang Mengisi Seluruh Posisi Jabatan (17 Posisi per Unit) ===
-        $allUnits = EducationUnit::all();
+        $allUnits = EducationUnit::query()->orderBy('code')->get();
         $positions = Position::all();
-        $guruRole = \Spatie\Permission\Models\Role::where('name', 'Guru')->where('guard_name', 'web')->first();
-        $defaultHashedPassword = \Illuminate\Support\Facades\Hash::make('Password123!');
+        $guruRole = Role::where('name', 'Guru')->where('guard_name', 'web')->first();
+        $defaultHashedPassword = Hash::make('Password123!');
 
         $positionTemplates = [
             ['code' => 'JBT-003', 'level' => 3, 'title' => 'Kepala Sekolah', 'role' => 'Kepala Sekolah'],
@@ -719,7 +721,7 @@ class DataDummyPegawaiSeeder extends Seeder
             'Khairul Umam', 'Lukman Hakim', 'Muhammad Farhan', 'Naufal Azmi',
             'Rizky Ramadhan', 'Syahrul Ramadhan', 'Taufik Hidayat', 'Usman Al-Ghazali',
             'Yahya Ayyash', 'Zainuddin Fanani', 'Arif Rahman', 'Bayu Pratama',
-            'Doni Kusuma', 'Eko Prasetyo', 'Gilang Ramadhan', 'Hadi Sucipto'
+            'Doni Kusuma', 'Eko Prasetyo', 'Gilang Ramadhan', 'Hadi Sucipto',
         ];
 
         $femaleNameList = [
@@ -727,7 +729,7 @@ class DataDummyPegawaiSeeder extends Seeder
             'Hana Pertiwi', 'Indah Permata', 'Laila Majnun', 'Marlina Putri',
             'Nadia Syakira', 'Nurul Laili', 'Rahmawati', 'Siti Maryam',
             'Tari Kusuma', 'Umi Kulsum', 'Winda Asri', 'Yulia Safitri',
-            'Zahra Amalia', 'Dian Lestari', 'Eka Rahayu', 'Gita Gutawa'
+            'Zahra Amalia', 'Dian Lestari', 'Eka Rahayu', 'Gita Gutawa',
         ];
 
         foreach ($allUnits as $unitIndex => $unit) {
@@ -752,20 +754,20 @@ class DataDummyPegawaiSeeder extends Seeder
                     $panggilan = explode(' ', $personName)[0];
                 }
 
-                $niyNum = 201500000 + ($unitIndex + 1) * 100 + ($pIndex + 1);
-                $nikNum = '1371' . str_pad((string) ($unitIndex + 1), 2, '0', STR_PAD_LEFT) . '00' . str_pad((string) ($pIndex + 1), 6, '0', STR_PAD_LEFT);
+                $nikNum = '1371'.str_pad((string) ($unitIndex + 1), 2, '0', STR_PAD_LEFT).'00'.str_pad((string) ($pIndex + 1), 6, '0', STR_PAD_LEFT);
                 $slugCode = strtolower(str_replace(['-', ' '], '', $unit->code));
-                $email = "pegawai." . str_pad((string) ($pIndex + 1), 2, '0', STR_PAD_LEFT) . ".{$slugCode}@dareliman.sch.id";
+                $niyCode = 'NIY-'.strtoupper($slugCode).'-'.str_pad((string) ($pIndex + 1), 2, '0', STR_PAD_LEFT);
+                $email = 'pegawai.'.str_pad((string) ($pIndex + 1), 2, '0', STR_PAD_LEFT).".{$slugCode}@dareliman.sch.id";
 
-                $roleTarget = \Spatie\Permission\Models\Role::where('name', $template['role'])->where('guard_name', 'web')->first()
+                $roleTarget = Role::where('name', $template['role'])->where('guard_name', 'web')->first()
                     ?? $guruRole;
 
                 $empRecord = Employee::updateOrCreate(
                     [
-                        'unit_id' => $unit->id,
-                        'niy' => "NIY-{$niyNum}",
+                        'email' => $email,
                     ],
                     [
+                        'niy' => $niyCode,
                         'nik' => $nikNum,
                         'nama_lengkap' => $fullName,
                         'nama_panggilan' => $panggilan,
@@ -780,7 +782,7 @@ class DataDummyPegawaiSeeder extends Seeder
                         'status_pegawai' => ($pIndex < 10) ? 'Tetap' : 'Kontrak',
                         'tanggal_masuk' => '2018-07-01',
                         'status' => 'Aktif',
-                        'no_hp' => '0812' . str_pad((string) ($unitIndex * 17 + $pIndex + 1), 8, '0', STR_PAD_LEFT),
+                        'no_hp' => '0812'.str_pad((string) ($unitIndex * 17 + $pIndex + 1), 8, '0', STR_PAD_LEFT),
                         'email' => $email,
                         'alamat' => $unit->metadata['address'] ?? 'Kota Padang',
                         'provinsi' => 'Sumatera Barat',

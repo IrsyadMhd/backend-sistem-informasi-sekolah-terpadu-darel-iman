@@ -13,8 +13,11 @@ class TahfizhSeeder extends Seeder
     public function run(): void
     {
         // 1. Dapatkan atau buat Academic Year
-        $academicYearId = DB::table('academic_years')->value('id');
-        if (!$academicYearId) {
+        $academicYearId = DB::table('academic_years')
+            ->where('is_active', true)
+            ->orderByDesc('start_date')
+            ->value('id');
+        if (! $academicYearId) {
             $academicYearId = (string) Str::uuid();
             DB::table('academic_years')->insert([
                 'id' => $academicYearId,
@@ -28,8 +31,12 @@ class TahfizhSeeder extends Seeder
         }
 
         // 2. Dapatkan atau buat Semester
-        $semesterId = DB::table('semesters')->where('academic_year_id', $academicYearId)->value('id');
-        if (!$semesterId) {
+        $semesterId = DB::table('semesters')
+            ->where('academic_year_id', $academicYearId)
+            ->orderByDesc('is_active')
+            ->orderBy('sequence')
+            ->value('id');
+        if (! $semesterId) {
             $semesterId = (string) Str::uuid();
             DB::table('semesters')->insert([
                 'id' => $semesterId,
@@ -45,8 +52,13 @@ class TahfizhSeeder extends Seeder
         }
 
         // 3. Dapatkan atau buat Class di tabel classes
-        $classId = DB::table('classes')->value('id');
-        if (!$classId) {
+        $classId = DB::table('classes')
+            ->where('academic_year_id', $academicYearId)
+            ->where('semester_id', $semesterId)
+            ->orderBy('id')
+            ->value('id');
+        $classId ??= DB::table('classes')->orderBy('id')->value('id');
+        if (! $classId) {
             $classId = (string) Str::uuid();
             DB::table('classes')->insert([
                 'id' => $classId,
@@ -60,7 +72,7 @@ class TahfizhSeeder extends Seeder
         }
 
         // 4. Dapatkan atau buat Siswa di tabel students
-        $students = DB::table('students')->get();
+        $students = DB::table('students')->orderBy('id')->get();
 
         if ($students->isEmpty()) {
             $parents = DB::table('parents')->get();
@@ -78,8 +90,8 @@ class TahfizhSeeder extends Seeder
                     'id' => (string) Str::uuid(),
                     'parent_id' => $parent?->id,
                     'full_name' => $sData['full_name'],
-                    'nis' => 'TFZ-' . (1000 + $idx + 1),
-                    'nisn' => '0098' . (765400 + $idx + 1),
+                    'nis' => 'TFZ-'.(1000 + $idx + 1),
+                    'nisn' => '0098'.(765400 + $idx + 1),
                     'gender' => $sData['gender'],
                     'class_id' => $classId,
                     'is_active' => true,
@@ -100,7 +112,7 @@ class TahfizhSeeder extends Seeder
                 ]);
             }
 
-            $students = DB::table('students')->get();
+            $students = DB::table('students')->orderBy('id')->get();
         }
 
         // 5. Tanggal Senin minggu ini
@@ -250,6 +262,6 @@ class TahfizhSeeder extends Seeder
             }
         }
 
-        $this->command->info('Seeder TahfizhDailyLog berhasil diisi untuk ' . count($students) . ' siswa!');
+        $this->command->info('Seeder TahfizhDailyLog berhasil diisi untuk '.count($students).' siswa!');
     }
 }

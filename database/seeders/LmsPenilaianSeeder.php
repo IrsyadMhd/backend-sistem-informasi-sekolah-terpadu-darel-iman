@@ -17,8 +17,15 @@ class LmsPenilaianSeeder extends Seeder
         $siswa = Student::orderBy('id')->first();
         $kelas = Kelas::orderBy('id')->first();
         $subject = Subject::orderBy('id')->first();
-        $semester = Semester::orderBy('id')->first();
-        $academicYear = AcademicYear::orderBy('id')->first();
+        $academicYear = AcademicYear::query()->where('is_active', true)->orderByDesc('start_date')->first()
+            ?? AcademicYear::query()->orderByDesc('start_date')->first();
+        $semester = $academicYear
+            ? Semester::query()
+                ->where('academic_year_id', $academicYear->id)
+                ->orderByDesc('is_active')
+                ->orderBy('sequence')
+                ->first()
+            : null;
 
         if (! $siswa || ! $subject || ! $semester) {
             return;

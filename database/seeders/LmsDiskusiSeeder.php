@@ -14,8 +14,8 @@ class LmsDiskusiSeeder extends Seeder
     public function run(): void
     {
         $modulAjarList = LmsModulAjar::all();
-        $users = User::all();
-        $adminUser = User::first();
+        $users = User::query()->orderBy('id')->get();
+        $adminUser = User::query()->orderBy('id')->first();
 
         if ($modulAjarList->isEmpty()) {
             return;
@@ -106,30 +106,44 @@ class LmsDiskusiSeeder extends Seeder
             if (isset($item['komentar']) && is_array($item['komentar'])) {
                 foreach ($item['komentar'] as $kom) {
                     $randomUser = $users->count() > 1 ? $users->random() : $adminUser;
-                    $komentarUtama = LmsDiskusiKomentar::create([
-                        'id' => Str::uuid()->toString(),
-                        'diskusi_id' => $diskusi->id,
-                        'parent_id' => null,
-                        'user_id' => $randomUser ? $randomUser->id : null,
-                        'peran_pengirim' => $kom['peran_pengirim'],
-                        'konten' => $kom['konten'],
-                        'is_solution' => false,
-                        'created_by' => $randomUser ? $randomUser->id : null,
-                    ]);
+                    $komentarUtama = LmsDiskusiKomentar::withTrashed()->firstOrCreate(
+                        [
+                            'diskusi_id' => $diskusi->id,
+                            'parent_id' => null,
+                            'konten' => $kom['konten'],
+                        ],
+                        [
+                            'id' => Str::uuid()->toString(),
+                            'user_id' => $randomUser ? $randomUser->id : null,
+                            'peran_pengirim' => $kom['peran_pengirim'],
+                            'is_solution' => false,
+                            'created_by' => $randomUser ? $randomUser->id : null,
+                        ]
+                    );
+                    if ($komentarUtama->trashed()) {
+                        $komentarUtama->restore();
+                    }
 
                     if (isset($kom['balasan']) && is_array($kom['balasan'])) {
                         foreach ($kom['balasan'] as $balasan) {
                             $balasanUser = $users->count() > 1 ? $users->random() : $adminUser;
-                            LmsDiskusiKomentar::create([
-                                'id' => Str::uuid()->toString(),
-                                'diskusi_id' => $diskusi->id,
-                                'parent_id' => $komentarUtama->id,
-                                'user_id' => $balasanUser ? $balasanUser->id : null,
-                                'peran_pengirim' => $balasan['peran_pengirim'],
-                                'konten' => $balasan['konten'],
-                                'is_solution' => false,
-                                'created_by' => $balasanUser ? $balasanUser->id : null,
-                            ]);
+                            $komentarBalasan = LmsDiskusiKomentar::withTrashed()->firstOrCreate(
+                                [
+                                    'diskusi_id' => $diskusi->id,
+                                    'parent_id' => $komentarUtama->id,
+                                    'konten' => $balasan['konten'],
+                                ],
+                                [
+                                    'id' => Str::uuid()->toString(),
+                                    'user_id' => $balasanUser ? $balasanUser->id : null,
+                                    'peran_pengirim' => $balasan['peran_pengirim'],
+                                    'is_solution' => false,
+                                    'created_by' => $balasanUser ? $balasanUser->id : null,
+                                ]
+                            );
+                            if ($komentarBalasan->trashed()) {
+                                $komentarBalasan->restore();
+                            }
                         }
                     }
                 }

@@ -30,11 +30,18 @@ class LmsPresensiSeeder extends Seeder
             return;
         }
 
-        $academicYear = AcademicYear::query()->where('is_active', true)->first() ?? AcademicYear::first();
-        $semester = Semester::query()->where('is_active', true)->first() ?? Semester::first();
+        $academicYear = AcademicYear::query()->where('is_active', true)->orderByDesc('start_date')->first()
+            ?? AcademicYear::query()->orderByDesc('start_date')->first();
+        $semester = $academicYear
+            ? Semester::query()
+                ->where('academic_year_id', $academicYear->id)
+                ->orderByDesc('is_active')
+                ->orderBy('sequence')
+                ->first()
+            : null;
         $subjects = Subject::query()->get();
-        $employee = Employee::query()->first();
-        $employees = Employee::query()->get();
+        $employee = Employee::query()->orderBy('id')->first();
+        $employees = Employee::query()->orderBy('id')->get();
 
         if ($subjects->isEmpty() || ! $academicYear || ! $semester) {
             $this->command->warn('Skipping LmsPresensiSeeder: Missing dependencies (Subjects/AcademicYear/Semester).');
@@ -45,19 +52,27 @@ class LmsPresensiSeeder extends Seeder
         $employeeId = $employee ? $employee->id : null;
         $employeeUserId = $employee ? ($employee->user_id ?? $employee->id) : null;
 
-        $classes = Kelas::query()->where('status', 'Aktif')->get();
+        $classes = Kelas::query()->where('status', 'Aktif')->orderBy('id')->get();
         if ($classes->isEmpty()) {
-            $classes = Kelas::query()->get();
+            $classes = Kelas::query()->orderBy('id')->get();
         }
 
         $firstClass = $classes->first();
         $firstClassId = $firstClass ? $firstClass->id : null;
 
-        $schoolClass = SchoolClass::query()->first();
+        $schoolClass = SchoolClass::query()->orderBy('id')->first();
         $validClassId = $schoolClass ? $schoolClass->id : null;
 
-        // Fetch existing schedules first
-        $schedules = ClassSchedule::query()->with(['kelas', 'subject', 'employee'])->get();
+        // Keep generated attendance tied to the canonical timetable, not to
+        // demo schedules created by later seeders in the same run.
+        $schedules = ClassSchedule::query()
+            ->where('metadata->source', 'JadwalPelajaranSeeder')
+            ->with(['kelas', 'subject', 'employee'])
+            ->orderBy('id')
+            ->get();
+        if ($schedules->isEmpty()) {
+            $schedules = ClassSchedule::query()->with(['kelas', 'subject', 'employee'])->orderBy('id')->get();
+        }
 
         // If no schedules exist, create new schedules safely without violating legacy class_id FK
         if ($schedules->isEmpty() && $classes->isNotEmpty()) {
@@ -66,7 +81,7 @@ class LmsPresensiSeeder extends Seeder
                 $emp = $employees->count() > 0 ? $employees[$cIdx % $employees->count()] : $employee;
                 $empId = $emp ? $emp->id : $employeeId;
 
-                $newSched = new ClassSchedule();
+                $newSched = new ClassSchedule;
                 $newSched->id = (string) Str::uuid();
                 $newSched->kelas_id = $kelasItem->id;
                 $newSched->class_id = $validClassId; // null or valid UUID from classes table
@@ -119,7 +134,7 @@ class LmsPresensiSeeder extends Seeder
                     ?? $schedules->firstWhere('kelas_id', $student->class_id)
                     ?? $schedules[$sIdx % $schedules->count()];
 
-                $subjectName = ($schedule->subject && !empty($schedule->subject->name))
+                $subjectName = ($schedule->subject && ! empty($schedule->subject->name))
                     ? $schedule->subject->name
                     : 'Pembelajaran';
 
@@ -129,7 +144,7 @@ class LmsPresensiSeeder extends Seeder
                 ], [
                     'id' => (string) Str::uuid(),
                     'meeting_number' => $dIdx + 1,
-                    'learning_material' => 'Materi ' . $subjectName,
+                    'learning_material' => 'Materi '.$subjectName,
                     'learning_activity' => 'Diskusi & Pemahaman Konsep',
                     'meeting_notes' => 'Sesi berjalan lancar dan interaktif',
                     'status' => 'final',
@@ -266,7 +281,7 @@ class LmsPresensiSeeder extends Seeder
             }
         }
 
-        $this->command->info("LmsPresensiSeeder executed successfully:");
+        $this->command->info('LmsPresensiSeeder executed successfully:');
         $this->command->info("- Presensi Records: {$countSeeded}");
         $this->command->info("- Verifikasi Izin: {$permCount}");
         $this->command->info("- Koreksi Presensi: {$corrCount}");

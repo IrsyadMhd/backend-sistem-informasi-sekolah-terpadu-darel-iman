@@ -12,9 +12,9 @@ class SubjectSeeder extends Seeder
 {
     public function run(): void
     {
-        $units = EducationUnit::all();
+        $units = EducationUnit::query()->orderBy('code')->get();
         $kurikulums = MasterKurikulum::all();
-        $gurus = Employee::where('status', 'Aktif')->get();
+        $gurus = Employee::where('status', 'Aktif')->orderBy('id')->get();
         if ($gurus->isEmpty()) {
             $gurus = Employee::all();
         }

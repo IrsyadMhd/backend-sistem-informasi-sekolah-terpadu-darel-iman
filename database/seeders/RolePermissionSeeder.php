@@ -5,11 +5,16 @@ namespace Database\Seeders;
 use App\Models\Permission;
 use App\Models\Role;
 use Illuminate\Database\Seeder;
+use Spatie\Permission\PermissionRegistrar;
 
 class RolePermissionSeeder extends Seeder
 {
     public function run(): void
     {
+        // Permission cache is shared by the application cache store, so it can
+        // contain IDs from another database during local/test seeding.
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+
         $roles = [
             'Super Admin',
             'super_admin',
@@ -87,6 +92,13 @@ class RolePermissionSeeder extends Seeder
             'academic.manage',
             'attendance.view',
             'attendance.manage',
+            'worship_attendance.view',
+            'worship_attendance.template.manage',
+            'worship_attendance.session.manage',
+            'worship_attendance.scan',
+            'worship_attendance.verify',
+            'worship_attendance.private_status.view',
+            'worship_attendance.export',
             'lms.view',
             'lms.manage',
             'cbt.manage',
@@ -576,18 +588,18 @@ class RolePermissionSeeder extends Seeder
                 'student.grade.view',
                 'student.tahfizh.view',
                 'student.mutabaah.view',
-                 'student.mutabaah.create',
-                 'student.notification.view',
-                 'kehadiran.siswa.barcode_kartu',
-                 'tahfizh.laporan_target',
+                'student.mutabaah.create',
+                'student.notification.view',
+                'kehadiran.siswa.barcode_kartu',
+                'tahfizh.laporan_target',
                 'sekolah.data_pribadi_siswa',
                 'sekolah.informasi_sekolah',
                 'kesiswaan.penugasan_siswa',
                 'pembelajaran.materi',
-                 'pembelajaran.kisi_kisi_ujian',
-                 'pembelajaran.bank_soal',
-                 'student_attendance.view_own',
-             ],
+                'pembelajaran.kisi_kisi_ujian',
+                'pembelajaran.bank_soal',
+                'student_attendance.view_own',
+            ],
         ];
 
         $foundationPerms = [

@@ -21,14 +21,16 @@ class StudentMutationSeeder extends Seeder
             if (isset($this->command) && method_exists($this->command, 'warn')) {
                 $this->command->warn('StudentMutationSeeder: Lingkungan production terdeteksi. Seeder mutasi dilewati.');
             }
+
             return;
         }
 
-        $units = EducationUnit::all();
+        $units = EducationUnit::query()->orderBy('code')->get();
         if ($units->isEmpty()) {
             if (isset($this->command) && method_exists($this->command, 'warn')) {
                 $this->command->warn('StudentMutationSeeder: Tidak ada EducationUnit di database. Mengabaikan seeder mutasi.');
             }
+
             return;
         }
 
@@ -38,7 +40,7 @@ class StudentMutationSeeder extends Seeder
         $user = User::first();
 
         // Ambil atau buat 30 siswa untuk memiliki metadata mutasi
-        $existingStudents = Student::all();
+        $existingStudents = Student::query()->orderBy('id')->get();
 
         $reasons = [
             'Pindah domisili orang tua',
@@ -123,9 +125,9 @@ class StudentMutationSeeder extends Seeder
             $effectiveDate = (clone $startDate)->addMonths($index % 12)->addDays($dateOffsetDays);
             $submissionDate = (clone $effectiveDate)->subDays(rand(3, 10));
 
-            $nis = 'DEMO-MUT-' . str_pad($index + 1, 4, '0', STR_PAD_LEFT);
-            $studentName = 'Siswa Mutasi ' . ($index + 1) . ' (' . ucfirst($scen['type']) . ')';
-            $refNumber = $scen['prefix'] . '-' . $effectiveDate->format('Ym') . '-' . str_pad($index + 1, 3, '0', STR_PAD_LEFT);
+            $nis = 'DEMO-MUT-'.str_pad($index + 1, 4, '0', STR_PAD_LEFT);
+            $studentName = 'Siswa Mutasi '.($index + 1).' ('.ucfirst($scen['type']).')';
+            $refNumber = $scen['prefix'].'-'.$effectiveDate->format('Ym').'-'.str_pad($index + 1, 3, '0', STR_PAD_LEFT);
 
             // Logika unit asal/tujuan & sekolah eksternal
             $unitAsalId = null;
@@ -186,12 +188,12 @@ class StudentMutationSeeder extends Seeder
                 Student::create([
                     'id' => (string) Str::uuid(),
                     'nis' => $nis,
-                    'nisn' => '009' . str_pad($index + 1, 7, '0', STR_PAD_LEFT),
+                    'nisn' => '009'.str_pad($index + 1, 7, '0', STR_PAD_LEFT),
                     'full_name' => $studentName,
                     'gender' => $index % 2 === 0 ? 'male' : 'female',
                     'birth_place' => 'Padang',
                     'birth_date' => '2015-05-15',
-                    'address' => 'Jl. Dar el-Iman No. ' . ($index + 1),
+                    'address' => 'Jl. Dar el-Iman No. '.($index + 1),
                     'unit_id' => $unitAsalId ?? $unitTujuanId ?? $units->first()->id,
                     'kelas_id' => $kelas?->id,
                     'is_active' => $status !== 'Ditolak',

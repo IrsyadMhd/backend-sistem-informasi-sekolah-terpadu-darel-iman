@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\AcademicYear;
 use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\LmsKisiKisi;
@@ -15,17 +16,25 @@ class LmsUjianSeeder extends Seeder
 {
     public function run(): void
     {
-        $kisi = LmsKisiKisi::first();
-        $kelas = Kelas::first();
-        $semester = Semester::first();
-        $guru = Employee::first();
-        $siswa = Student::first();
+        $kisi = LmsKisiKisi::query()->orderBy('id')->first();
+        $kelas = Kelas::query()->orderBy('id')->first();
+        $academicYear = AcademicYear::query()->where('is_active', true)->orderByDesc('start_date')->first()
+            ?? AcademicYear::query()->orderByDesc('start_date')->first();
+        $semester = $academicYear
+            ? Semester::query()
+                ->where('academic_year_id', $academicYear->id)
+                ->orderByDesc('is_active')
+                ->orderBy('sequence')
+                ->first()
+            : null;
+        $guru = Employee::query()->orderBy('id')->first();
+        $siswa = Student::query()->orderBy('id')->first();
 
         if (! $kisi || ! $kelas || ! $semester) {
             return;
         }
 
-        $kelases = Kelas::all();
+        $kelases = Kelas::query()->orderBy('id')->get();
         if ($kelases->isEmpty()) {
             $kelases = collect([$kelas]);
         }

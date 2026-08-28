@@ -3,7 +3,6 @@
 namespace Database\Seeders;
 
 use App\Models\AcademicYear;
-use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\ModulSemester;
@@ -16,10 +15,16 @@ class ModulSemesterSeeder extends Seeder
 {
     public function run(): void
     {
-        $ta = AcademicYear::first();
-        $sem = Semester::first();
-        $unit = EducationUnit::first();
-        $kelas = Kelas::first();
+        $ta = AcademicYear::query()->where('is_active', true)->orderByDesc('start_date')->first()
+            ?? AcademicYear::query()->orderByDesc('start_date')->first();
+        $sem = $ta
+            ? Semester::query()
+                ->where('academic_year_id', $ta->id)
+                ->orderByDesc('is_active')
+                ->orderBy('sequence')
+                ->first()
+            : null;
+        $kelas = Kelas::query()->orderBy('id')->first();
         $subject = Subject::first();
         $guru = Employee::first();
 
@@ -30,7 +35,7 @@ class ModulSemesterSeeder extends Seeder
         $dataModul = [
             'tahun_ajaran_id' => $ta->id,
             'semester_id' => $sem->id,
-            'unit_pendidikan_id' => $unit?->id,
+            'unit_pendidikan_id' => $kelas->unit_pendidikan_id,
             'kelas_id' => $kelas->id,
             'mata_pelajaran_id' => $subject->id,
             'guru_id' => $guru->id,

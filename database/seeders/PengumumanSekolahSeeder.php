@@ -19,6 +19,7 @@ class PengumumanSekolahSeeder extends Seeder
     {
         if (! Schema::hasTable('pengumuman_sekolahs')) {
             $this->command?->warn('Tabel pengumuman_sekolahs belum ada. Jalankan migration terlebih dahulu.');
+
             return;
         }
 
@@ -29,6 +30,7 @@ class PengumumanSekolahSeeder extends Seeder
 
         if (! $penerbit) {
             $this->command?->warn('PengumumanSekolahSeeder: Tidak ditemukan user penerbit di database.');
+
             return;
         }
 
@@ -36,7 +38,7 @@ class PengumumanSekolahSeeder extends Seeder
         $units = EducationUnit::where('is_active', true)->get();
 
         if ($units->isEmpty()) {
-            $units = EducationUnit::all();
+            $units = EducationUnit::query()->orderBy('code')->get();
         }
 
         // Templat berita & pengumuman komprehensif untuk disebar ke seluruh unit
@@ -64,7 +66,7 @@ class PengumumanSekolahSeeder extends Seeder
 
         // Seed berita spesifik untuk masing-masing unit pendidikan yang ada di database
         foreach ($units as $unit) {
-            $unitId = String($unit->id);
+            $unitId = (string) $unit->id;
             $unitName = $unit->name;
             $unitCode = $unit->code;
 

@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\EducationUnit;
 use App\Models\Kelas;
 use App\Models\ParentModel;
 use App\Models\Student;
@@ -11,6 +12,7 @@ use App\Support\PhoneNormalizer;
 use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class DataDummySiswaSeeder extends Seeder
@@ -18,10 +20,12 @@ class DataDummySiswaSeeder extends Seeder
     public function run(): void
     {
         // Ensure academic year exists (idempotent)
-        $tahunAjaranAktif = DB::table('academic_years')->where('name', '2024/2025')->first();
-        if (! $tahunAjaranAktif) {
-            $tahunAjaranAktif = DB::table('academic_years')->first();
-        }
+        $tahunAjaranAktif = DB::table('academic_years')
+            ->where('is_active', true)
+            ->orderByDesc('start_date')
+            ->first()
+            ?? DB::table('academic_years')->where('name', '2024/2025')->first()
+            ?? DB::table('academic_years')->orderByDesc('start_date')->first();
         if (! $tahunAjaranAktif) {
             $tahunAjaranId = (string) Str::uuid();
             DB::table('academic_years')->updateOrInsert(
@@ -42,8 +46,13 @@ class DataDummySiswaSeeder extends Seeder
         // Ensure semester exists (idempotent)
         $semesterAktif = DB::table('semesters')
             ->where('academic_year_id', $tahunAjaranId)
+            ->where('is_active', true)
             ->orderBy('sequence')
-            ->first();
+            ->first()
+            ?? DB::table('semesters')
+                ->where('academic_year_id', $tahunAjaranId)
+                ->orderBy('sequence')
+                ->first();
 
         if (! $semesterAktif) {
             $semesterId = (string) Str::uuid();
@@ -112,9 +121,54 @@ class DataDummySiswaSeeder extends Seeder
                     'tahun_ajaran' => '2024/2025',
                 ],
             ],
+            [
+                'name' => 'Kelas 4A',
+                'level' => '4',
+                'academic_year_id' => $tahunAjaranId,
+                'semester_id' => $semesterId,
+                'classroom_id' => null,
+                'homeroom_teacher_id' => null,
+                'metadata' => ['wali_kelas' => 'Ust. Salman', 'tahun_ajaran' => '2024/2025'],
+            ],
+            [
+                'name' => 'Kelas 4B',
+                'level' => '4',
+                'academic_year_id' => $tahunAjaranId,
+                'semester_id' => $semesterId,
+                'classroom_id' => null,
+                'homeroom_teacher_id' => null,
+                'metadata' => ['wali_kelas' => 'Ust. Zubair', 'tahun_ajaran' => '2024/2025'],
+            ],
+            [
+                'name' => 'Kelas 3A',
+                'level' => '3',
+                'academic_year_id' => $tahunAjaranId,
+                'semester_id' => $semesterId,
+                'classroom_id' => null,
+                'homeroom_teacher_id' => null,
+                'metadata' => ['wali_kelas' => 'Ust. Hamzah', 'tahun_ajaran' => '2024/2025'],
+            ],
+            [
+                'name' => 'Kelas 3B',
+                'level' => '3',
+                'academic_year_id' => $tahunAjaranId,
+                'semester_id' => $semesterId,
+                'classroom_id' => null,
+                'homeroom_teacher_id' => null,
+                'metadata' => ['wali_kelas' => 'Ust. Bilal', 'tahun_ajaran' => '2024/2025'],
+            ],
+            [
+                'name' => 'Kelas 2A',
+                'level' => '2',
+                'academic_year_id' => $tahunAjaranId,
+                'semester_id' => $semesterId,
+                'classroom_id' => null,
+                'homeroom_teacher_id' => null,
+                'metadata' => ['wali_kelas' => 'Ust. Umar', 'tahun_ajaran' => '2024/2025'],
+            ],
         ];
 
-        $unitPendidikanId = DB::table('education_units')->value('id');
+        $unitPendidikanId = EducationUnit::query()->orderBy('code')->value('id');
 
         foreach ($daftarKelas as $kelas) {
             $modelKelas = Kelas::query()->updateOrCreate(
@@ -607,6 +661,7 @@ class DataDummySiswaSeeder extends Seeder
                     'unit_id' => $unitPendidikanId,
                     'parent_id' => $parent?->id,
                     'class_id' => $kelasMap[$siswa['class_name']] ?? null,
+                    'kelas_id' => $kelasMap[$siswa['class_name']] ?? null,
                     'full_name' => $siswa['full_name'],
                     'gender' => $siswa['gender'],
                     'birth_place' => $siswa['birth_place'],
@@ -636,15 +691,15 @@ class DataDummySiswaSeeder extends Seeder
         }
 
         // === Pastikan setiap dari 15 Unit Pendidikan memiliki 25 Siswa (Total 375 Siswa) ===
-        $allUnitsForStudents = \App\Models\EducationUnit::all();
-        $defaultHashedPassword = \Illuminate\Support\Facades\Hash::make('Password123!');
+        $allUnitsForStudents = EducationUnit::query()->orderBy('code')->get();
+        $defaultHashedPassword = Hash::make('Password123!');
         $maleStudentPool = [
             'Ahmad Zaky', 'Muhammad Fadli', 'Raihan Ananda', 'Faris Al-Faruq',
             'Ibrahim Naufal', 'Yusuf Habibi', 'Umar Al-Faruq', 'Hamzah Abbasy',
             'Ali Zainal', 'Bilal Rabah', 'Zaid Haritsah', 'Khalid Walid',
             'Usman Afan', 'Hasan Basri', 'Husain Ali', 'Thariq Ziyad',
             'Sutrisno Putra', 'Fadhil Mubarok', 'Rian Hidayat', 'Diki Wahyudi',
-            'Bintang Pratama', 'Candra Wijaya', 'Dimas Anggara', 'Erlangga Putra', 'Fikri Haikal'
+            'Bintang Pratama', 'Candra Wijaya', 'Dimas Anggara', 'Erlangga Putra', 'Fikri Haikal',
         ];
 
         $femaleStudentPool = [
@@ -653,16 +708,16 @@ class DataDummySiswaSeeder extends Seeder
             'Asma Binti Abu Bakar', 'Sumayyah Yasir', 'Shafiyyah Huyay', 'Hafsah Umar',
             'Khaulah Azwar', 'Nusaibah Kaab', 'Ummu Sulaim', 'Halimah Sadiah',
             'Putri Maharani', 'Rania Syakira', 'Salsabila Nadhifah', 'Tania Rahmawati',
-            'Ulfah Safitri', 'Vina Melati', 'Wulan Dari', 'Yolanda Fitri', 'Zafira Aurelia'
+            'Ulfah Safitri', 'Vina Melati', 'Wulan Dari', 'Yolanda Fitri', 'Zafira Aurelia',
         ];
 
         foreach ($allUnitsForStudents as $uIndex => $unitObj) {
             $unitKelas = Kelas::where('unit_pendidikan_id', $unitObj->id)->first();
-            $className = $unitKelas ? ($unitKelas->nama_kelas . ' ' . $unitObj->code) : ('Kelas 1 ' . $unitObj->code);
+            $className = $unitKelas ? ($unitKelas->nama_kelas.' '.$unitObj->code) : ('Kelas 1 '.$unitObj->code);
 
             if (! $unitKelas) {
                 $unitKelas = Kelas::create([
-                    'kode_kelas' => 'K-' . strtoupper($unitObj->code) . '-1A',
+                    'kode_kelas' => 'K-'.strtoupper($unitObj->code).'-1A',
                     'unit_pendidikan_id' => $unitObj->id,
                     'tahun_ajaran_id' => $tahunAjaranId,
                     'semester_id' => $semesterId,
@@ -699,9 +754,12 @@ class DataDummySiswaSeeder extends Seeder
                 $namePool = $isFemale ? $femaleStudentPool : $maleStudentPool;
                 $studentName = $namePool[$sIndex % count($namePool)];
 
-                $nis = '24' . str_pad((string) ($uIndex + 1), 2, '0', STR_PAD_LEFT) . str_pad((string) ($sIndex + 1), 3, '0', STR_PAD_LEFT);
-                $nisn = '0024' . str_pad((string) ($uIndex + 1), 2, '0', STR_PAD_LEFT) . str_pad((string) ($sIndex + 1), 4, '0', STR_PAD_LEFT);
-                $studentEmail = strtolower($nis) . '@student.dareliman.sch.id';
+                $nis = '24'.str_pad((string) ($uIndex + 1), 2, '0', STR_PAD_LEFT).str_pad((string) ($sIndex + 1), 3, '0', STR_PAD_LEFT);
+                $nisn = '0024'.str_pad((string) ($uIndex + 1), 2, '0', STR_PAD_LEFT).str_pad((string) ($sIndex + 1), 4, '0', STR_PAD_LEFT);
+                $studentEmail = strtolower($nis).'@student.dareliman.sch.id';
+                $generatedParent = $parents->isNotEmpty()
+                    ? $parents->get(($uIndex * 25 + $sIndex) % $parents->count())
+                    : null;
 
                 $studentUser = User::query()->firstOrCreate(
                     ['email' => $studentEmail],
@@ -713,15 +771,12 @@ class DataDummySiswaSeeder extends Seeder
                 );
                 $studentUser->syncRoles(['Siswa']);
 
-                Student::query()->updateOrCreate(
-                    [
-                        'unit_id' => $unitObj->id,
-                        'nis' => $nis,
-                    ],
+                $generatedStudent = Student::query()->updateOrCreate(
+                    ['nis' => $nis],
                     [
                         'user_id' => $studentUser->id,
                         'unit_id' => $unitObj->id,
-                        'parent_id' => $parent?->id,
+                        'parent_id' => $generatedParent?->id,
                         'class_id' => $classId,
                         'kelas_id' => $unitKelas->id,
                         'nisn' => $nisn,
@@ -729,20 +784,36 @@ class DataDummySiswaSeeder extends Seeder
                         'gender' => $isFemale ? 'female' : 'male',
                         'birth_place' => ($uIndex % 2 === 0) ? 'Padang' : '50 Kota',
                         'birth_date' => Carbon::create(2015 - ($sIndex % 4), 1 + ($sIndex % 11), 1 + ($sIndex % 25))->toDateString(),
-                        'address' => 'Jl. Pendidikan No. ' . ($sIndex + 1) . ', Kota Padang',
+                        'address' => 'Jl. Pendidikan No. '.($sIndex + 1).', Kota Padang',
                         'is_active' => true,
                         'tahun_masuk' => (string) (2024 - ($sIndex % 3)),
                         'metadata' => [
                             'status' => 'Aktif',
                             'tahun_masuk' => (string) (2024 - ($sIndex % 3)),
                             'orang_tua' => [
-                                'nama_ayah' => 'Bapak ' . explode(' ', $studentName)[0],
-                                'nama_ibu' => 'Ibu ' . explode(' ', $studentName)[0],
-                                'no_hp' => '0813' . str_pad((string) ($uIndex * 25 + $sIndex + 1), 8, '0', STR_PAD_LEFT),
+                                'nama_ayah' => 'Bapak '.explode(' ', $studentName)[0],
+                                'nama_ibu' => 'Ibu '.explode(' ', $studentName)[0],
+                                'no_hp' => '0813'.str_pad((string) ($uIndex * 25 + $sIndex + 1), 8, '0', STR_PAD_LEFT),
                             ],
                         ],
                     ]
                 );
+
+                StudentParent::query()->where('student_id', $generatedStudent->id)->delete();
+
+                if ($generatedParent) {
+                    StudentParent::query()->create([
+                        'student_id' => $generatedStudent->id,
+                        'parent_id' => $generatedParent->id,
+                        'relationship_type' => 'father',
+                        'is_primary' => true,
+                        'metadata' => [
+                            'phone_normalized' => PhoneNormalizer::normalize(
+                                '0813'.str_pad((string) ($uIndex * 25 + $sIndex + 1), 8, '0', STR_PAD_LEFT)
+                            ),
+                        ],
+                    ]);
+                }
             }
         }
     }

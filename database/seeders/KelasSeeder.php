@@ -51,7 +51,7 @@ class KelasSeeder extends Seeder
         );
 
         // 3. Ambil data Unit Pendidikan yang ada
-        $units = EducationUnit::all();
+        $units = EducationUnit::query()->orderBy('code')->get();
         if ($units->isEmpty()) {
             $units = collect([
                 EducationUnit::create(['name' => 'SDIT Dar el-Iman', 'code' => 'SDIT-01', 'level' => 'SDIT', 'is_active' => true]),
@@ -61,7 +61,7 @@ class KelasSeeder extends Seeder
         }
 
         // 4. Ambil data Employee (Guru) untuk wali kelas
-        $employees = Employee::where('status', 'Aktif')->get();
+        $employees = Employee::where('status', 'Aktif')->orderBy('id')->get();
 
         // Sampel data kelas per jenjang unit
         $sampleClasses = [
