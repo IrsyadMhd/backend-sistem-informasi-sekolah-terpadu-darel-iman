@@ -85,14 +85,14 @@ class MutationReportService
 
         $selisih = $pindahMasuk - $pindahKeluar;
 
-        // Recap per unit
+        // Recap per unit constructed from $allMutations collection (Eliminates N+1 loop)
         $units = EducationUnit::all();
-        $unitRecaps = $units->map(function ($u) {
-            $muts = Student::where(function ($q) use ($u) {
-                $q->where('unit_id', $u->id)
-                  ->orWhere('metadata->unit_asal_id', $u->id)
-                  ->orWhere('metadata->unit_tujuan_id', $u->id);
-            })->whereNotNull('metadata->mutasi_type')->get();
+        $unitRecaps = $units->map(function ($u) use ($allMutations) {
+            $muts = $allMutations->filter(function ($s) use ($u) {
+                return (string) $s->unit_id === (string) $u->id
+                    || (string) ($s->metadata['unit_asal_id'] ?? '') === (string) $u->id
+                    || (string) ($s->metadata['unit_tujuan_id'] ?? '') === (string) $u->id;
+            });
 
             $pIn = $muts->filter(fn ($s) => ($s->metadata['mutasi_type'] ?? '') === 'masuk' && (($s->metadata['unit_tujuan_id'] ?? $s->unit_id) == $u->id))->count();
             $pOut = $muts->filter(fn ($s) => ($s->metadata['mutasi_type'] ?? '') === 'keluar' && (($s->metadata['unit_asal_id'] ?? $s->unit_id) == $u->id))->count();

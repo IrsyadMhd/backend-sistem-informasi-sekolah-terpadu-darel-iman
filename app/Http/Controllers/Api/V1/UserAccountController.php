@@ -110,7 +110,11 @@ class UserAccountController extends Controller
         $isUnitOnlyManager = $this->accessScope->canManageUnitAccess($request->user())
             && ! $this->accessScope->canManageGlobalAccess($request->user());
         $validated = $request->validate($isUnitOnlyManager
-            ? ['role' => ['required', 'string', Rule::exists(Role::class, 'name')]]
+            ? [
+                'name' => ['required', 'string', 'max:255'],
+                'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
+                'role' => ['required', 'string', Rule::exists(Role::class, 'name')],
+            ]
             : $this->rules($user, false));
         $this->accessScope->assertRoleAssignmentAllowed($request->user(), $validated['role']);
 
@@ -122,14 +126,17 @@ class UserAccountController extends Controller
         abort_if($removingOwnAdminAccess, 422, 'Super Admin tidak dapat menonaktifkan atau mencabut role dirinya sendiri.');
 
         DB::transaction(function () use ($user, $validated, $isUnitOnlyManager) {
+            $user->fill([
+                'name' => $validated['name'],
+                'email' => strtolower($validated['email']),
+            ]);
             if (! $isUnitOnlyManager) {
                 $user->fill([
-                    'name' => $validated['name'],
-                    'email' => strtolower($validated['email']),
                     'phone' => $validated['phone'] ?? null,
                     'is_active' => $validated['is_active'] ?? $user->is_active,
-                ])->save();
+                ]);
             }
+            $user->save();
 
             $user->syncRoles([$validated['role']]);
 
@@ -147,7 +154,6 @@ class UserAccountController extends Controller
 
     public function resetPassword(Request $request, User $user): JsonResponse
     {
-        $this->accessScope->assertGlobalAccessManagement($request->user());
         $this->assertUserAccess($request->user(), $user);
         $validated = $request->validate([
             'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->letters()->numbers()->symbols()],

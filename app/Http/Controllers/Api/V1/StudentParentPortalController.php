@@ -39,7 +39,6 @@ use App\Services\LmsUjianService;
 use App\Services\StudentQrCredentialService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class StudentParentPortalController extends Controller

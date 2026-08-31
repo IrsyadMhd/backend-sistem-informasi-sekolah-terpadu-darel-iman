@@ -11,6 +11,7 @@ use App\Models\RekapPrestasiSiswa;
 use App\Models\Semester;
 use App\Models\Student;
 use App\Models\Teacher;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -42,65 +43,34 @@ class KepalaSekolahDashboardService
         $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
         $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
 
-        // 1. KPIs scoped to Principal's unit with graceful fallbacks
-        $studentQuery = Student::query();
-        if ($targetUnitId && $unit) {
-            $studentQuery->where(function ($q) use ($targetUnitId, $unit) {
-                $q->where('unit_id', $targetUnitId)
-                  ->orWhereHas('kelas', function ($kq) use ($targetUnitId, $unit) {
-                      $kq->where('unit_pendidikan_id', $targetUnitId);
-                      if (! empty($unit->level)) {
-                          $kq->orWhere('jenjang', $unit->level);
-                      }
-                  });
-                if (! empty($unit->level)) {
-                    $q->orWhereHas('educationUnit', function ($eq) use ($unit) {
-                        $eq->where('level', $unit->level);
-                    });
-                }
+        // 1. KPIs scoped to Principal's unit
+        $studentQuery = Student::query()
+            ->where(function ($q) {
+                $q->whereNull('metadata->mutasi_type')
+                  ->orWhere('metadata->mutasi_type', '!=', 'keluar');
             });
-        }
-        if ((clone $studentQuery)->count() === 0) {
-            $studentQuery = Student::query();
+        if ($targetUnitId && $unit) {
+            $studentQuery->where(function ($q) use ($targetUnitId) {
+                $q->where('unit_id', $targetUnitId)
+                  ->orWhereHas('kelas', function ($kq) use ($targetUnitId) {
+                      $kq->where('unit_pendidikan_id', $targetUnitId);
+                  });
+            });
         }
 
         $employeeQuery = Employee::query();
         if ($targetUnitId && $unit) {
-            $employeeQuery->where(function ($q) use ($targetUnitId, $unit) {
-                $q->where('unit_id', $targetUnitId)
-                  ->orWhereNull('unit_id');
-                if (! empty($unit->level)) {
-                    $q->orWhereHas('educationUnit', function ($eq) use ($unit) {
-                        $eq->where('level', $unit->level);
-                    });
-                }
-            });
-        }
-        if ((clone $employeeQuery)->count() === 0) {
-            $employeeQuery = Employee::query();
+            $employeeQuery->where('unit_id', $targetUnitId);
         }
 
         $classQuery = Kelas::query();
         if ($targetUnitId && $unit) {
-            $classQuery->where(function ($q) use ($targetUnitId, $unit) {
-                $q->where('unit_pendidikan_id', $targetUnitId);
-                if (! empty($unit->level)) {
-                    $q->orWhere('jenjang', $unit->level);
-                }
-            });
-        }
-        if ((clone $classQuery)->count() === 0) {
-            $classQuery = Kelas::query();
+            $classQuery->where('unit_pendidikan_id', $targetUnitId);
         }
 
         $totalSiswa = (clone $studentQuery)->where(function ($q) {
             $q->where('is_active', true)->orWhereNull('is_active');
         })->count();
-        if ($totalSiswa === 0) {
-            $totalSiswa = Student::query()->where(function ($q) {
-                $q->where('is_active', true)->orWhereNull('is_active');
-            })->count();
-        }
 
         $like = DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
         $totalGuru = (clone $employeeQuery)->where(function ($q) use ($like) {
@@ -112,27 +82,10 @@ class KepalaSekolahDashboardService
                     ->orWhere('name', $like, '%Pendidik%');
               });
         })->count();
-        if ($totalGuru === 0) {
-            $totalGuru = Employee::query()->where(function ($q) use ($like) {
-                $q->whereHas('teacher')
-                  ->orWhereHas('teachings')
-                  ->orWhere('status_pegawai', $like, '%Guru%')
-                  ->orWhereHas('position', function ($p) use ($like) {
-                      $p->where('name', $like, '%Guru%')
-                        ->orWhere('name', $like, '%Pendidik%');
-                  });
-            })->count();
-        }
 
         $totalPegawai = (clone $employeeQuery)->count();
-        if ($totalPegawai === 0) {
-            $totalPegawai = Employee::count();
-        }
 
         $totalKelas = (clone $classQuery)->count();
-        if ($totalKelas === 0) {
-            $totalKelas = Kelas::count();
-        }
 
         $totalRombel = Schema::hasTable('rombels') && $targetUnitId
             ? DB::table('rombels')->where('unit_id', $targetUnitId)->count()
@@ -149,18 +102,70 @@ class KepalaSekolahDashboardService
         $sakit = 0;
         $alpha = 0;
 
-        if (Schema::hasTable('attendances')) {
-            $attQuery = DB::table('attendances')
-                ->whereDate('attendance_date', $today);
-            $studentIds = (clone $studentQuery)->pluck('id');
-            if ($studentIds->isNotEmpty()) {
-                $attQuery->whereIn('student_id', $studentIds);
+        $hadirHariIni = 0;
+        $terlambat = 0;
+        $izin = 0;
+        $sakit = 0;
+        $alpha = 0;
+
+        $studentIds = (clone $studentQuery)->pluck('id');
+
+        $latestGate = Schema::hasTable('attendances') && $studentIds->isNotEmpty()
+            ? DB::table('attendances')->whereIn('student_id', $studentIds)->max('attendance_date')
+            : null;
+        $latestLms = Schema::hasTable('lms_presensi') && $studentIds->isNotEmpty()
+            ? DB::table('lms_presensi')->whereIn('siswa_id', $studentIds)->max('tanggal')
+            : null;
+        $latestActiveDate = max($latestGate, $latestLms);
+
+        $attDateToUse = ! empty($filters['date']) ? $filters['date'] : (! empty($filters['attendance_date']) ? $filters['attendance_date'] : $today);
+
+        if ($studentIds->isNotEmpty()) {
+            $gateMap = Schema::hasTable('attendances')
+                ? DB::table('attendances')
+                    ->whereIn('student_id', $studentIds)
+                    ->whereDate('attendance_date', $attDateToUse)
+                    ->get()
+                    ->keyBy('student_id')
+                : collect();
+
+            $lmsMap = Schema::hasTable('lms_presensi')
+                ? DB::table('lms_presensi')
+                    ->whereIn('siswa_id', $studentIds)
+                    ->whereDate('tanggal', $attDateToUse)
+                    ->get()
+                    ->groupBy('siswa_id')
+                : collect();
+
+            foreach ($studentIds as $sId) {
+                $gate = $gateMap->get($sId);
+                $lmsList = $lmsMap->get($sId);
+
+                $isGatePresent = $gate && in_array(strtolower($gate->status ?? ''), ['present', 'hadir', 'late', 'terlambat']);
+                $isLessonPresent = false;
+                $lmsStatus = null;
+                if ($lmsList && $lmsList->isNotEmpty()) {
+                    foreach ($lmsList as $lms) {
+                        $s = strtolower($lms->status_hadir ?? '');
+                        if (in_array($s, ['present', 'hadir', 'late', 'terlambat'])) {
+                            $isLessonPresent = true;
+                        } elseif (! $lmsStatus) {
+                            $lmsStatus = $s;
+                        }
+                    }
+                }
+
+                // Status hijau jika siswa absen gerbang maupun absen di pelajaran
+                if ($isGatePresent || $isLessonPresent) {
+                    $hadirHariIni++;
+                } elseif (($gate && in_array(strtolower($gate->status), ['permission', 'izin'])) || ($lmsStatus && in_array($lmsStatus, ['permission', 'izin']))) {
+                    $izin++;
+                } elseif (($gate && in_array(strtolower($gate->status), ['sick', 'sakit'])) || ($lmsStatus && in_array($lmsStatus, ['sick', 'sakit']))) {
+                    $sakit++;
+                } elseif (($gate && in_array(strtolower($gate->status), ['absent', 'alpha', 'alpa'])) || ($lmsStatus && in_array($lmsStatus, ['alpa', 'alpha']))) {
+                    $alpha++;
+                }
             }
-            $hadirHariIni = (clone $attQuery)->whereIn('status', ['present', 'hadir'])->count();
-            $terlambat = (clone $attQuery)->where('status', 'late')->count();
-            $izin = (clone $attQuery)->whereIn('status', ['permission', 'izin'])->count();
-            $sakit = (clone $attQuery)->whereIn('status', ['sick', 'sakit'])->count();
-            $alpha = (clone $attQuery)->whereIn('status', ['absent', 'alpha'])->count();
         }
 
         // Tahfizh setoran hari ini
@@ -184,7 +189,11 @@ class KepalaSekolahDashboardService
                     // Ignore error if seeder fails silently
                 }
             }
-            $totalPrestasi = RekapPrestasiSiswa::count();
+            $totalPrestasiQuery = RekapPrestasiSiswa::query();
+            if ($targetUnitId) {
+                $totalPrestasiQuery->whereHas('siswa', fn ($sq) => $sq->where('unit_id', $targetUnitId));
+            }
+            $totalPrestasi = $totalPrestasiQuery->count();
         }
 
         $kpis = [
@@ -203,22 +212,102 @@ class KepalaSekolahDashboardService
         ];
 
         // 2. Charts Data
-        // Attendance Trend (Last 7 Days) - scoped to principal's unit
-        $sub7Days = now()->subDays(6)->toDateString();
-        $attendanceTrend = [];
-        if (Schema::hasTable('attendances')) {
-            $trendQuery = DB::table('attendances')
-                ->selectRaw('attendance_date as date, sum(case when status in (\'present\',\'hadir\') then 1 else 0 end) as hadir, sum(case when status = \'late\' then 1 else 0 end) as terlambat, sum(case when status in (\'absent\',\'alpha\') then 1 else 0 end) as alpha')
-                ->whereBetween('attendance_date', [$sub7Days, $today]);
-            $studentIds = (clone $studentQuery)->pluck('id');
-            if ($studentIds->isNotEmpty()) {
-                $trendQuery->whereIn('student_id', $studentIds);
-            }
-            $attendanceTrend = $trendQuery
-                ->groupBy('attendance_date')
-                ->orderBy('attendance_date')
-                ->get();
+        // Attendance Trend: Perbandingan Fullday (Senin - Jumat) vs Pondok Pesantren (Senin - Sabtu)
+        $isPesantren = false;
+        if ($unit) {
+            $uCode = strtoupper($unit->code ?? '');
+            $uName = strtolower($unit->name ?? '');
+            $isPesantren = str_contains($uCode, 'PONPES') || str_contains($uCode, 'MAHAD') || str_contains($uName, 'pesantren') || str_contains($uName, 'mahad') || str_contains($uName, 'pondok');
         }
+
+        $trendStudentIds = (clone $studentQuery)->pluck('id');
+        $totalSiswaCount = $trendStudentIds->count();
+
+        $dayNames = [
+            1 => 'Senin',
+            2 => 'Selasa',
+            3 => 'Rabu',
+            4 => 'Kamis',
+            5 => 'Jumat',
+            6 => 'Sabtu',
+            7 => 'Minggu',
+        ];
+
+        // Tentukan tanggal acuan minggu aktif dari tanggal presensi yang digunakan
+        $refDate = Carbon::parse($attDateToUse);
+        $monday = $refDate->copy()->startOfWeek(Carbon::MONDAY);
+
+        $fulldayDates = collect();
+        for ($i = 0; $i < 5; $i++) {
+            $fulldayDates->push($monday->copy()->addDays($i));
+        }
+
+        $pesantrenDates = collect();
+        for ($i = 0; $i < 6; $i++) {
+            $pesantrenDates->push($monday->copy()->addDays($i));
+        }
+
+        $startWeek = $monday->toDateString();
+        $endWeek = $monday->copy()->addDays(6)->toDateString();
+
+        $gateTrend = (Schema::hasTable('attendances') && $trendStudentIds->isNotEmpty())
+            ? DB::table('attendances')
+                ->whereIn('student_id', $trendStudentIds)
+                ->whereBetween('attendance_date', [$startWeek, $endWeek])
+                ->get()
+            : collect();
+
+        $lmsTrend = (Schema::hasTable('lms_presensi') && $trendStudentIds->isNotEmpty())
+            ? DB::table('lms_presensi')
+                ->whereIn('siswa_id', $trendStudentIds)
+                ->whereBetween('tanggal', [$startWeek, $endWeek])
+                ->get()
+            : collect();
+
+        $buildTrend = function ($dateCollection) use ($gateTrend, $lmsTrend, $trendStudentIds, $dayNames, $totalSiswaCount) {
+            return $dateCollection->map(function ($carbonDate) use ($gateTrend, $lmsTrend, $trendStudentIds, $dayNames, $totalSiswaCount) {
+                $dStr = $carbonDate->toDateString();
+                $dayNum = $carbonDate->dayOfWeekIso;
+                $dayName = $dayNames[$dayNum] ?? 'Hari';
+
+                $gateOnDay = $gateTrend->filter(fn ($x) => str_starts_with($x->attendance_date, $dStr))->keyBy('student_id');
+                $lmsOnDay = $lmsTrend->filter(fn ($x) => str_starts_with($x->tanggal, $dStr))->groupBy('siswa_id');
+
+                $hadir = 0;
+                $terlambat = 0;
+                $alpha = 0;
+
+                foreach ($trendStudentIds as $sId) {
+                    $g = $gateOnDay->get($sId);
+                    $l = $lmsOnDay->get($sId);
+
+                    $isPres = ($g && in_array(strtolower($g->status ?? ''), ['present', 'hadir', 'late', 'terlambat']))
+                        || ($l && $l->contains(fn ($x) => in_array(strtolower($x->status_hadir ?? ''), ['present', 'hadir', 'late', 'terlambat'])));
+
+                    if ($isPres) {
+                        $hadir++;
+                    } elseif (($g && in_array(strtolower($g->status ?? ''), ['absent', 'alpha', 'alpa'])) || ($l && $l->contains(fn ($x) => in_array(strtolower($x->status_hadir ?? ''), ['alpa', 'alpha'])))) {
+                        $alpha++;
+                    }
+                }
+
+                $rate = $totalSiswaCount > 0 ? round(($hadir / $totalSiswaCount) * 100, 1) : 0;
+
+                return [
+                    'date' => $dStr,
+                    'day_name' => $dayName,
+                    'label' => $dayName . ' (' . $carbonDate->format('d/m') . ')',
+                    'hadir' => $hadir,
+                    'terlambat' => $terlambat,
+                    'alpha' => $alpha,
+                    'rate' => $rate,
+                ];
+            })->values()->toArray();
+        };
+
+        $fulldayTrend = $buildTrend($fulldayDates);
+        $pesantrenTrend = $buildTrend($pesantrenDates);
+        $attendanceTrend = $isPesantren ? $pesantrenTrend : $fulldayTrend;
 
         // 3. Tables & Alerts
         if (PengumumanSekolah::count() === 0) {
@@ -272,14 +361,9 @@ class KepalaSekolahDashboardService
             $prestasiQuery = RekapPrestasiSiswa::query()
                 ->with(['siswa.kelas', 'siswa.educationUnit']);
 
-            if (! empty($targetUnitId) && $unit) {
-                $prestasiQuery->where(function ($q) use ($targetUnitId, $unit) {
-                    $q->whereHas('siswa', function ($sq) use ($targetUnitId, $unit) {
-                        $sq->where('unit_id', $targetUnitId);
-                        if (! empty($unit->level)) {
-                            $sq->orWhereHas('educationUnit', fn ($eq) => $eq->where('level', $unit->level));
-                        }
-                    });
+            if (! empty($targetUnitId)) {
+                $prestasiQuery->whereHas('siswa', function ($sq) use ($targetUnitId) {
+                    $sq->where('unit_id', $targetUnitId);
                 });
             }
 
@@ -340,118 +424,318 @@ class KepalaSekolahDashboardService
             }
 
             if (! empty($targetUnitId)) {
-                $empQuery->where(function ($q) use ($targetUnitId) {
-                    $q->where('unit_id', $targetUnitId)
-                      ->orWhereNull('unit_id');
-                });
+                $empQuery->where('unit_id', $targetUnitId);
             }
 
-            $empList = $empQuery->with(['user', 'position', 'educationUnit'])->limit(25)->get();
+            $empList = $empQuery->with(['user', 'position', 'educationUnit'])->get();
 
-            if ($empList->isEmpty()) {
-                $fallbackEmpQuery = Employee::query();
-                if (Schema::hasColumn('employees', 'status')) {
-                    $fallbackEmpQuery->where(function ($q) {
-                        $q->whereIn('status', ['Aktif', 'aktif', 'active', 'Tetap'])
-                          ->orWhereNull('status');
-                    });
-                }
-                $empList = $fallbackEmpQuery->with(['user', 'position', 'educationUnit'])->limit(25)->get();
+            if ($empList->isEmpty() && empty($targetUnitId)) {
+                $empList = Employee::query()->with(['user', 'position', 'educationUnit'])->limit(50)->get();
             }
 
             if ($empList->isNotEmpty()) {
-                $onlineUsers = $empList->map(function ($emp, $idx) use ($unitNama) {
+                $userIds = $empList->pluck('user_id')->filter()->unique();
+                $recentTokens = collect();
+                if ($userIds->isNotEmpty() && Schema::hasTable('personal_access_tokens')) {
+                    $recentTokens = DB::table('personal_access_tokens')
+                        ->whereIn('tokenable_id', $userIds)
+                        ->whereNotNull('last_used_at')
+                        ->orderByDesc('last_used_at')
+                        ->get()
+                        ->groupBy('tokenable_id');
+                }
+
+                $recentLogins = collect();
+                if ($userIds->isNotEmpty() && Schema::hasTable('login_events')) {
+                    $recentLogins = DB::table('login_events')
+                        ->where('status', 'success')
+                        ->whereIn('user_id', $userIds)
+                        ->orderByDesc('created_at')
+                        ->get()
+                        ->groupBy('user_id');
+                }
+
+                $now = now();
+                $onlineThreshold = $now->copy()->subMinutes(15);
+
+                $onlineUsers = $empList->map(function ($emp) use ($unitNama, $recentTokens, $recentLogins, $now, $onlineThreshold, $user) {
                     $uName = $emp->nama_lengkap ?? $emp->full_name ?? $emp->name ?? $emp->user?->name ?? 'Pegawai';
                     $posName = $emp->position?->name ?? $emp->status_pegawai ?? 'Pegawai / Guru';
                     $isFemale = ($emp->jenis_kelamin === 'P' || $emp->jenis_kelamin === 'female' || str_contains(strtolower($uName), 'ustadzah') || str_contains(strtolower($uName), 'siti') || str_contains(strtolower($uName), 'rahma') || str_contains(strtolower($uName), 'ibu'));
+
+                    $uid = $emp->user_id;
+                    $lastLoginTime = null;
+
+                    if ($uid) {
+                        if (isset($recentTokens[$uid])) {
+                            $tok = $recentTokens[$uid]->first();
+                            $tokTime = \Carbon\Carbon::parse($tok->last_used_at ?? $tok->created_at);
+                            if (! $lastLoginTime || $tokTime->gt($lastLoginTime)) {
+                                $lastLoginTime = $tokTime;
+                            }
+                        }
+                        if (isset($recentLogins[$uid])) {
+                            $le = $recentLogins[$uid]->first();
+                            $leTime = \Carbon\Carbon::parse($le->created_at);
+                            if (! $lastLoginTime || $leTime->gt($lastLoginTime)) {
+                                $lastLoginTime = $leTime;
+                            }
+                        }
+                    }
+
+                    $isCurrentUser = ($uid && $user && $uid === $user->id);
+                    $isOnline = $isCurrentUser || ($lastLoginTime && $lastLoginTime->gte($onlineThreshold));
+
+                    if ($isOnline) {
+                        $lastSeen = $isCurrentUser ? 'Aktif sekarang' : 'Login ' . $lastLoginTime->diffForHumans();
+                        $activity = 'Sesi aktif di portal sistem';
+                    } elseif ($lastLoginTime) {
+                        $lastSeen = 'Offline (Login ' . $lastLoginTime->diffForHumans() . ')';
+                        $activity = 'Terakhir login ' . $lastLoginTime->format('d M Y, H:i') . ' WIB';
+                    } else {
+                        $lastSeen = 'Offline';
+                        $activity = 'Belum pernah login ke sistem';
+                    }
+
+                    $nipDisplay = $emp->niy ? 'NIY. ' . $emp->niy : ($emp->nik ? 'NIK. ' . $emp->nik : '—');
+
                     return [
-                        'id' => 'emp-'.$emp->id,
+                        'id' => 'emp-' . $emp->id,
                         'name' => $uName,
                         'nama' => $uName,
                         'role' => $posName,
-                        'nip' => $emp->niy ? 'NIY. '.$emp->niy : ($emp->nik ? 'NIK. '.$emp->nik : 'NIP. 19850312 201001 1 00'.($idx + 1)),
+                        'nip' => $nipDisplay,
                         'dept' => $emp->educationUnit?->name ?? $emp->unit?->name ?? $unitNama,
-                        'activity' => $idx === 0 ? 'Membuka Dashboard Monitoring Sekolah & Rekap Prestasi' : ($idx === 1 ? 'Input Nilai Mutabaah Yaumiyah & Tasmi’ Juz 30' : 'Aktif di portal sekolah'),
-                        'lastSeen' => $idx === 0 ? 'Aktif sekarang' : ($idx * 3).' menit lalu',
-                        'email' => $emp->email ?? $emp->user?->email ?? strtolower(str_replace(' ', '.', $uName)).'@simsit.sch.id',
-                        'phone' => $emp->no_hp ?? $emp->phone ?? '0812-6789-010'.($idx + 1),
-                        'avatar_url' => $emp->foto ?? $emp->avatar_url ?? $emp->user?->avatar_url ?? null,
+                        'activity' => $activity,
+                        'lastSeen' => $lastSeen,
+                        'last_login_at' => $lastLoginTime ? $lastLoginTime->toIso8601String() : null,
+                        'is_online' => $isOnline,
+                        'email' => $emp->email ?? $emp->user?->email ?? '—',
+                        'phone' => $emp->no_hp ?? $emp->phone ?? '—',
+                        'avatar_url' => $emp->photo_url ?? $emp->avatar_url ?? $emp->foto ?? $emp->user?->avatar_url ?? null,
                         'gender' => $isFemale ? 'female' : 'male',
                     ];
-                })->toArray();
-
-                $activityPool = [
-                    'Membuka Dashboard Monitoring Sekolah & Rekap Prestasi',
-                    'Input Nilai Mutabaah Yaumiyah & Tasmi’ Juz 30',
-                    'Melakukan Presensi Masuk Gerbang Sekolah',
-                    'Memverifikasi Data Akademik & Rapor Siswa',
-                    'Mengirim Pengumuman Program Sekolah',
-                    'Memperbarui Rekapitulasi Kehadiran Kelas',
-                    'Meninjau Catatan Kesiswaan & Bimbingan'
-                ];
-                $onlineLogs = $empList->take(8)->map(function ($emp, $idx) use ($activityPool) {
-                    $uName = $emp->nama_lengkap ?? $emp->full_name ?? $emp->name ?? $emp->user?->name ?? 'Pengguna';
-                    $posName = $emp->position?->name ?? $emp->status_pegawai ?? 'Guru / Pegawai';
-                    return [
-                        'id' => 'log-'.$emp->id.'-'.$idx,
-                        'user' => $uName,
-                        'nama' => $uName,
-                        'role' => $posName,
-                        'type' => $idx % 2 === 0 ? 'login' : 'activity',
-                        'action' => $activityPool[$idx % count($activityPool)],
-                        'time' => ($idx * 4 + 2).' menit lalu',
-                    ];
-                })->toArray();
+                })
+                ->sort(function ($a, $b) {
+                    if ($a['is_online'] !== $b['is_online']) {
+                        return $b['is_online'] <=> $a['is_online'];
+                    }
+                    if ($a['last_login_at'] !== $b['last_login_at']) {
+                        return strcmp($b['last_login_at'] ?? '', $a['last_login_at'] ?? '');
+                    }
+                    return strcmp($a['name'], $b['name']);
+                })
+                ->values()
+                ->toArray();
             }
         }
 
-        // 6. Presensi Siswa (Data Riil Database Student Unit)
-        $studentAttendance = [];
-        if (Schema::hasTable('students')) {
-            $stListQuery = Student::query()->where(function ($q) {
-                $q->where('is_active', true)->orWhereNull('is_active');
-            });
+        // Real Activity Logs from login_events
+        if (Schema::hasTable('login_events')) {
+            $logQuery = DB::table('login_events')
+                ->join('users', 'login_events.user_id', '=', 'users.id')
+                ->leftJoin('employees', 'employees.user_id', '=', 'users.id')
+                ->leftJoin('positions', 'employees.jabatan_id', '=', 'positions.id')
+                ->select(
+                    'login_events.id',
+                    'users.name as user_name',
+                    'employees.nama_lengkap as emp_name',
+                    'positions.name as role_name',
+                    'login_events.portal_type',
+                    'login_events.login_method',
+                    'login_events.status',
+                    'login_events.ip_address',
+                    'login_events.created_at'
+                )
+                ->where('login_events.status', 'success');
 
             if (! empty($targetUnitId)) {
-                $stListQuery->where(function ($q) use ($targetUnitId) {
-                    $q->where('unit_id', $targetUnitId)
-                      ->orWhereHas('kelas', function ($kq) use ($targetUnitId) {
-                          $kq->where('unit_pendidikan_id', $targetUnitId);
-                      });
+                $logQuery->where(function ($q) use ($targetUnitId) {
+                    $q->where('employees.unit_id', $targetUnitId)
+                      ->orWhere('login_events.education_unit_id', $targetUnitId);
                 });
             }
-            $stList = $stListQuery->with(['educationUnit', 'kelas'])->limit(25)->get();
 
-            if ($stList->isEmpty()) {
-                $stList = Student::query()
-                    ->where(function ($q) {
-                        $q->where('is_active', true)->orWhereNull('is_active');
-                    })
-                    ->with(['educationUnit', 'kelas'])
-                    ->limit(25)
+            $rawLogs = $logQuery->latest('login_events.created_at')->limit(15)->get();
+
+            if ($rawLogs->isEmpty()) {
+                $rawLogs = DB::table('login_events')
+                    ->join('users', 'login_events.user_id', '=', 'users.id')
+                    ->leftJoin('employees', 'employees.user_id', '=', 'users.id')
+                    ->leftJoin('positions', 'employees.jabatan_id', '=', 'positions.id')
+                    ->select(
+                        'login_events.id',
+                        'users.name as user_name',
+                        'employees.nama_lengkap as emp_name',
+                        'positions.name as role_name',
+                        'login_events.portal_type',
+                        'login_events.login_method',
+                        'login_events.status',
+                        'login_events.ip_address',
+                        'login_events.created_at'
+                    )
+                    ->where('login_events.status', 'success')
+                    ->latest('login_events.created_at')
+                    ->limit(15)
                     ->get();
             }
 
+            $onlineLogs = $rawLogs->map(function ($log) {
+                $uName = $log->emp_name ?: ($log->user_name ?: 'Pengguna');
+                $posName = $log->role_name ?: 'Pengguna Sistem';
+                $cTime = \Carbon\Carbon::parse($log->created_at);
+                $portalLabel = ucfirst($log->portal_type ?? 'portal');
+                return [
+                    'id' => 'log-' . $log->id,
+                    'user' => $uName,
+                    'nama' => $uName,
+                    'role' => $posName,
+                    'type' => 'login',
+                    'action' => 'Login sukses ke ' . $portalLabel . ($log->ip_address ? ' (' . $log->ip_address . ')' : ''),
+                    'time' => $cTime->diffForHumans(),
+                ];
+            })->toArray();
+        }
+
+        // 6. Presensi Siswa (Gabungan Absen Gerbang & Absen Pelajaran)
+        $studentAttendance = [];
+        if (Schema::hasTable('students')) {
+            $stListQuery = Student::query()
+                ->where(function ($q) {
+                    $q->where('is_active', true)->orWhereNull('is_active');
+                })
+                ->where(function ($q) {
+                    $q->whereNull('metadata->mutasi_type')
+                      ->orWhere('metadata->mutasi_type', '!=', 'keluar');
+                });
+
+            if (! empty($targetUnitId)) {
+                $stListQuery->where('unit_id', $targetUnitId);
+            }
+            $stList = $stListQuery->with(['educationUnit', 'kelas', 'parent'])->get();
+
             if ($stList->isNotEmpty()) {
-                $statusPool = ['Hadir', 'Hadir', 'Hadir', 'Hadir', 'Terlambat', 'Hadir', 'Izin', 'Sakit'];
-                $studentAttendance = $stList->map(function ($st, $idx) use ($unitNama, $statusPool) {
+                $studentIds = $stList->pluck('id');
+
+                $gateMap = Schema::hasTable('attendances')
+                    ? DB::table('attendances')
+                        ->whereIn('student_id', $studentIds)
+                        ->whereDate('attendance_date', $attDateToUse)
+                        ->get()
+                        ->keyBy('student_id')
+                    : collect();
+
+                $lmsMap = Schema::hasTable('lms_presensi')
+                    ? DB::table('lms_presensi')
+                        ->whereIn('siswa_id', $studentIds)
+                        ->whereDate('tanggal', $attDateToUse)
+                        ->get()
+                        ->groupBy('siswa_id')
+                    : collect();
+
+                $studentAttendance = $stList->map(function ($st) use ($unitNama, $gateMap, $lmsMap, $attDateToUse) {
                     $sName = $st->full_name ?? $st->name ?? 'Siswa';
-                    $status = $statusPool[$idx % count($statusPool)];
+                    $gate = $gateMap->get($st->id);
+                    $lmsList = $lmsMap->get($st->id);
+
+                    $isGatePresent = false;
+                    $gateTime = null;
+                    if ($gate) {
+                        $gStatus = strtolower($gate->status ?? '');
+                        if (in_array($gStatus, ['present', 'hadir', 'late', 'terlambat'])) {
+                            $isGatePresent = true;
+                            $gateTime = $gate->check_in_time ? \Carbon\Carbon::parse($gate->check_in_time)->format('H:i') : null;
+                        }
+                    }
+
+                    $isLessonPresent = false;
+                    $lessonTime = null;
+                    $lmsStatus = null;
+                    if ($lmsList && $lmsList->isNotEmpty()) {
+                        foreach ($lmsList as $lms) {
+                            $lStatus = strtolower($lms->status_hadir ?? '');
+                            if (in_array($lStatus, ['present', 'hadir', 'late', 'terlambat'])) {
+                                $isLessonPresent = true;
+                                $t = $lms->waktu_presensi ?? $lms->arrival_time;
+                                if ($t) {
+                                    $fmt = \Carbon\Carbon::parse($t)->format('H:i');
+                                    if (! $lessonTime || $fmt < $lessonTime) {
+                                        $lessonTime = $fmt;
+                                    }
+                                }
+                            } elseif (! $lmsStatus) {
+                                $lmsStatus = $lStatus;
+                            }
+                        }
+                    }
+
+                    // Status jika belum/tidak ada presensi (bukan hijau!)
+                    $isWeekend = \Carbon\Carbon::parse($attDateToUse)->isWeekend();
+                    $status = $isWeekend ? 'Libur (Akhir Pekan)' : 'Belum Presensi';
+                    $waktu = '—';
+                    $keterangan = $isWeekend ? 'Tidak ada kegiatan KBM (Hari Libur)' : 'Belum ada catatan presensi hari ini';
+
+                    if ($isGatePresent || $isLessonPresent) {
+                        $status = 'Hadir'; // STATUS HIJAU HANYA JIKA ADA PRESENSI!
+                        $timeVal = $gateTime ?? $lessonTime;
+                        $waktu = $timeVal ? $timeVal . ' WIB' : 'Tercatat';
+                        if ($isGatePresent && $isLessonPresent) {
+                            $keterangan = 'Hadir Lengkap (Absen Gerbang & Pelajaran)';
+                        } elseif ($isGatePresent) {
+                            $keterangan = 'Hadir (Absen Gerbang)';
+                        } else {
+                            $keterangan = 'Hadir (Absen Pelajaran)';
+                        }
+                    } elseif ($gate && in_array(strtolower($gate->status), ['permission', 'izin'])) {
+                        $status = 'Izin';
+                        $keterangan = $gate->keterangan ?? 'Izin';
+                    } elseif ($lmsStatus && in_array($lmsStatus, ['permission', 'izin'])) {
+                        $status = 'Izin';
+                        $keterangan = 'Izin pada jam pelajaran';
+                    } elseif ($gate && in_array(strtolower($gate->status), ['sick', 'sakit'])) {
+                        $status = 'Sakit';
+                        $keterangan = $gate->keterangan ?? 'Sakit';
+                    } elseif ($lmsStatus && in_array($lmsStatus, ['sick', 'sakit'])) {
+                        $status = 'Sakit';
+                        $keterangan = 'Sakit pada jam pelajaran';
+                    } elseif (($gate && in_array(strtolower($gate->status), ['absent', 'alpha', 'alpa'])) || ($lmsStatus && in_array($lmsStatus, ['alpa', 'alpha']))) {
+                        $status = 'Alpha';
+                        $keterangan = 'Tidak hadir tanpa keterangan';
+                    }
+
+                    $parentName = $st->parent?->full_name 
+                        ?? data_get($st->metadata, 'orang_tua.nama_ayah') 
+                        ?? data_get($st->metadata, 'orang_tua.nama_ibu') 
+                        ?? '—';
+
+                    $parentPhone = $st->parent?->phone 
+                        ?? data_get($st->metadata, 'orang_tua.no_hp') 
+                        ?? '—';
+
                     return [
-                        'id' => 'st-'.$st->id,
+                        'id' => 'st-' . $st->id,
                         'nama' => $sName,
-                        'nisn' => $st->nisn ?? $st->nis ?? '001234567'.($idx + 1),
+                        'nisn' => $st->nisn ?? $st->nis ?? '—',
                         'unit_name' => $st->educationUnit?->name ?? $unitNama,
-                        'kelas' => $st->kelas?->nama_kelas ?? 'Kelas 6A',
+                        'kelas' => $st->kelas?->nama_kelas ?? '—',
                         'status' => $status,
-                        'waktu' => $status === 'Terlambat' ? '07:35 WIB' : ($status === 'Izin' ? '07:00 WIB' : '07:12 WIB'),
-                        'nama_ortu' => $st->nama_ayah ?? $st->nama_ibu ?? 'Wali murid '.$sName,
-                        'no_hp_ortu' => $st->no_hp_ortu ?? '0812-3456-789'.($idx + 1),
-                        'keterangan' => $status === 'Hadir' ? 'Hadir Tepat Waktu (Presensi Barcode)' : ($status === 'Terlambat' ? 'Terlambat 15 Menit (Kendala Hujan)' : ($status === 'Izin' ? 'Izin Acara Keluarga' : 'Demam & Flu')),
-                        'avatar_url' => $st->avatar_url ?? $st->foto ?? null,
-                        'gender' => $st->gender ?? ($idx % 2 === 0 ? 'male' : 'female'),
+                        'waktu' => $waktu,
+                        'nama_ortu' => $parentName,
+                        'no_hp_ortu' => $parentPhone,
+                        'keterangan' => $keterangan,
+                        'avatar_url' => $st->photo_url ?? $st->avatar_url ?? $st->foto ?? null,
+                        'gender' => $st->gender ?? 'male',
                     ];
-                })->toArray();
+                })
+                ->sortBy(fn ($s) => match ($s['status']) {
+                    'Hadir' => 0,
+                    'Izin' => 1,
+                    'Sakit' => 2,
+                    'Alpha' => 3,
+                    default => 4,
+                })
+                ->values()
+                ->toArray();
             }
         }
 
@@ -460,89 +744,121 @@ class KepalaSekolahDashboardService
             [
                 'id' => 'pengurus-1',
                 'jabatan' => 'Ketua Yayasan',
-                'nama' => 'Ust. Dr. Muhammad Elvi Syam, Lc., M.A.',
-                'nip' => 'NIY-201101001',
-                'email' => 'elvisyam@dareliman.sch.id',
-                'phone' => '0811-6601-001',
+                'code' => 'JBT-001',
+                'nama_default' => 'Ust. Dr. Muhammad Elvi Syam, Lc., M.A.',
+                'nip_default' => 'NIY-201101001',
+                'email_default' => 'elvisyam@dareliman.sch.id',
+                'phone_default' => '0811-6601-001',
                 'periode' => '2021 - 2026',
-                'status' => 'Aktif',
                 'gender' => 'male',
-                'avatar_url' => null,
                 'badge_variant' => 'emerald',
                 'role_code' => 'KETUA',
             ],
             [
                 'id' => 'pengurus-2',
                 'jabatan' => 'Sekretaris Yayasan',
-                'nama' => 'Ust. Abu Umar Indra, S.S.',
-                'nip' => 'NIY-201101002',
-                'email' => 'sekretaris@dareliman.sch.id',
-                'phone' => '0812-6789-002',
+                'code' => 'JBT-002',
+                'nama_default' => 'Ust. Abu Umar Indra, S.S.',
+                'nip_default' => 'NIY-201101002',
+                'email_default' => 'sekretaris@dareliman.sch.id',
+                'phone_default' => '0812-6789-002',
                 'periode' => '2021 - 2026',
-                'status' => 'Aktif',
                 'gender' => 'male',
-                'avatar_url' => null,
                 'badge_variant' => 'blue',
                 'role_code' => 'SEKRETARIS',
             ],
             [
                 'id' => 'pengurus-3',
                 'jabatan' => 'Bendahara Yayasan',
-                'nama' => 'H. Faisal Ramli, S.E., Ak.',
-                'nip' => 'NIY-201101003',
-                'email' => 'bendahara@dareliman.sch.id',
-                'phone' => '0813-7890-003',
+                'code' => 'JBT-015',
+                'nama_default' => 'H. Faisal Ramli, S.E., Ak.',
+                'nip_default' => 'NIY-201101003',
+                'email_default' => 'bendahara@dareliman.sch.id',
+                'phone_default' => '0813-7890-003',
                 'periode' => '2021 - 2026',
-                'status' => 'Aktif',
                 'gender' => 'male',
-                'avatar_url' => null,
                 'badge_variant' => 'purple',
                 'role_code' => 'BENDAHARA',
             ],
         ];
 
-        if (Schema::hasTable('employees')) {
-            $empKetua = Employee::query()
-                ->whereHas('position', function ($q) {
-                    $q->where('code', 'JBT-001')->orWhere('name', 'LIKE', '%Ketua Yayasan%');
-                })->orWhere('nama_lengkap', 'LIKE', '%Elvi Syam%')
-                ->first();
+        $now = now();
+        $onlineThreshold = $now->copy()->subMinutes(15);
 
-            if ($empKetua) {
-                $defaultPengurus[0]['nama'] = $empKetua->nama_lengkap ?? $empKetua->full_name ?? $defaultPengurus[0]['nama'];
-                $defaultPengurus[0]['nip'] = $empKetua->niy ? 'NIY. '.$empKetua->niy : ($empKetua->nik ? 'NIK. '.$empKetua->nik : $defaultPengurus[0]['nip']);
-                $defaultPengurus[0]['email'] = $empKetua->email ?? $defaultPengurus[0]['email'];
-                $defaultPengurus[0]['phone'] = $empKetua->no_hp ?? $defaultPengurus[0]['phone'];
-                $defaultPengurus[0]['avatar_url'] = $empKetua->foto ?? $empKetua->avatar_url ?? null;
+        $pengurusYayasan = [];
+        foreach ($defaultPengurus as $item) {
+            $emp = null;
+            if (Schema::hasTable('employees')) {
+                $emp = Employee::query()
+                    ->whereHas('position', function ($q) use ($item) {
+                        $q->where('code', $item['code'])->orWhere('name', 'LIKE', '%' . $item['jabatan'] . '%');
+                    })
+                    ->where('nama_lengkap', 'not like', '%Super Admin%')
+                    ->first();
             }
 
-            $empSekretaris = Employee::query()
-                ->whereHas('position', function ($q) {
-                    $q->where('code', 'JBT-002')->orWhere('name', 'LIKE', '%Sekretaris Yayasan%');
-                })->orWhere('nama_lengkap', 'LIKE', '%Abu Umar%')
-                ->first();
+            $uid = $emp?->user_id;
+            $lastLoginTime = null;
 
-            if ($empSekretaris) {
-                $defaultPengurus[1]['nama'] = $empSekretaris->nama_lengkap ?? $empSekretaris->full_name ?? $defaultPengurus[1]['nama'];
-                $defaultPengurus[1]['nip'] = $empSekretaris->niy ? 'NIY. '.$empSekretaris->niy : ($empSekretaris->nik ? 'NIK. '.$empSekretaris->nik : $defaultPengurus[1]['nip']);
-                $defaultPengurus[1]['email'] = $empSekretaris->email ?? $defaultPengurus[1]['email'];
-                $defaultPengurus[1]['phone'] = $empSekretaris->no_hp ?? $defaultPengurus[1]['phone'];
-                $defaultPengurus[1]['avatar_url'] = $empSekretaris->foto ?? $empSekretaris->avatar_url ?? null;
+            if ($uid) {
+                if (Schema::hasTable('personal_access_tokens')) {
+                    $tok = DB::table('personal_access_tokens')
+                        ->where('tokenable_id', $uid)
+                        ->whereNotNull('last_used_at')
+                        ->orderByDesc('last_used_at')
+                        ->first();
+                    if ($tok) {
+                        $tokTime = \Carbon\Carbon::parse($tok->last_used_at ?? $tok->created_at);
+                        if (! $lastLoginTime || $tokTime->gt($lastLoginTime)) {
+                            $lastLoginTime = $tokTime;
+                        }
+                    }
+                }
+                if (Schema::hasTable('login_events')) {
+                    $le = DB::table('login_events')
+                        ->where('user_id', $uid)
+                        ->where('status', 'success')
+                        ->orderByDesc('created_at')
+                        ->first();
+                    if ($le) {
+                        $leTime = \Carbon\Carbon::parse($le->created_at);
+                        if (! $lastLoginTime || $leTime->gt($lastLoginTime)) {
+                            $lastLoginTime = $leTime;
+                        }
+                    }
+                }
             }
 
-            $empBendahara = Employee::query()
-                ->whereHas('position', function ($q) {
-                    $q->where('code', 'JBT-015')->orWhere('name', 'LIKE', '%Bendahara Yayasan%');
-                })->orWhere('nama_lengkap', 'LIKE', '%Faisal Ramli%')
-                ->first();
+            $isCurrentUser = ($uid && $user && $uid === $user->id);
+            $isOnline = $isCurrentUser || ($lastLoginTime && $lastLoginTime->gte($onlineThreshold));
 
-            if ($empBendahara) {
-                $defaultPengurus[2]['nama'] = $empBendahara->nama_lengkap ?? $empBendahara->full_name ?? $defaultPengurus[2]['nama'];
-                $defaultPengurus[2]['nip'] = $empBendahara->niy ? 'NIY. '.$empBendahara->niy : ($empBendahara->nik ? 'NIK. '.$empBendahara->nik : $defaultPengurus[2]['nip']);
-                $defaultPengurus[2]['email'] = $empBendahara->email ?? $defaultPengurus[2]['email'];
-                $defaultPengurus[2]['phone'] = $empBendahara->no_hp ?? $defaultPengurus[2]['phone'];
-                $defaultPengurus[2]['avatar_url'] = $empBendahara->foto ?? $empBendahara->avatar_url ?? null;
+            if ($isOnline) {
+                $lastSeen = $isCurrentUser ? 'Aktif sekarang' : 'Login ' . $lastLoginTime->diffForHumans();
+            } elseif ($lastLoginTime) {
+                $lastSeen = 'Offline (Login ' . $lastLoginTime->diffForHumans() . ')';
+            } else {
+                $lastSeen = 'Offline';
             }
+
+            $nipDisplay = $emp?->niy ? 'NIY. ' . $emp->niy : ($emp?->nik ? 'NIK. ' . $emp->nik : $item['nip_default']);
+
+            $pengurusYayasan[] = [
+                'id' => $item['id'],
+                'jabatan' => $item['jabatan'],
+                'nama' => $emp?->nama_lengkap ?? $item['nama_default'],
+                'nip' => $nipDisplay,
+                'email' => $emp?->email ?? $item['email_default'],
+                'phone' => $emp?->no_hp ?? $item['phone_default'],
+                'periode' => $item['periode'],
+                'status' => $emp?->status ?? 'Aktif',
+                'is_online' => $isOnline,
+                'last_seen' => $lastSeen,
+                'last_login_at' => $lastLoginTime ? $lastLoginTime->toIso8601String() : null,
+                'gender' => $item['gender'],
+                'avatar_url' => $emp?->foto ?? $emp?->avatar_url ?? null,
+                'badge_variant' => $item['badge_variant'],
+                'role_code' => $item['role_code'],
+            ];
         }
 
         return [
@@ -574,10 +890,24 @@ class KepalaSekolahDashboardService
             'online_users' => $onlineUsers,
             'online_logs' => $onlineLogs,
             'student_attendance' => $studentAttendance,
-            'pengurus_yayasan' => $defaultPengurus,
+            'attendance_meta' => [
+                'date' => $attDateToUse,
+                'date_label' => Carbon::parse($attDateToUse)->translatedFormat('d M Y'),
+                'is_today' => $attDateToUse === $today,
+                'is_weekend' => Carbon::parse($attDateToUse)->isWeekend(),
+                'has_activity' => ($hadirHariIni + $terlambat + $izin + $sakit + $alpha) > 0,
+                'latest_active_date' => $latestActiveDate,
+                'latest_active_date_label' => $latestActiveDate ? Carbon::parse($latestActiveDate)->translatedFormat('d M Y') : null,
+                'total_evaluated' => count($studentAttendance),
+            ],
+            'pengurus_yayasan' => $pengurusYayasan,
             'kpis' => $kpis,
             'charts' => [
                 'attendance_trend' => $attendanceTrend,
+                'fullday_trend' => $fulldayTrend,
+                'pesantren_trend' => $pesantrenTrend,
+                'unit_schedule_type' => $isPesantren ? 'pesantren' : 'fullday',
+                'schedule_label' => $isPesantren ? 'Pondok Pesantren (Senin - Sabtu)' : 'Fullday School (Senin - Jumat)',
             ],
             'tables' => [
                 'announcements' => $recentAnnouncements,

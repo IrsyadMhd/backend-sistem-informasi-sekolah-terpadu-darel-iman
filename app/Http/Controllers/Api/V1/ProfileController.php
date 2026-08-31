@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
@@ -74,11 +75,23 @@ class ProfileController extends Controller
             // 2. Resolve Unit ID if provided
             $unitId = null;
             if (! empty($validated['unit_id'])) {
-                $unitId = $validated['unit_id'];
+                $unitVal = $validated['unit_id'];
+                if (Str::isUuid($unitVal)) {
+                    $unitId = $unitVal;
+                } else {
+                    $unitId = \App\Models\EducationUnit::where('name', $unitVal)
+                        ->orWhere('code', $unitVal)
+                        ->value('id');
+                }
             } elseif (! empty($validated['unit'])) {
-                $unitId = \App\Models\EducationUnit::where('name', $validated['unit'])
-                    ->orWhere('id', $validated['unit'])
-                    ->value('id');
+                $unitVal = $validated['unit'];
+                $unitQuery = \App\Models\EducationUnit::where('name', $unitVal);
+                if (Str::isUuid($unitVal)) {
+                    $unitQuery->orWhere('id', $unitVal);
+                } else {
+                    $unitQuery->orWhere('code', $unitVal);
+                }
+                $unitId = $unitQuery->value('id');
             }
 
             // 3. Update Employee Record (jika terhubung)

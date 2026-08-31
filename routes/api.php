@@ -47,6 +47,8 @@ use App\Http\Controllers\Api\V1\LmsMediaController;
 use App\Http\Controllers\Api\V1\LmsModulAjarController;
 use App\Http\Controllers\Api\V1\LmsPengumpulanTugasController;
 use App\Http\Controllers\Api\V1\LmsPenugasanController;
+use App\Http\Controllers\Api\V1\LmsPresensiController;
+use App\Http\Controllers\Api\V1\MobileAppConfigController;
 Route::get('/seed-sdit1-data', function () {
     if (! app()->environment('local', 'testing')) {
         abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole('Super Admin'), 403, 'Development seed endpoints are disabled in production.');
@@ -158,7 +160,12 @@ Route::get('/seed-sdit1-data', function () {
             'students_sdit1_count' => \App\Models\Student::where('unit_id', $unitId)->count(),
         ]);
     } catch (\Throwable $e) {
-        return response()->json(['error' => $e->getMessage(), 'line' => $e->getLine()], 500);
+        return response()->json([
+            'error' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile(),
+            'trace' => $e->getTraceAsString()
+        ], 200);
     }
 });
 
@@ -258,6 +265,61 @@ Route::get('/seed-all-units', function (\Illuminate\Http\Request $request) {
         return response()->json(['error' => $e->getMessage(), 'line' => $e->getLine(), 'file' => $e->getFile()], 500);
     }
 });
+
+Route::get('/run-chat-migrations', function () {
+    try {
+        if (\Illuminate\Support\Facades\Schema::hasTable('users') && ! \Illuminate\Support\Facades\Schema::hasColumn('users', 'is_superadmin')) {
+            \Illuminate\Support\Facades\Schema::table('users', function (\Illuminate\Database\Schema\Blueprint $table) {
+                $table->boolean('is_superadmin')->default(false)->nullable();
+            });
+        }
+        \Illuminate\Support\Facades\Artisan::call('migrate', ['--force' => true]);
+        return response()->json([
+            'success' => true,
+            'has_is_superadmin' => \Illuminate\Support\Facades\Schema::hasColumn('users', 'is_superadmin'),
+            'output' => \Illuminate\Support\Facades\Artisan::output(),
+        ]);
+    } catch (\Throwable $e) {
+        return response()->json(['error' => $e->getMessage(), 'line' => $e->getLine()], 500);
+    }
+});
+
+Route::get('/debug-chat-contacts', function (\Illuminate\Http\Request $request) {
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+    try {
+        $usersCount = \App\Models\User::count();
+        $employeesCount = \App\Models\Employee::count();
+        $unitsCount = \App\Models\EducationUnit::count();
+
+        $superAdmin = \App\Models\User::where('email', 'superadmin@school-erp.local')->first()
+            ?? \App\Models\User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first()
+            ?? \App\Models\User::first();
+        
+        $request->setUserResolver(fn () => $superAdmin);
+        
+        $controller = app(\App\Http\Controllers\Api\V1\EmployeeChatController::class);
+        $response = $controller->employeeContacts($request);
+
+        return response()->json([
+            'database' => [
+                'users_count' => $usersCount,
+                'employees_count' => $employeesCount,
+                'units_count' => $unitsCount,
+                'super_admin' => $superAdmin?->only(['id', 'name', 'email', 'unit_id']),
+            ],
+            'api_response' => json_decode($response->getContent(), true),
+        ]);
+    } catch (\Throwable $e) {
+        return response()->json([
+            'error' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile(),
+            'trace_string' => $e->getTraceAsString()
+        ], 200);
+    }
+});
 use App\Http\Controllers\Api\V1\LmsRaporController;
 use App\Http\Controllers\Api\V1\LmsReferensiController;
 use App\Http\Controllers\Api\V1\MasterKurikulumController;
@@ -286,6 +348,7 @@ use App\Http\Controllers\Api\V1\WorshipAttendanceController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/site-settings', [SiteSettingController::class, 'show']);
+Route::get('/mobile/config', [MobileAppConfigController::class, 'show']);
 Route::get('/equran/surah', [EQuranController::class, 'surahs']);
 Route::get('/equran/surah/{id}', [EQuranController::class, 'show']);
 Route::get('/equran/jadwal-sholat', [EQuranController::class, 'jadwalSholat']);
@@ -378,7 +441,7 @@ Route::middleware('auth:sanctum')->prefix('v2/approval')->group(function () {
 
 Route::middleware('auth:sanctum')->group(function () {
     // Foundation Board Dashboard Monitoring Endpoints
-    Route::prefix('foundation')->middleware('can:foundation.dashboard.view')->group(function () {
+    Route::prefix('foundation')->middleware('permission:foundation.dashboard.view|dashboard.kepala-sekolah.view|dashboard.divisi-pendidikan.view')->group(function () {
         Route::get('/dashboard', [FoundationDashboardController::class, 'index']);
         Route::get('/units', [FoundationDashboardController::class, 'units']);
         Route::get('/units/{id}', [FoundationDashboardController::class, 'unitDetail']);
@@ -484,6 +547,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     });
     Route::post('/site-settings', [SiteSettingController::class, 'update'])
+        ->middleware('can:sistem.pengaturan');
+    Route::get('/admin/mobile-config', [MobileAppConfigController::class, 'adminShow'])
+        ->middleware('can:sistem.pengaturan');
+    Route::put('/admin/mobile-config', [MobileAppConfigController::class, 'update'])
         ->middleware('can:sistem.pengaturan');
     Route::get('/dashboard', [DashboardPemantauanController::class, 'ringkasan'])
         ->middleware('can:dashboard.pemantauan.lihat');
@@ -1263,6 +1330,9 @@ Route::middleware('auth:sanctum')->group(function () {
         // Unified Chat Alias Routes (/api/chat/*)
         // Role-scoped: portal (Orang Tua/Siswa) + seluruh role staf sekolah.
         Route::prefix('chat')->middleware('role:Orang Tua|Siswa|Guru|Guru Mata Pelajaran|Guru PAI|Pembimbing|Wali Kelas|Guru Tahfizh|Musyrif|Musyrifah|Musyrif / Musyrifah|Guru BK|Kepala Sekolah|Tata Usaha|TU|Operator|Divisi Pendidikan|Waka Kurikulum|Waka Kesiswaan|Wakil Kepala Sekolah|Admin|Super Admin|Pengurus Yayasan|Ketua Yayasan|Sekretaris Yayasan|Bendahara Yayasan')->group(function () {
+            Route::get('/capabilities', [EmployeeChatController::class, 'getCapabilities']);
+            Route::post('/presence', [EmployeeChatController::class, 'updatePresence']);
+
             Route::get('/contacts', [StudentParentPortalController::class, 'chatContacts']);
             Route::get('/available-teachers', [StudentParentPortalController::class, 'chatContacts']);
             Route::get('/conversations', [TeacherPortalController::class, 'chatConversations']);
@@ -1274,7 +1344,21 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/employee/conversations', [EmployeeChatController::class, 'employeeConversations']);
             Route::get('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
             Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
+            Route::post('/conversations/group', [EmployeeChatController::class, 'storeGroupConversation']);
+            Route::post('/messages/{message}/reactions', [EmployeeChatController::class, 'addReaction']);
+            Route::delete('/messages/{message}/reactions/{reaction}', [EmployeeChatController::class, 'removeReaction']);
         });
+
+        // Direct Employee Chat Routes (/api/v1/employee/* and /api/v1/employee/chat/*)
+        Route::get('/employee/chat/contacts', [EmployeeChatController::class, 'employeeContacts']);
+        Route::get('/employee/chat/conversations', [EmployeeChatController::class, 'employeeConversations']);
+        Route::get('/employee/chat/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
+        Route::post('/employee/chat/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
+
+        Route::get('/employee/contacts', [EmployeeChatController::class, 'employeeContacts']);
+        Route::get('/employee/conversations', [EmployeeChatController::class, 'employeeConversations']);
+        Route::get('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
+        Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
 
         // Dedicated Musyrif & Boarding Module Routes (/api/v1/musyrif/*)
         Route::prefix('musyrif')->middleware('role:Musyrif|musyrif|Musyrifah|Musyrif / Musyrifah|Pengasuh|Wali Asrama|Pembimbing|Super Admin|Admin|super_admin')->group(function () {

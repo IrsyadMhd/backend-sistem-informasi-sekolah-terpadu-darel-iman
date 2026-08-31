@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\EducationUnit;
 use App\Models\User;
 use Database\Seeders\DefaultRoleUserSeeder;
 use Database\Seeders\RolePermissionSeeder;
@@ -60,11 +61,44 @@ class UserAccountManagementTest extends TestCase
         $this->assertSoftDeleted('users', ['id' => $user->id]);
     }
 
-    public function test_non_super_admin_cannot_manage_login_accounts(): void
+    public function test_school_principal_and_administration_can_update_username_and_password_in_their_unit(): void
+    {
+        $unit = EducationUnit::factory()->create();
+
+        foreach (['kepsek@school-erp.local', 'tu@school-erp.local'] as $index => $managerEmail) {
+            $manager = User::where('email', $managerEmail)->firstOrFail();
+            $target = User::where('email', $index === 0 ? 'guru@school-erp.local' : 'guru.tahfizh@school-erp.local')->firstOrFail();
+            $manager->employee()->update(['unit_id' => $unit->id]);
+            $target->employee()->update(['unit_id' => $unit->id]);
+            Sanctum::actingAs($manager);
+
+            $newEmail = "akun.unit.{$index}@example.test";
+            $this->putJson("/api/hak-akses/users/{$target->id}", [
+                'name' => "Akun Unit {$index}",
+                'email' => $newEmail,
+                'role' => $target->getRoleNames()->first(),
+            ])->assertOk();
+
+            $this->assertSame($newEmail, $target->fresh()->email);
+
+            $password = "PasswordUnit@2026{$index}!";
+            $this->putJson("/api/hak-akses/users/{$target->id}/password", [
+                'password' => $password,
+                'password_confirmation' => $password,
+            ])->assertOk();
+            $this->assertTrue(Hash::check($password, $target->fresh()->password));
+        }
+    }
+
+    public function test_unit_manager_cannot_update_a_global_account(): void
     {
         Sanctum::actingAs(User::where('email', 'kepsek@school-erp.local')->firstOrFail());
+        $superAdmin = User::where('email', 'superadmin@school-erp.local')->firstOrFail();
 
-        $this->getJson('/api/hak-akses/users')->assertForbidden();
+        $this->putJson("/api/hak-akses/users/{$superAdmin->id}/password", [
+            'password' => 'TidakBoleh@2026!',
+            'password_confirmation' => 'TidakBoleh@2026!',
+        ])->assertForbidden();
     }
 
     public function test_admin_cannot_disable_or_delete_own_account(): void

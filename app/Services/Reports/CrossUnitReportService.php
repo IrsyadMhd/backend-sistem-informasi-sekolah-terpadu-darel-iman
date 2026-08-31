@@ -28,33 +28,58 @@ class CrossUnitReportService
 
         $units = $unitQuery->get();
 
-        $mainComparison = $units->map(function ($u) {
-            $allEmployees = Employee::with(['position', 'teacherBridge', 'teachings'])->where('unit_id', $u->id)->get();
-            $totalPegawai = $allEmployees->count();
-            $guru = $allEmployees->filter(function ($e) {
-                $posName = $e->position->name ?? '';
-                return $e->teacherBridge !== null
-                    || $e->teachings->isNotEmpty()
-                    || str_contains(strtolower($posName), 'guru')
-                    || str_contains(strtolower($posName), 'pendidik')
-                    || in_array($e->position?->level_jabatan, [8, 9]);
-            })->count();
+        $like = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+        $currentYearNum = (int) date('Y');
+
+        $sdmStatsByUnit = Employee::query()
+            ->selectRaw('
+                unit_id,
+                COUNT(*) as total_sdm,
+                SUM(CASE WHEN (SELECT 1 FROM teachers WHERE teachers.employee_id = employees.id LIMIT 1) IS NOT NULL
+                          OR (SELECT 1 FROM employee_teachings WHERE employee_teachings.employee_id = employees.id LIMIT 1) IS NOT NULL
+                          OR (SELECT 1 FROM positions WHERE positions.id = employees.jabatan_id AND (positions.name ' . $like . ' "%Guru%" OR positions.name ' . $like . ' "%Pendidik%" OR positions.level_jabatan IN (8, 9)) LIMIT 1) IS NOT NULL
+                    THEN 1 ELSE 0 END) as guru_count
+            ')
+            ->groupBy('unit_id')
+            ->get()
+            ->keyBy('unit_id');
+
+        $studentStatsByUnit = Student::query()
+            ->selectRaw('
+                unit_id,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as siswa_aktif,
+                SUM(CASE WHEN is_active = 1 AND (tahun_masuk = ? OR metadata->>\'$.is_new_student\' = "true") THEN 1 ELSE 0 END) as siswa_baru,
+                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "masuk" THEN 1 ELSE 0 END) as mutasi_masuk,
+                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "keluar" THEN 1 ELSE 0 END) as mutasi_keluar,
+                SUM(CASE WHEN is_active = 0 AND metadata->>\'$.status_siswa\' = "lulus" THEN 1 ELSE 0 END) as lulus,
+                SUM(CASE WHEN is_active = 0 OR metadata->>\'$.is_alumni\' = "true" THEN 1 ELSE 0 END) as alumni
+            ', [$currentYearNum])
+            ->groupBy('unit_id')
+            ->get()
+            ->keyBy('unit_id');
+
+        $kelasCountByUnit = Kelas::query()
+            ->selectRaw('unit_pendidikan_id, COUNT(*) as count')
+            ->groupBy('unit_pendidikan_id')
+            ->get()
+            ->pluck('count', 'unit_pendidikan_id');
+
+        $mainComparison = $units->map(function ($u) use ($sdmStatsByUnit, $studentStatsByUnit, $kelasCountByUnit) {
+            $sdmSt = $sdmStatsByUnit->get($u->id);
+            $stSt = $studentStatsByUnit->get($u->id);
+
+            $totalPegawai = (int) ($sdmSt->total_sdm ?? 0);
+            $guru = (int) ($sdmSt->guru_count ?? 0);
             $nonGuru = max(0, $totalPegawai - $guru);
 
-            $siswaAktif = Student::where('unit_id', $u->id)->where('is_active', true)->count();
-            $siswaBaru = Student::where('unit_id', $u->id)->where('is_active', true)->where(function ($q) {
-                $q->where('tahun_masuk', date('Y'))->orWhere('metadata->is_new_student', true);
-            })->count();
+            $siswaAktif = (int) ($stSt->siswa_aktif ?? 0);
+            $siswaBaru = (int) ($stSt->siswa_baru ?? 0);
+            $mutasiMasuk = (int) ($stSt->mutasi_masuk ?? 0);
+            $mutasiKeluar = (int) ($stSt->mutasi_keluar ?? 0);
+            $lulus = (int) ($stSt->lulus ?? 0);
+            $alumni = (int) ($stSt->alumni ?? 0);
 
-            $mutasiMasuk = Student::where('unit_id', $u->id)->where('metadata->mutasi_type', 'masuk')->count();
-            $mutasiKeluar = Student::where('unit_id', $u->id)->where('metadata->mutasi_type', 'keluar')->count();
-
-            $lulus = Student::where('unit_id', $u->id)->where('is_active', false)->where('metadata->status_siswa', 'lulus')->count();
-            $alumni = Student::where('unit_id', $u->id)->where(function ($q) {
-                $q->where('is_active', false)->orWhere('metadata->is_alumni', true);
-            })->count();
-
-            $kelasCount = Kelas::where('unit_pendidikan_id', $u->id)->count();
+            $kelasCount = (int) ($kelasCountByUnit->get($u->id) ?? 0);
             $rombelCount = max(1, $kelasCount);
 
             return [

@@ -10,7 +10,7 @@ class EmployeeRepository implements EmployeeRepositoryInterface
 {
     public function paginate(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = Employee::query()->with(['unit', 'position', 'user', 'role', 'teachings.subject', 'teachings.classroom', 'schedules.subject', 'schedules.kelas']);
+        $query = Employee::query()->with(['unit:id,name,code', 'position:id,name,code,level_jabatan', 'division:id,name', 'user:id,name,email']);
 
         if (! empty($filters['search'])) {
             $search = '%'.$filters['search'].'%';

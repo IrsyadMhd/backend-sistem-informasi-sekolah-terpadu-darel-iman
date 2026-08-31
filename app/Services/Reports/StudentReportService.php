@@ -14,8 +14,8 @@ class StudentReportService
     {
         $period = $this->resolvePeriod($filters);
 
-        // Base Query
-        $studentQuery = Student::with(['educationUnit.jenisUnit', 'kelas', 'parent', 'attendances']);
+        // Base Query (removes heavy 'attendances' eager-loading)
+        $studentQuery = Student::with(['educationUnit.jenisUnit', 'kelas', 'parent']);
 
         // Scope filters
         if (!empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
@@ -104,27 +104,51 @@ class StudentReportService
             'pertumbuhan_siswa' => $growthRate,
         ];
 
-        // 2. Charts
+        // 2. Single-Query Aggregations for Unit Recap & Unit Chart Distribution (Eliminates N+1 loop)
         $units = EducationUnit::with(['jenisUnit'])->get();
 
-        $chartUnitDist = $units->map(function ($u) use ($studentQuery) {
-            $subStudents = (clone $studentQuery)->where('unit_id', $u->id)->where('is_active', true)->get();
-            $l = $subStudents->filter(fn ($s) => in_array(strtolower($s->gender ?? 'l'), ['l', 'laki-laki', 'male']))->count();
+        $statsByUnit = Student::query()
+            ->selectRaw('
+                unit_id,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_count,
+                SUM(CASE WHEN is_active = 1 AND LOWER(gender) IN ("l", "laki-laki", "male") THEN 1 ELSE 0 END) as male_count,
+                SUM(CASE WHEN is_active = 1 AND (tahun_masuk = ? OR metadata->>\'$.is_new_student\' = "true") THEN 1 ELSE 0 END) as new_student_count,
+                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "masuk" THEN 1 ELSE 0 END) as mutasi_masuk_count,
+                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "keluar" THEN 1 ELSE 0 END) as mutasi_keluar_count
+            ', [$currentYearNum])
+            ->groupBy('unit_id')
+            ->get()
+            ->keyBy('unit_id');
+
+        $kelasCountByUnit = Kelas::query()
+            ->selectRaw('unit_pendidikan_id, COUNT(*) as count')
+            ->groupBy('unit_pendidikan_id')
+            ->get()
+            ->pluck('count', 'unit_pendidikan_id');
+
+        $chartUnitDist = $units->map(function ($u) use ($statsByUnit) {
+            $unitStat = $statsByUnit->get($u->id);
+            $totalActive = (int) ($unitStat->active_count ?? 0);
+            $male = (int) ($unitStat->male_count ?? 0);
+            $female = max(0, $totalActive - $male);
 
             return [
                 'name' => $u->code ?: $u->name,
                 'full_name' => $u->name,
-                'laki_laki' => $l,
-                'perempuan' => max(0, $subStudents->count() - $l),
-                'total' => $subStudents->count(),
+                'laki_laki' => $male,
+                'perempuan' => $female,
+                'total' => $totalActive,
             ];
         });
 
         // Jenjang Distribution
         $chartJenjang = $units->groupBy(fn ($u) => $u->jenisUnit->nama_jenis ?? $u->level ?? 'Lainnya')
-            ->map(function ($group, $key) use ($studentQuery) {
+            ->map(function ($group, $key) use ($statsByUnit) {
                 $uIds = $group->pluck('id')->toArray();
-                $count = (clone $studentQuery)->whereIn('unit_id', $uIds)->where('is_active', true)->count();
+                $count = 0;
+                foreach ($uIds as $uid) {
+                    $count += (int) ($statsByUnit->get($uid)->active_count ?? 0);
+                }
                 return ['name' => $key, 'value' => $count];
             })->values();
 
@@ -162,20 +186,18 @@ class StudentReportService
             'capacity_comparison' => $chartCapacity,
         ];
 
-        // 3. Rekap Per Unit
-        $unitRecaps = $units->map(function ($u) {
-            $activeCount = Student::where('unit_id', $u->id)->where('is_active', true)->count();
-            $male = Student::where('unit_id', $u->id)->where('is_active', true)->whereIn('gender', ['L', 'Laki-Laki', 'Male', 'male', 'l'])->count();
+        // 3. Rekap Per Unit (Constructed from single pre-computed SQL aggregations)
+        $unitRecaps = $units->map(function ($u) use ($statsByUnit, $kelasCountByUnit) {
+            $unitStat = $statsByUnit->get($u->id);
+            $activeCount = (int) ($unitStat->active_count ?? 0);
+            $male = (int) ($unitStat->male_count ?? 0);
             $female = max(0, $activeCount - $male);
 
-            $newStudents = Student::where('unit_id', $u->id)->where('is_active', true)->where(function ($q) {
-                $q->where('tahun_masuk', date('Y'))->orWhere('metadata->is_new_student', true);
-            })->count();
+            $newStudents = (int) ($unitStat->new_student_count ?? 0);
+            $pMasuk = (int) ($unitStat->mutasi_masuk_count ?? 0);
+            $pKeluar = (int) ($unitStat->mutasi_keluar_count ?? 0);
 
-            $pMasuk = Student::where('unit_id', $u->id)->where('metadata->mutasi_type', 'masuk')->count();
-            $pKeluar = Student::where('unit_id', $u->id)->where('metadata->mutasi_type', 'keluar')->count();
-
-            $kelasCount = Kelas::where('unit_pendidikan_id', $u->id)->count();
+            $kelasCount = (int) ($kelasCountByUnit->get($u->id) ?? 0);
 
             return [
                 'unit_id' => $u->id,

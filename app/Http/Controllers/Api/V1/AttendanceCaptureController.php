@@ -77,7 +77,7 @@ class AttendanceCaptureController extends Controller
             'scanned_at' => ['nullable', 'date'], 'device_id' => ['nullable', 'string', 'max:255'],
         ]);
         $student = $method === 'face_recognition'
-            ? Student::active()->get()->first(fn ($item) => ($item->metadata['face_template_reference'] ?? null) === $data['template_reference'])
+            ? Student::active()->where('metadata->face_template_reference', $data['template_reference'])->first()
             : $this->capture->resolveStudent($method, $data['identifier']);
 
         return response()->json(['success' => true, 'data' => $this->capture->record($request, $session, $method, $student, $data)]);
@@ -151,7 +151,7 @@ class AttendanceCaptureController extends Controller
             'scanned_at' => ['nullable', 'date'],
         ]);
         $session = LessonAttendanceSession::findOrFail($data['session_id']);
-        $student = Student::active()->get()->first(fn ($item) => ($item->metadata['fingerprint_template_reference'] ?? null) === $data['template_reference']);
+        $student = Student::active()->where('metadata->fingerprint_template_reference', $data['template_reference'])->first();
         $data['device_uuid'] = $device->id;
         $data['device_id'] = $device->device_code;
 

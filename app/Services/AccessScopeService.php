@@ -36,6 +36,7 @@ class AccessScopeService
         'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
         'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan', 'kepala-bidang-pendidikan',
         'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
+        'Tata Usaha', 'TU', 'tu', 'tata_usaha', 'tata-usaha',
     ];
 
     private const GLOBAL_ROLE_NAMES = [

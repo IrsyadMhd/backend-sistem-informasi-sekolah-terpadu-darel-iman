@@ -41,6 +41,7 @@ class DatabaseSeeder extends Seeder
             QrCredentialSeeder::class,
             PemantauanDivisiSeeder::class,
             PengumumanSekolahSeeder::class,
+            IndikatorKinerjaUtamaSeeder::class,
         ]);
 
         // 5. LMS Core & Content

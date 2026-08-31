@@ -708,6 +708,7 @@ class RolePermissionSeeder extends Seeder
         foreach ([
             'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
             'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+            'Tata Usaha', 'TU', 'tu', 'tata_usaha',
         ] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],

@@ -53,16 +53,12 @@ class GraduationReportService
         $malePassed = $allCandidates->filter(fn ($s) => in_array(strtolower($s->gender ?? 'l'), ['l', 'laki-laki', 'male']) && in_array(strtolower($s->metadata['status_kelulusan'] ?? 'lulus'), ['lulus', 'passed']))->count();
         $femalePassed = max(0, $totalLulus - $malePassed);
 
-        // Unit recaps
+        // Unit recaps constructed from $allCandidates collection (Eliminates N+1 loop)
         $units = EducationUnit::all();
-        $unitRecaps = $units->map(function ($u) {
-            $cands = Student::where('unit_id', $u->id)
-                ->where(function ($q) {
-                    $q->where('is_active', false)
-                      ->orWhere('metadata->status_siswa', 'lulus')
-                      ->orWhere('metadata->status_kelulusan', 'Lulus');
-                })->get();
+        $candidatesByUnit = $allCandidates->groupBy('unit_id');
 
+        $unitRecaps = $units->map(function ($u) use ($candidatesByUnit) {
+            $cands = $candidatesByUnit->get($u->id, collect([]));
             $pCount = $cands->count();
             $lCount = $cands->filter(fn ($s) => in_array(strtolower($s->metadata['status_kelulusan'] ?? 'lulus'), ['lulus', 'passed']))->count();
             $tlCount = $cands->filter(fn ($s) => in_array(strtolower($s->metadata['status_kelulusan'] ?? ''), ['tidak_lulus', 'failed', 'tidak lulus']))->count();

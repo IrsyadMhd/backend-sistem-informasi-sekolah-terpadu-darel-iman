@@ -140,7 +140,7 @@ class DashboardPemantauanController extends Controller
                     ->orderByDesc('mulai_tampil')
                     ->limit(10)
                     ->get(),
-                'indikator_kinerja_utama' => IndikatorKinerjaUtama::query()->orderBy('urutan_tampil')->limit(12)->get(),
+                'indikator_kinerja_utama' => $this->hitungIndikatorPerluPerhatian(),
             ];
         });
 
@@ -432,5 +432,91 @@ class DashboardPemantauanController extends Controller
         if (! $user || ! $user->can($izin)) {
             abort(403, 'Anda tidak memiliki izin modul dashboard pemantauan.');
         }
+    }
+
+    /**
+     * Menghitung indikator kinerja operasional yang perlu perhatian secara dinamis dari database riil
+     * (tanpa hardcode), mencakup tabel IKU, pemantauan divisi, presensi kesiswaan, dan jadwal pengajaran.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function hitungIndikatorPerluPerhatian(): array
+    {
+        $alerts = collect();
+
+        // 1. Data IKU tersimpan di database jika ada yang belum mencapai target (nilai < target_nilai)
+        if (Schema::hasTable('indikator_kinerja_utamas')) {
+            $ikuData = IndikatorKinerjaUtama::query()
+                ->where(function ($query) {
+                    $query->whereNotNull('target_nilai')
+                        ->whereColumn('nilai', '<', 'target_nilai');
+                })
+                ->orWhere('kategori_indikator', 'kritis')
+                ->orderBy('urutan_tampil')
+                ->limit(5)
+                ->get();
+
+            foreach ($ikuData as $iku) {
+                $alerts->push([
+                    'id' => (string) $iku->id,
+                    'nama_indikator' => "IKU [{$iku->kategori_indikator}]: {$iku->nama_indikator} (Capaian: {$iku->nilai}/{$iku->target_nilai} {$iku->satuan})",
+                    'status' => 'perlu_perhatian',
+                ]);
+            }
+        }
+
+        // 2. Pemantauan Divisi: Aspek dengan persentase capaian terendah (< 75%) atau status belum tercapai
+        if (Schema::hasTable('pemantauan_divisis')) {
+            $divisiPerluPerhatian = DB::table('pemantauan_divisis')
+                ->where(function ($q) {
+                    $q->where('persentase_capaian', '<', 75)
+                        ->orWhereIn('status_pemantauan', ['belum_tercapai', 'tertunda', 'proses']);
+                })
+                ->orderBy('persentase_capaian', 'asc')
+                ->limit(3)
+                ->get(['id', 'nama_divisi', 'aspek_pemantauan', 'persentase_capaian', 'status_pemantauan']);
+
+            foreach ($divisiPerluPerhatian as $div) {
+                $capaian = round((float) $div->persentase_capaian);
+                $alerts->push([
+                    'id' => (string) $div->id,
+                    'nama_indikator' => "Evaluasi Divisi {$div->nama_divisi}: {$div->aspek_pemantauan} (Realisasi: {$capaian}%)",
+                    'status' => 'perlu_perhatian',
+                ]);
+            }
+        }
+
+        // 3. Presensi Kesiswaan: Deteksi ketidakhadiran atau keterlambatan siswa dari sesi presensi terbaru
+        if (Schema::hasTable('attendances')) {
+            $latestDate = DB::table('attendances')->max('attendance_date');
+            if ($latestDate) {
+                $stats = DB::table('attendances')
+                    ->where('attendance_date', $latestDate)
+                    ->selectRaw("
+                        COUNT(*) as total,
+                        SUM(CASE WHEN UPPER(status) = 'TERLAMBAT' OR status = 'late' THEN 1 ELSE 0 END) as terlambat,
+                        SUM(CASE WHEN UPPER(status) IN ('SAKIT', 'IZIN', 'ALPHA', 'ALPA', 'absent') THEN 1 ELSE 0 END) as tidak_hadir
+                    ")
+                    ->first();
+
+                if ($stats && (int) $stats->tidak_hadir > 0) {
+                    $alerts->push([
+                        'id' => 'alert-attendance-absence-' . $latestDate,
+                        'nama_indikator' => "Presensi Siswa ({$latestDate}): {$stats->tidak_hadir} siswa tidak hadir dari {$stats->total} siswa terdata",
+                        'status' => 'perlu_perhatian',
+                    ]);
+                }
+
+                if ($stats && (int) $stats->terlambat > 0) {
+                    $alerts->push([
+                        'id' => 'alert-attendance-late-' . $latestDate,
+                        'nama_indikator' => "Ketepatan Waktu Siswa ({$latestDate}): {$stats->terlambat} siswa tercatat datang terlambat",
+                        'status' => 'perlu_perhatian',
+                    ]);
+                }
+            }
+        }
+
+        return $alerts->take(5)->values()->all();
     }
 }

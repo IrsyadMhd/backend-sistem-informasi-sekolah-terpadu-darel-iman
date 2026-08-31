@@ -268,6 +268,8 @@ class AlumniController extends Controller
     {
         $request->validate([
             'target_unit_id' => 'required|exists:education_units,id',
+            'kelas_id' => 'nullable|exists:kelas,id',
+            'tingkat' => 'nullable|string',
         ]);
 
         $student = Student::findOrFail($id);
@@ -280,7 +282,14 @@ class AlumniController extends Controller
         $metadata['tgl_mutasi'] = now()->toDateTimeString();
         $metadata['catatan_mutasi'] = $request->input('alasan', 'Pindah unit internal');
 
+        if ($request->filled('tingkat')) {
+            $metadata['tingkat_tujuan'] = $request->input('tingkat');
+        }
+
         $student->unit_id = $newUnitId;
+        if ($request->filled('kelas_id')) {
+            $student->kelas_id = $request->input('kelas_id');
+        }
         $student->metadata = $metadata;
         $student->save();
 

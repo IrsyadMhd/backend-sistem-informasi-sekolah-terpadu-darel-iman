@@ -116,6 +116,11 @@ class AppServiceProvider extends ServiceProvider
             return RoleName::userHasAny($user, ['Super Admin']) ? true : null;
         });
 
+        // Slow Query Automatic Alert Warning Log (>500ms)
+        \Illuminate\Support\Facades\DB::whenQueryingForLongerThan(500, function (\Illuminate\Database\Connection $connection, \Illuminate\Database\Events\QueryExecuted $event) {
+            \Illuminate\Support\Facades\Log::warning("Slow DB Query ({$event->time}ms): {$event->sql}");
+        });
+
         foreach ([
             MutabaahCategory::class,
             MutabaahAgendaItem::class,

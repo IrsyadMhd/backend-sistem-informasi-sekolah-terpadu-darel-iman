@@ -18,7 +18,12 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, HasPersonPhoto, HasRoles, HasUuidPrimaryKey, Notifiable, SoftDeletes;
 
-    protected $appends = ['photo_url', 'avatar_url'];
+    protected $appends = ['photo_url', 'avatar_url', 'is_superadmin'];
+
+    public function getIsSuperadminAttribute(): bool
+    {
+        return method_exists($this, 'hasRole') ? $this->hasRole(['Super Admin', 'super_admin', 'Admin']) : false;
+    }
 
     /**
      * The attributes that are mass assignable.

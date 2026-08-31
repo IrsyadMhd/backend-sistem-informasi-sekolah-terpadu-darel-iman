@@ -15,8 +15,8 @@ class SdmReportService
     {
         $period = $this->resolvePeriod($filters);
 
-        // Employee Base Query
-        $employeeQuery = Employee::with(['unit.jenisUnit', 'position', 'division', 'teachings.subject', 'schedules.kelas']);
+        // Employee Base Query (removes heavy 'teachings.subject' & 'schedules.kelas' eager-loading)
+        $employeeQuery = Employee::with(['unit.jenisUnit', 'position', 'division']);
 
         // Scope filters
         if (!empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
@@ -153,36 +153,43 @@ class SdmReportService
             'sdm_keluar' => $sdmKeluar,
         ];
 
-        // 2. Charts
+        // 2. Single-Query Pre-Aggregations for Unit Recaps & Charts (Eliminates N+1 loop)
         $units = EducationUnit::with(['jenisUnit'])->get();
 
-        $chartUnitDist = $units->map(function ($u) use ($employeeQuery) {
-            $unitEmployees = (clone $employeeQuery)->where('unit_id', $u->id)->get();
-            $guru = $unitEmployees->filter(function ($e) {
-                $posName = $e->position->name ?? '';
-                return $e->teacherBridge !== null
-                    || $e->teachings->isNotEmpty()
-                    || str_contains(strtolower($posName), 'guru')
-                    || str_contains(strtolower($posName), 'pendidik')
-                    || in_array($e->position?->level_jabatan, [8, 9]);
-            })->count();
+        $statsByUnit = Employee::query()
+            ->selectRaw('
+                unit_id,
+                COUNT(*) as total_sdm,
+                SUM(CASE WHEN LOWER(status) IN ("aktif", "active", "1") OR status IS NULL THEN 1 ELSE 0 END) as sdm_aktif,
+                SUM(CASE WHEN LOWER(jenis_kelamin) LIKE "l%" OR LOWER(jenis_kelamin) LIKE "male%" THEN 1 ELSE 0 END) as male_count,
+                SUM(CASE WHEN (SELECT 1 FROM teachers WHERE teachers.employee_id = employees.id LIMIT 1) IS NOT NULL
+                          OR (SELECT 1 FROM employee_teachings WHERE employee_teachings.employee_id = employees.id LIMIT 1) IS NOT NULL
+                          OR (SELECT 1 FROM positions WHERE positions.id = employees.jabatan_id AND (positions.name ' . $like . ' "%Guru%" OR positions.name ' . $like . ' "%Pendidik%" OR positions.level_jabatan IN (8, 9)) LIMIT 1) IS NOT NULL
+                    THEN 1 ELSE 0 END) as guru_count
+            ')
+            ->groupBy('unit_id')
+            ->get()
+            ->keyBy('unit_id');
+
+        $chartUnitDist = $units->map(function ($u) use ($statsByUnit) {
+            $st = $statsByUnit->get($u->id);
+            $totalSub = (int) ($st->total_sdm ?? 0);
+            $guru = (int) ($st->guru_count ?? 0);
 
             return [
                 'name' => $u->code ?: $u->name,
                 'full_name' => $u->name,
                 'guru' => $guru,
-                'non_guru' => max(0, $unitEmployees->count() - $guru),
-                'total' => $unitEmployees->count(),
+                'non_guru' => max(0, $totalSub - $guru),
+                'total' => $totalSub,
             ];
         });
 
-        // Status kepegawaian chart
-        $statusCounts = (clone $employeeQuery)->get()->groupBy('status_pegawai')->map(function ($group, $key) {
-            return [
-                'name' => $key ?: 'Lainnya',
-                'value' => $group->count(),
-            ];
-        })->values();
+        // Status kepegawaian chart via SQL Grouping
+        $statusCounts = Employee::query()
+            ->selectRaw('COALESCE(status_pegawai, "Lainnya") as name, COUNT(*) as value')
+            ->groupBy('status_pegawai')
+            ->get();
 
         // Gender chart
         $chartGender = [
@@ -205,27 +212,13 @@ class SdmReportService
             'positions' => $chartPositions,
         ];
 
-        // 3. Rekap Per Unit
-        $unitRecaps = $units->map(function ($u) use ($employeeQuery) {
-            $subEmployees = (clone $employeeQuery)->where('unit_id', $u->id)->get();
-            $totalSub = $subEmployees->count();
-
-            $gCount = $subEmployees->filter(function ($e) {
-                $pName = $e->position->name ?? '';
-                return $e->teacherBridge !== null
-                    || $e->teachings->isNotEmpty()
-                    || str_contains(strtolower($pName), 'guru')
-                    || str_contains(strtolower($pName), 'pendidik')
-                    || in_array($e->position?->level_jabatan, [8, 9]);
-            })->count();
-
-            $aCount = $subEmployees->filter(function ($e) {
-                return in_array(strtolower($e->status ?? 'aktif'), ['aktif', 'active']);
-            })->count();
-
-            $lCount = $subEmployees->filter(function ($e) {
-                return in_array(strtolower($e->jenis_kelamin ?? 'l'), ['l', 'laki-laki', 'male']);
-            })->count();
+        // 3. Rekap Per Unit (Constructed from single pre-computed SQL aggregations)
+        $unitRecaps = $units->map(function ($u) use ($statsByUnit) {
+            $st = $statsByUnit->get($u->id);
+            $totalSub = (int) ($st->total_sdm ?? 0);
+            $gCount = (int) ($st->guru_count ?? 0);
+            $aCount = (int) ($st->sdm_aktif ?? 0);
+            $lCount = (int) ($st->male_count ?? 0);
 
             return [
                 'unit_id' => $u->id,
@@ -238,7 +231,7 @@ class SdmReportService
                 'nonaktif' => max(0, $totalSub - $aCount),
                 'laki_laki' => $lCount,
                 'perempuan' => max(0, $totalSub - $lCount),
-                'percentage' => $totalSub > 0 ? round(($totalSub / max(1, $subEmployees->count())) * 100, 1) : 0,
+                'percentage' => $totalSdm > 0 ? round(($totalSub / $totalSdm) * 100, 1) : 0,
             ];
         });
 

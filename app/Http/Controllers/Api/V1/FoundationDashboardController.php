@@ -12,18 +12,17 @@ use App\Models\PengumumanSekolah;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use App\Services\AccessScopeService;
 use App\Services\FoundationDashboardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class FoundationDashboardController extends Controller
 {
-    protected FoundationDashboardService $service;
-
-    public function __construct(FoundationDashboardService $service)
-    {
-        $this->service = $service;
-    }
+    public function __construct(
+        protected FoundationDashboardService $service,
+        protected AccessScopeService $accessScope,
+    ) {}
 
     /**
      * Aggregated main overview for Foundation Dashboard.
@@ -78,16 +77,32 @@ class FoundationDashboardController extends Controller
     {
         $query = Employee::with(['unit', 'position', 'division']);
 
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereIn('unit_id', $accessibleUnitIds);
+        }
+
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
-            $query->where('unit_id', $request->query('unit_id'));
+            $unitId = (string) $request->query('unit_id');
+            $operator = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($unitId, $operator) {
+                $q->where('unit_id', $unitId)
+                  ->orWhereHas('unit', function ($u) use ($unitId, $operator) {
+                      $u->where('id', $unitId)
+                        ->orWhere('name', $operator, "%{$unitId}%")
+                        ->orWhere('code', $operator, "%{$unitId}%");
+                  });
+            });
         }
 
         if ($request->filled('search')) {
             $search = (string) $request->query('search');
-            $query->where(function ($q) use ($search) {
-                $q->where('nama_lengkap', 'like', "%{$search}%")
-                  ->orWhere('niy', 'like', "%{$search}%")
-                  ->orWhere('nik', 'like', "%{$search}%");
+            $operator = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $operator) {
+                $q->where('nama_lengkap', $operator, "%{$search}%")
+                  ->orWhere('niy', $operator, "%{$search}%")
+                  ->orWhere('nik', $operator, "%{$search}%");
             });
         }
 
@@ -111,6 +126,12 @@ class FoundationDashboardController extends Controller
     public function teachers(Request $request): JsonResponse
     {
         $query = Teacher::with(['employee.unit', 'employee.position']);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereHas('employee', fn ($employee) => $employee->whereIn('unit_id', $accessibleUnitIds));
+        }
 
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
             $query->whereHas('employee', fn ($employee) => $employee->where('unit_id', $request->query('unit_id')));
@@ -141,6 +162,12 @@ class FoundationDashboardController extends Controller
     public function students(Request $request): JsonResponse
     {
         $query = Student::with(['educationUnit', 'kelas'])->where('is_active', true);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereIn('unit_id', $accessibleUnitIds);
+        }
 
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
             $query->where('unit_id', $request->query('unit_id'));
@@ -367,6 +394,13 @@ class FoundationDashboardController extends Controller
     {
         $query = Kelas::with(['waliKelas', 'unitPendidikan', 'siswa', 'siswaLegacy']);
 
+        $user = $request->user();
+        $scopedUnitIds = null;
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $scopedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereIn('unit_pendidikan_id', $scopedUnitIds);
+        }
+
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
             $query->where('unit_pendidikan_id', $request->query('unit_id'));
         }
@@ -390,8 +424,12 @@ class FoundationDashboardController extends Controller
         $classes = $query->paginate($perPage);
         $classes->through(fn (Kelas $kelas) => $this->serializeKelas($kelas));
 
-        $totalKelas = Kelas::count();
-        $totalAktif = Kelas::where(function ($q) {
+        $summaryQuery = Kelas::query();
+        if ($scopedUnitIds !== null) {
+            $summaryQuery->whereIn('unit_pendidikan_id', $scopedUnitIds);
+        }
+        $totalKelas = (clone $summaryQuery)->count();
+        $totalAktif = (clone $summaryQuery)->where(function ($q) {
             $q->whereRaw('LOWER(status) = ?', ['aktif'])->orWhereNull('status');
         })->count();
         $totalNonaktif = max(0, $totalKelas - $totalAktif);
@@ -413,6 +451,13 @@ class FoundationDashboardController extends Controller
     public function rombel(Request $request): JsonResponse
     {
         $query = Kelas::with(['waliKelas', 'unitPendidikan', 'siswa', 'siswaLegacy']);
+
+        $user = $request->user();
+        $scopedUnitIds = null;
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $scopedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereIn('unit_pendidikan_id', $scopedUnitIds);
+        }
 
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
             $query->where('unit_pendidikan_id', $request->query('unit_id'));
@@ -437,12 +482,17 @@ class FoundationDashboardController extends Controller
         $rombel = $query->paginate($perPage);
         $rombel->through(fn (Kelas $kelas) => $this->serializeKelas($kelas));
 
-        $totalRombel = Kelas::count();
-        $totalAktif = Kelas::where(function ($q) {
+        $summaryQuery = Kelas::query();
+        if ($scopedUnitIds !== null) {
+            $summaryQuery->whereIn('unit_pendidikan_id', $scopedUnitIds);
+        }
+        $totalRombel = (clone $summaryQuery)->count();
+        $totalAktif = (clone $summaryQuery)->where(function ($q) {
             $q->whereRaw('LOWER(status) = ?', ['aktif'])->orWhereNull('status');
         })->count();
-        $totalKapasitas = (int) Kelas::sum('kapasitas');
+        $totalKapasitas = (int) (clone $summaryQuery)->sum('kapasitas');
         $totalTerisi = (int) Student::where('is_active', true)
+            ->when($scopedUnitIds !== null, fn ($q) => $q->whereIn('unit_id', $scopedUnitIds))
             ->where(fn ($student) => $student->whereNotNull('kelas_id')->orWhereNotNull('class_id'))
             ->count();
 

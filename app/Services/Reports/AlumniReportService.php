@@ -57,16 +57,12 @@ class AlumniReportService
         $belumTerdata = max(0, $totalAlumni - ($kuliah + $kerja + $wirausaha));
         $contactable = $allAlumni->filter(fn ($s) => !empty($s->metadata['no_hp_alumni']) || !empty($s->parent->father_phone) || !empty($s->parent->mother_phone))->count();
 
-        // Unit recaps
+        // Unit recaps constructed from $allAlumni collection (Eliminates N+1 loop)
         $units = EducationUnit::all();
-        $unitRecaps = $units->map(function ($u) {
-            $alum = Student::where('unit_id', $u->id)
-                ->where(function ($q) {
-                    $q->where('is_active', false)
-                      ->orWhere('metadata->is_alumni', true)
-                      ->orWhere('metadata->status_siswa', 'alumni');
-                })->get();
+        $alumniByUnit = $allAlumni->groupBy('unit_id');
 
+        $unitRecaps = $units->map(function ($u) use ($alumniByUnit) {
+            $alum = $alumniByUnit->get($u->id, collect([]));
             $tot = $alum->count();
             $k = $alum->filter(fn ($s) => !empty($s->metadata['perguruan_tinggi']) || in_array(strtolower($s->metadata['status_lanjutan'] ?? ''), ['kuliah', 'pendidikan', 'studi']))->count();
             $w = $alum->filter(fn ($s) => !empty($s->metadata['perusahaan']) || in_array(strtolower($s->metadata['status_lanjutan'] ?? ''), ['bekerja', 'kerja']))->count();

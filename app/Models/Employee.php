@@ -59,6 +59,12 @@ class Employee extends Model
         return $this->belongsTo(EducationUnit::class, 'unit_id');
     }
 
+    /** Alias of unit() — used by dashboards and report services */
+    public function educationUnit()
+    {
+        return $this->belongsTo(EducationUnit::class, 'unit_id');
+    }
+
     public function position()
     {
         return $this->belongsTo(Position::class, 'jabatan_id');
