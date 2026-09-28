@@ -253,7 +253,14 @@ class SubjectController extends Controller
             ];
         });
 
-        return Excel::download(new SubjectExport($subjects), 'master_mata_pelajaran_'.date('Ymd_His').'.xlsx');
+        $format = strtolower((string) $request->query('format', 'xlsx'));
+        $timestamp = date('Ymd_His');
+
+        return match ($format) {
+            'csv' => Excel::download(new SubjectExport($subjects), "master_mata_pelajaran_{$timestamp}.csv", \Maatwebsite\Excel\Excel::CSV),
+            'xls' => Excel::download(new SubjectExport($subjects), "master_mata_pelajaran_{$timestamp}.xls", \Maatwebsite\Excel\Excel::XLS),
+            default => Excel::download(new SubjectExport($subjects), "master_mata_pelajaran_{$timestamp}.xlsx", \Maatwebsite\Excel\Excel::XLSX),
+        };
     }
 
     /**

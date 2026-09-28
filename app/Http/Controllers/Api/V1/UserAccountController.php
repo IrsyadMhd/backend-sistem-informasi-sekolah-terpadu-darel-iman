@@ -107,6 +107,11 @@ class UserAccountController extends Controller
     public function update(Request $request, User $user): JsonResponse
     {
         $this->assertUserAccess($request->user(), $user);
+
+        $targetIsSuperAdmin = $user->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin']);
+        $actorIsSuperAdmin = $request->user()->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin']);
+        abort_if($targetIsSuperAdmin && ! $actorIsSuperAdmin, 403, 'Hanya Super Admin yang dapat mengubah atau mengelola akun Super Admin.');
+
         $isUnitOnlyManager = $this->accessScope->canManageUnitAccess($request->user())
             && ! $this->accessScope->canManageGlobalAccess($request->user());
         $validated = $request->validate($isUnitOnlyManager
@@ -118,7 +123,7 @@ class UserAccountController extends Controller
             : $this->rules($user, false));
         $this->accessScope->assertRoleAssignmentAllowed($request->user(), $validated['role']);
 
-        $removingOwnAdminAccess = $request->user()->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin'])
+        $removingOwnAdminAccess = $actorIsSuperAdmin
             && $request->user()->is($user)
             && ((! ($validated['is_active'] ?? $user->is_active))
                 || (($validated['role'] ?? $user->getRoleNames()->first()) !== 'Super Admin'));
@@ -155,6 +160,11 @@ class UserAccountController extends Controller
     public function resetPassword(Request $request, User $user): JsonResponse
     {
         $this->assertUserAccess($request->user(), $user);
+
+        $targetIsSuperAdmin = $user->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin']);
+        $actorIsSuperAdmin = $request->user()->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin']);
+        abort_if($targetIsSuperAdmin && ! $actorIsSuperAdmin, 403, 'Hanya Super Admin yang dapat mereset password akun Super Admin.');
+
         $validated = $request->validate([
             'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->letters()->numbers()->symbols()],
         ]);
@@ -180,6 +190,11 @@ class UserAccountController extends Controller
     {
         $this->accessScope->assertGlobalAccessManagement($request->user());
         $this->assertUserAccess($request->user(), $user);
+
+        $targetIsSuperAdmin = $user->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin']);
+        $actorIsSuperAdmin = $request->user()->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'super-admin']);
+        abort_if($targetIsSuperAdmin && ! $actorIsSuperAdmin, 403, 'Hanya Super Admin yang dapat menghapus akun Super Admin.');
+
         abort_if($request->user()->is($user), 422, 'Anda tidak dapat menghapus akun yang sedang digunakan.');
 
         if ($user->hasRole('Super Admin')) {

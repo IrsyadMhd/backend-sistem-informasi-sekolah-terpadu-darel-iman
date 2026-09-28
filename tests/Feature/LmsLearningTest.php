@@ -40,8 +40,16 @@ class LmsLearningTest extends TestCase
         $sem = Semester::create(['academic_year_id' => $ay->id, 'name' => 'Ganjil', 'semester_type' => 'odd', 'start_date' => '2026-07-01', 'end_date' => '2026-12-31', 'is_active' => true]);
         $kur = MasterKurikulum::create(['kode_kurikulum' => 'KUR-S05', 'nama_kurikulum' => 'Kurikulum SIT', 'jenis_kurikulum' => 'SIT', 'unit_pendidikan_id' => $unit->id, 'jenjang' => 'SD', 'tahun_ajaran_id' => $ay->id, 'tanggal_mulai' => '2026-07-01']);
         $subj = Subject::create(['code' => 'PAI-S05', 'name' => 'PAI', 'education_unit_id' => $unit->id]);
-        $emp = Employee::create(['nama_lengkap' => 'Guru PAI', 'jenis_kelamin' => 'L', 'unit_id' => $unit->id]);
-        $kelas = Kelas::create(['nama_kelas' => 'I A', 'level' => 1, 'education_unit_id' => $unit->id]);
+        $emp = Employee::create(['nama_lengkap' => 'Guru PAI', 'jenis_kelamin' => 'L', 'unit_id' => $unit->id, 'niy' => 'EMP-TEST-PAI-01']);
+        $kelas = Kelas::create([
+            'unit_pendidikan_id' => $unit->id,
+            'tahun_ajaran_id' => $ay->id,
+            'semester_id' => $sem->id,
+            'kode_kelas' => 'K-SD-1A',
+            'nama_kelas' => 'I A',
+            'jenjang' => 'SD',
+            'tingkat' => '1',
+        ]);
 
         $modul = LmsModulAjar::create([
             'tahun_ajaran_id' => $ay->id,
@@ -56,7 +64,7 @@ class LmsLearningTest extends TestCase
         ]);
 
         // 1. Create Materi
-        $materiRes = $this->actingAs($this->user)->postJson('/api/materi', [
+        $materiRes = $this->actingAs($this->user)->postJson('/api/lms/materi', [
             'modul_ajar_id' => $modul->id,
             'judul' => '  Mengenal   Adab   Makan  ',
             'isi' => "Line 1\nLine 2", // Must keep multiline
@@ -70,7 +78,7 @@ class LmsLearningTest extends TestCase
         $materiId = $materiRes->json('data.id');
 
         // 2. Create Media
-        $mediaRes = $this->actingAs($this->user)->postJson('/api/media', [
+        $mediaRes = $this->actingAs($this->user)->postJson('/api/lms/media', [
             'materi_id' => $materiId,
             'nama_file' => '  Video   Adab   Makan  ',
             'tipe_file' => 'video',
@@ -84,7 +92,7 @@ class LmsLearningTest extends TestCase
     public function test_referensi_keamanan_url_protocol(): void
     {
         // Penolakan javascript: URL
-        $unsafeRes = $this->actingAs($this->user)->postJson('/api/referensi', [
+        $unsafeRes = $this->actingAs($this->user)->postJson('/api/lms/referensi', [
             'judul' => 'Buku Referensi',
             'url' => 'javascript:alert("hacked")',
         ]);
@@ -93,7 +101,7 @@ class LmsLearningTest extends TestCase
             ->assertJsonValidationErrors(['url']);
 
         // Success valid URL
-        $safeRes = $this->actingAs($this->user)->postJson('/api/referensi', [
+        $safeRes = $this->actingAs($this->user)->postJson('/api/lms/referensi', [
             'judul' => '  Buku   Tuntunan   Shalat  ',
             'url' => 'https://dareliman.sch.id/buku-tuntunan',
         ]);
@@ -109,8 +117,16 @@ class LmsLearningTest extends TestCase
         $sem = Semester::create(['academic_year_id' => $ay->id, 'name' => 'Ganjil', 'semester_type' => 'odd', 'start_date' => '2026-07-01', 'end_date' => '2026-12-31', 'is_active' => true]);
         $kur = MasterKurikulum::create(['kode_kurikulum' => 'KUR-SMP-S05', 'nama_kurikulum' => 'Kurikulum SIT', 'jenis_kurikulum' => 'SIT', 'unit_pendidikan_id' => $unit->id, 'jenjang' => 'SMP', 'tahun_ajaran_id' => $ay->id, 'tanggal_mulai' => '2026-07-01']);
         $subj = Subject::create(['code' => 'IPS-S05', 'name' => 'IPS', 'education_unit_id' => $unit->id]);
-        $emp = Employee::create(['nama_lengkap' => 'Guru IPS', 'jenis_kelamin' => 'P', 'unit_id' => $unit->id]);
-        $kelas = Kelas::create(['nama_kelas' => 'VIII A', 'level' => 8, 'education_unit_id' => $unit->id]);
+        $emp = Employee::create(['nama_lengkap' => 'Guru IPS', 'jenis_kelamin' => 'P', 'unit_id' => $unit->id, 'niy' => 'EMP-TEST-IPS-01']);
+        $kelas = Kelas::create([
+            'unit_pendidikan_id' => $unit->id,
+            'tahun_ajaran_id' => $ay->id,
+            'semester_id' => $sem->id,
+            'kode_kelas' => 'K-SMP-8A',
+            'nama_kelas' => 'VIII A',
+            'jenjang' => 'SMP',
+            'tingkat' => '8',
+        ]);
 
         $modul = LmsModulAjar::create([
             'tahun_ajaran_id' => $ay->id,
@@ -125,7 +141,7 @@ class LmsLearningTest extends TestCase
         ]);
 
         // 1. Aktivitas
-        $aktRes = $this->actingAs($this->user)->postJson('/api/aktivitas-belajar', [
+        $aktRes = $this->actingAs($this->user)->postJson('/api/lms/aktivitas', [
             'modul_ajar_id' => $modul->id,
             'nama_aktivitas' => '  Diskusi   Kelompok   Interaksi  ',
             'jenis_aktivitas' => 'Diskusi',

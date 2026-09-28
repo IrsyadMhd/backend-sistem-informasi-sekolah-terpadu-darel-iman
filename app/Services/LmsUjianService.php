@@ -52,8 +52,6 @@ class LmsUjianService
             $employee = Employee::where('user_id', auth()->id())->first();
             if ($employee) {
                 $data['guru_id'] = $employee->id;
-            } else {
-                $data['guru_id'] = Employee::first()?->id;
             }
         }
 

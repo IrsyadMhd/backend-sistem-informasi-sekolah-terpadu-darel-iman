@@ -18,6 +18,8 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, HasPersonPhoto, HasRoles, HasUuidPrimaryKey, Notifiable, SoftDeletes;
 
+    protected string $guard_name = 'web';
+
     protected $appends = ['photo_url', 'avatar_url', 'is_superadmin'];
 
     public function getIsSuperadminAttribute(): bool

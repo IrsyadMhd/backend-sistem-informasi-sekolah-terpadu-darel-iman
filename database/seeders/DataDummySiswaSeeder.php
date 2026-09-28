@@ -637,7 +637,12 @@ class DataDummySiswaSeeder extends Seeder
         // Hanya 3 parent fixture dari ParentSeeder (deterministic, terlepas
         // dari akun parent lain yang dibuat seeder lain).
         $parents = ParentModel::query()
-            ->where('email', 'like', '%@parent.local')
+            ->whereIn('email', [
+                'ahmad.fauzi@dareliman.sch.id',
+                'budi.santoso@dareliman.sch.id',
+                'hendra.kurniawan@dareliman.sch.id',
+                'ahmad.fauzi@parent.local', // backwards compatibility
+            ])
             ->orderBy('email')
             ->get();
 

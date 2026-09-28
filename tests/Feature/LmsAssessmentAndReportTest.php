@@ -317,7 +317,9 @@ class LmsAssessmentAndReportTest extends TestCase
         $this->assertTrue($studentFresh->metadata['is_alumni']);
 
         // Verify Alumni index includes this graduated student
-        $alumniResp = $this->actingAs($this->teacherUser)
+        $adminUser = User::factory()->create(['name' => 'Admin Kesiswaan']);
+        $adminUser->assignRole('Super Admin');
+        $alumniResp = $this->actingAs($adminUser)
             ->getJson('/api/alumni');
 
         $alumniResp->assertStatus(200);

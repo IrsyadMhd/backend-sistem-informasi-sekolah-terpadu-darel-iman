@@ -118,9 +118,10 @@ class JadwalPonpesIkhwan2026Seeder extends Seeder
             $schoolClass = SchoolClass::firstOrCreate([
                 'name' => $rombel->nama_kelas,
                 'academic_year_id' => $academicYear->id,
+                'semester_id' => $semesterGenap->id,
             ], [
-                'grade_level' => $meta['tingkat'],
-                'status' => 'active',
+                'level' => $meta['tingkat'],
+                'metadata' => ['status' => 'active'],
             ]);
 
             $rombels[$key] = [

@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class MutabaahDailyService
 {
@@ -52,7 +53,7 @@ class MutabaahDailyService
             'date' => $date,
             'assignments' => $assignments->map(fn ($item) => $this->assignmentData($item)),
             'selected_assignment_id' => $assignment?->id,
-            'template' => $template ? $this->templateData($template) : null,
+            'template' => $template ? $this->templateData($template, $assignment) : null,
             'can_reopen' => $user->hasRole('Super Admin') || $user->can('mutabaah.daily.reopen'),
         ];
     }
@@ -72,7 +73,7 @@ class MutabaahDailyService
             ->where('template_id', $template->id)->byDate($filters['date'])->get()->keyBy('student_id');
 
         return [
-            'template' => $this->templateData($template),
+            'template' => $this->templateData($template, $assignment),
             'students' => $students->map(function (Student $student) use ($headers) {
                 $header = $headers->get($student->id);
 
@@ -125,7 +126,8 @@ class MutabaahDailyService
                 ['daily_header_id' => $header->id, 'template_item_id' => $item->id],
                 ['agenda_item_id' => $item->agenda_item_id, 'status_value' => $data['status_value'] ?? null,
                     'numeric_value' => $data['numeric_value'] ?? null, 'text_value' => $data['text_value'] ?? null,
-                    'notes' => $data['notes'] ?? null, 'input_by' => $user->id, 'input_at' => now()]
+                    'notes' => $data['notes'] ?? null, 'input_by' => $user->id, 'input_at' => now(),
+                    'input_source' => 'teacher', 'verification_status' => 'verified', 'verified_by' => $user->id, 'verified_at' => now()]
             );
             $this->assessment->recalculate($header);
 
@@ -271,12 +273,68 @@ class MutabaahDailyService
             'can_input' => $item->can_input, 'can_finalize' => $item->can_finalize];
     }
 
-    private function templateData(MutabaahTemplate $template): array
+    public function verifyHomeItems(User $user, array $data): int
     {
-        return ['id' => $template->id, 'name' => $template->name, 'items' => $template->items->where('is_active', true)->values()->map(fn ($item) => [
-            'id' => $item->id, 'agenda_item_id' => $item->agenda_item_id, 'name' => $item->agendaItem?->name,
-            'category' => $item->agendaItem?->category?->name ?? 'Mutabaah Yaumiyyah',
-            'input_type' => $item->agendaItem?->input_type?->value, 'weight' => $item->weight, 'required' => $item->is_required,
-        ])];
+        return DB::transaction(function () use ($user, $data) {
+            $assignment = $this->ownedAssignment($user, $data['supervisor_assignment_id'], $data['activity_date']);
+            $headers = MutabaahDailyHeader::query()
+                ->where(function ($q) use ($assignment) {
+                    $q->where('supervisor_assignment_id', $assignment->id)
+                      ->orWhere('education_unit_id', $assignment->education_unit_id);
+                })
+                ->whereDate('activity_date', $data['activity_date'])
+                ->when(! empty($data['student_ids']), fn ($q) => $q->whereIn('student_id', $data['student_ids']))
+                ->pluck('id');
+
+            return MutabaahDailyDetail::query()
+                ->whereIn('daily_header_id', $headers)
+                ->where('input_source', 'parent')
+                ->where('verification_status', 'pending')
+                ->update([
+                    'verification_status' => 'verified',
+                    'verified_by' => $user->id,
+                    'verified_at' => now(),
+                ]);
+        });
+    }
+
+    private function templateData(MutabaahTemplate $template, ?MutabaahSupervisorAssignment $assignment = null): array
+    {
+        $unit = $assignment?->educationUnit;
+        $isBoarding = false;
+        if ($unit) {
+            $isBoarding = Str::contains(strtoupper($unit->name . ' ' . $unit->code . ' ' . ($unit->level ?? '')), ['PONPES', 'MAHAD', 'PESANTREN']);
+        }
+        $programType = $isBoarding ? 'boarding' : 'fullday';
+
+        $rules = DB::table('mutabaah_input_rules')
+            ->where('program_type', $programType)
+            ->where('is_active', true)
+            ->get()
+            ->keyBy('agenda_item_id');
+
+        return [
+            'id' => $template->id,
+            'name' => $template->name,
+            'program_type' => $programType,
+            'items' => $template->items->where('is_active', true)->values()->map(function ($item) use ($rules, $programType, $isBoarding) {
+                $rule = $rules->get($item->agenda_item_id);
+                $isHome = $programType === 'fullday' && ($rule?->input_source === 'parent' || $rule?->location === 'home');
+
+                return [
+                    'id' => $item->id,
+                    'agenda_item_id' => $item->agenda_item_id,
+                    'name' => $item->agendaItem?->name,
+                    'category' => $item->agendaItem?->category?->name ?? 'Mutabaah Yaumiyyah',
+                    'input_type' => $item->agendaItem?->input_type?->value,
+                    'weight' => $item->weight,
+                    'required' => $item->is_required,
+                    'scope' => $isBoarding ? 'boarding' : ($isHome ? 'home' : 'school'),
+                    'responsible_role' => $isBoarding ? 'musyrif' : ($isHome ? 'parent' : 'teacher'),
+                    'requires_verification' => (bool) ($rule?->requires_verification ?? false),
+                    'is_parent_item' => $isHome,
+                ];
+            }),
+        ];
     }
 }

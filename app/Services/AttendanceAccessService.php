@@ -7,6 +7,7 @@ use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\LessonAttendanceSession;
 use App\Models\LmsPresensi;
+use App\Models\ParentModel;
 use App\Models\SchoolClass;
 use App\Models\Student;
 use App\Models\User;
@@ -22,9 +23,55 @@ class AttendanceAccessService
         return Employee::where('user_id', $user->id)->first();
     }
 
-    public function student(User $user): ?Student
+    public function student(User $user, ?string $childId = null): ?Student
     {
-        return Student::where('user_id', $user->id)->first();
+        $directStudent = Student::where('user_id', $user->id)->first();
+        if ($directStudent) {
+            return $directStudent;
+        }
+
+        $parent = ParentModel::where('user_id', $user->id)->first();
+        if ($parent) {
+            $query = Student::where(function ($q) use ($parent) {
+                $q->where('parent_id', $parent->id)
+                  ->orWhereHas('parentsPivot', fn ($pivot) => $pivot->whereKey($parent->id));
+            });
+
+            if ($childId) {
+                return $query->whereKey($childId)->first();
+            }
+
+            return $query->first();
+        }
+
+        return null;
+    }
+
+    public function parentStudentIds(User $user): Collection
+    {
+        $parent = ParentModel::where('user_id', $user->id)->first();
+        if (! $parent) {
+            return collect();
+        }
+
+        return Student::where(function ($q) use ($parent) {
+            $q->where('parent_id', $parent->id)
+              ->orWhereHas('parentsPivot', fn ($pivot) => $pivot->whereKey($parent->id));
+        })->pluck('id');
+    }
+
+    public function canAccessStudent(User $user, string $studentId): bool
+    {
+        if ($user->hasRole('Super Admin')) {
+            return true;
+        }
+
+        $student = $this->student($user, $studentId);
+        if ($student && $student->id === $studentId) {
+            return true;
+        }
+
+        return $this->homeroomStudentIds($user)->contains($studentId);
     }
 
     public function teacherSchedules(User $user): Builder

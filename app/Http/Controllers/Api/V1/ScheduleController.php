@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\ScheduleExport;
 use App\Http\Controllers\Controller;
 use App\Models\AcademicYear;
 use App\Models\ClassSchedule;
@@ -15,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * ScheduleController
@@ -128,6 +130,90 @@ class ScheduleController extends Controller
         ]);
     }
 
+    public function export(Request $request)
+    {
+        $this->authorizeView($request->user());
+        $query = $this->scopedQuery($request->user())->with([
+            'kelas',
+            'schoolClass',
+            'employee',
+            'teacher',
+            'subject',
+            'academicYear',
+            'semester',
+        ]);
+
+        if ($request->filled('unit_pendidikan_id') || $request->filled('unit_id')) {
+            $unitId = $request->query('unit_pendidikan_id') ?: $request->query('unit_id');
+            $query->whereHas('kelas', fn ($q) => $q->where('unit_pendidikan_id', $unitId));
+        }
+
+        if ($request->filled('kelas_id')) {
+            $query->where('kelas_id', $request->query('kelas_id'));
+        }
+
+        if ($request->filled('class_id')) {
+            $query->where('class_id', $request->query('class_id'));
+        }
+
+        if ($request->filled('employee_id')) {
+            $query->where('employee_id', $request->query('employee_id'));
+        }
+
+        if ($request->filled('teacher_id')) {
+            $query->where('teacher_id', $request->query('teacher_id'));
+        }
+
+        if ($request->filled('subject_id')) {
+            $query->where('subject_id', $request->query('subject_id'));
+        }
+
+        if ($request->filled('academic_year_id')) {
+            $query->where('academic_year_id', $request->query('academic_year_id'));
+        }
+
+        if ($request->filled('semester_id')) {
+            $query->where('semester_id', $request->query('semester_id'));
+        }
+
+        if ($request->filled('search')) {
+            $search = trim((string) $request->query('search'));
+            $query->where(function ($subQuery) use ($search) {
+                $subQuery
+                    ->whereHas('employee', fn ($q) => $q->where('nama_lengkap', 'ilike', "%{$search}%"))
+                    ->orWhereHas('teacher', fn ($q) => $q->where('name', 'ilike', "%{$search}%"))
+                    ->orWhereHas('subject', fn ($q) => $q
+                        ->where('name', 'ilike', "%{$search}%")
+                        ->orWhere('nama_mapel', 'ilike', "%{$search}%"))
+                    ->orWhereHas('kelas', fn ($q) => $q
+                        ->where('nama_kelas', 'ilike', "%{$search}%")
+                        ->orWhere('kode_kelas', 'ilike', "%{$search}%"));
+            });
+        }
+
+        if ($request->filled('is_active')) {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        $schedules = $query->orderBy('day_of_week')->orderBy('time_start')->get();
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $filename = 'jadwal_pelajaran_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new ScheduleExport($schedules), $filename, $excelFormat);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $schedules,
+        ]);
+    }
+
     public function options(): JsonResponse
     {
         $user = request()->user();
@@ -143,11 +229,13 @@ class ScheduleController extends Controller
                     ->with(['unitPendidikan:id,name', 'tahunAjaran:id,name', 'semester:id,name'])
                     ->orderBy('nama_kelas')
                     ->get(['id', 'nama_kelas', 'kode_kelas', 'unit_pendidikan_id', 'tahun_ajaran_id', 'semester_id']),
-                'guru' => Employee::query()
-                    ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_id', $unitIds))
-                    ->where('status', 'Aktif')
-                    ->orderBy('nama_lengkap')
-                    ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']),
+                'guru' => $this->isGuruRole($user)
+                    ? Employee::query()->where('user_id', $user->id)->where('status', 'Aktif')->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id'])
+                    : Employee::query()
+                        ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_id', $unitIds))
+                        ->where('status', 'Aktif')
+                        ->orderBy('nama_lengkap')
+                        ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']),
                 'mata_pelajaran' => Subject::query()
                     ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
                     ->where(fn ($q) => $q->where('status', true)->orWhereNull('status'))
@@ -382,7 +470,38 @@ class ScheduleController extends Controller
             $query->whereHas('kelas', fn (Builder $kelasQuery) => $kelasQuery->whereIn('unit_pendidikan_id', $unitIds));
         }
 
+        // Guru hanya bisa melihat jadwal mengajar mereka sendiri
+        if ($this->isGuruRole($user)) {
+            $employee = Employee::query()->where('user_id', $user->id)->first();
+            if ($employee) {
+                $query->where('employee_id', $employee->id);
+            }
+        }
+
         return $query;
+    }
+
+    private function isGuruRole(User $user): bool
+    {
+        return $user->hasAnyRole([
+            'Guru',
+            'guru',
+            'Guru Mata Pelajaran',
+            'guru_mata_pelajaran',
+            'Guru PAI',
+            'Guru Tahfizh',
+            'guru_tahfizh',
+            'Guru BK',
+            'guru_bk',
+            'Wali Kelas',
+            'walas',
+            'wali_kelas',
+            'Musyrif',
+            'musyrif',
+            'Musyrifah',
+            'Musyrif / Musyrifah',
+            'Pembimbing',
+        ]);
     }
 
     private function accessibleUnitIds(User $user): ?array

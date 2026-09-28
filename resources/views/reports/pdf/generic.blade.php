@@ -33,7 +33,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>YAYASAN DAR EL-IMAN PADANG</h1>
+        <h1>{{ strtoupper($foundation_name ?? \App\Models\SiteSetting::current()->school_name ?? config('app.name')) }}</h1>
         <h2>{{ $title }}</h2>
         <p>Periode: {{ $period }} • Dicetak: {{ date('d F Y H:i') }} WIB</p>
     </div>
@@ -183,7 +183,7 @@
     <div class="footer">
         <table>
             <tr>
-                <td>Dokumen resmi Sistem Manajemen Sekolah Terpadu — Yayasan Dar el-Iman Padang.</td>
+                <td>Dokumen resmi {{ \App\Models\SiteSetting::current()->application_name ?? config('app.name') }} — {{ $foundation_name ?? \App\Models\SiteSetting::current()->school_name ?? config('app.name') }}.</td>
                 <td align="right">Halaman 1 dari 1</td>
             </tr>
         </table>

@@ -13,8 +13,15 @@ class LmsPenugasanResource extends JsonResource
         $totalPengumpulan = $this->relationLoaded('pengumpulan') ? $this->pengumpulan->count() : ($this->pengumpulan_count ?? 0);
         $totalDinilai = $this->relationLoaded('pengumpulan') ? $this->pengumpulan->whereNotNull('nilai_guru')->count() : 0;
 
+        $unitPendidikanId = $this->kelas?->unit_pendidikan_id 
+            ?? $this->subject?->unit_pendidikan_id 
+            ?? $this->guru?->unit_id 
+            ?? null;
+
         return [
             'id' => $this->id,
+            'unit_pendidikan_id' => $unitPendidikanId,
+            'unit_id' => $unitPendidikanId,
             // User requested fields & Database fields
             'judul' => $this->judul_tugas,
             'judul_tugas' => $this->judul_tugas,
@@ -72,12 +79,21 @@ class LmsPenugasanResource extends JsonResource
                 'id' => $this->kelas->id,
                 'nama_kelas' => $this->kelas->nama_kelas ?? $this->kelas->name ?? 'Kelas',
                 'tingkat' => $this->kelas->tingkat ?? null,
+                'unit_pendidikan_id' => $this->kelas->unit_pendidikan_id ?? null,
+            ] : null,
+
+            'mata_pelajaran' => $this->relationLoaded('subject') && $this->subject ? [
+                'id' => $this->subject->id,
+                'nama_mapel' => $this->subject->nama_mapel ?? $this->subject->name ?? 'Mata Pelajaran',
+                'kode_mapel' => $this->subject->kode_mapel ?? $this->subject->code ?? null,
+                'unit_pendidikan_id' => $this->subject->unit_pendidikan_id ?? $unitPendidikanId,
             ] : null,
 
             'subject' => $this->relationLoaded('subject') && $this->subject ? [
                 'id' => $this->subject->id,
                 'nama_mapel' => $this->subject->nama_mapel ?? $this->subject->name ?? 'Mata Pelajaran',
                 'kode_mapel' => $this->subject->kode_mapel ?? $this->subject->code ?? null,
+                'unit_pendidikan_id' => $this->subject->unit_pendidikan_id ?? $unitPendidikanId,
             ] : null,
 
             'semester' => $this->relationLoaded('semester') && $this->semester ? [

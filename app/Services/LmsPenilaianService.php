@@ -109,10 +109,21 @@ class LmsPenilaianService
         return $this->penilaianRepository->getStats($filters);
     }
 
-    public function opsi(): array
+    public function opsi(?\App\Models\User $user = null): array
     {
-        $kelas = Kelas::orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
-        $subjects = Subject::orderBy('name', 'asc')->get(['id', 'code', 'name']);
+        $accessScope = app(AccessScopeService::class);
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $kelas = $accessScope->accessibleRombels($user)->orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
+            $allowedMapelIds = $accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique();
+            $subjectsQuery = Subject::orderBy('name', 'asc');
+            if ($allowedMapelIds->isNotEmpty()) {
+                $subjectsQuery->whereIn('id', $allowedMapelIds);
+            }
+            $subjects = $subjectsQuery->get(['id', 'code', 'name']);
+        } else {
+            $kelas = Kelas::orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
+            $subjects = Subject::orderBy('name', 'asc')->get(['id', 'code', 'name']);
+        }
         $semesters = Semester::get(['id', 'name'])
             ->map(fn (Semester $semester) => [
                 'id' => $semester->id,

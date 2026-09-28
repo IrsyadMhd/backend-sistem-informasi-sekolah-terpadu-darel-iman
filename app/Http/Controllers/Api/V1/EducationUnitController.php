@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\EducationUnitExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\IndexRequest;
 use App\Http\Requests\V1\StoreEducationUnitRequest;
@@ -15,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
 
 class EducationUnitController extends Controller
 {
@@ -25,7 +27,7 @@ class EducationUnitController extends Controller
     public function index(IndexRequest $request): JsonResponse
     {
         $search = (string) $request->validated('search', '');
-        $perPage = (int) $request->validated('per_page', 15);
+        $perPage = (int) $request->validated('per_page', 10);
         $level = $request->query('level');
         $city = $request->query('city');
         $province = $request->query('province');
@@ -38,6 +40,8 @@ class EducationUnitController extends Controller
         $data = (clone $scopedUnits)
             ->withCount([
                 'students as total_siswa',
+                'students as total_siswa_laki' => fn ($query) => $query->whereIn(DB::raw('LOWER(gender)'), ['l', 'laki-laki', 'male']),
+                'students as total_siswa_perempuan' => fn ($query) => $query->whereIn(DB::raw('LOWER(gender)'), ['p', 'perempuan', 'female']),
                 'employees as total_guru' => fn ($query) => $this->teacherQuery($query),
             ])
             ->when($search !== '', function ($query) use ($search, $likeOp) {
@@ -128,6 +132,12 @@ class EducationUnitController extends Controller
     public function show(Request $request, EducationUnit|string $education_unit): JsonResponse
     {
         $model = $this->scopedUnit($request->user(), $education_unit);
+        $model->loadCount([
+            'students as total_siswa',
+            'students as total_siswa_laki' => fn ($query) => $query->whereIn(DB::raw('LOWER(gender)'), ['l', 'laki-laki', 'male']),
+            'students as total_siswa_perempuan' => fn ($query) => $query->whereIn(DB::raw('LOWER(gender)'), ['p', 'perempuan', 'female']),
+            'employees as total_guru' => fn ($query) => $this->teacherQuery($query),
+        ]);
 
         return response()->json($model);
     }
@@ -156,7 +166,7 @@ class EducationUnitController extends Controller
     /**
      * Ekspor data master unit pendidikan berdasarkan filter aktif.
      */
-    public function export(Request $request): JsonResponse
+    public function export(Request $request)
     {
         $search = (string) $request->query('search', '');
         $level = $request->query('level');
@@ -167,9 +177,11 @@ class EducationUnitController extends Controller
 
         $scopedUnits = $this->accessScope->accessibleEducationUnits($request->user());
 
-        $units = (clone $scopedUnits)
+        $query = (clone $scopedUnits)
             ->withCount([
                 'students as total_siswa',
+                'students as total_siswa_laki' => fn ($query) => $query->whereIn(DB::raw('LOWER(gender)'), ['l', 'laki-laki', 'male']),
+                'students as total_siswa_perempuan' => fn ($query) => $query->whereIn(DB::raw('LOWER(gender)'), ['p', 'perempuan', 'female']),
                 'employees as total_guru' => fn ($query) => $this->teacherQuery($query),
             ])
             ->when($search !== '', function ($query) use ($search, $likeOp) {
@@ -193,9 +205,20 @@ class EducationUnitController extends Controller
                 } elseif ($status === 'nonaktif' || $status === '0' || $status === 'false') {
                     $query->where('is_active', false);
                 }
-            })
-            ->orderBy('name', 'asc')
-            ->get();
+            });
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $filename = 'data_unit_pendidikan_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new EducationUnitExport($query->orderBy('name', 'asc')), $filename, $excelFormat);
+        }
+
+        $units = $query->orderBy('name', 'asc')->get();
 
         $data = $units->map(function ($unit, $index) {
             $meta = $unit->metadata ?? [];
@@ -211,6 +234,8 @@ class EducationUnitController extends Controller
                 'principal_name' => $meta['principal_name'] ?? $meta['kepala_unit'] ?? '-',
                 'total_guru' => $unit->total_guru ?? 0,
                 'total_siswa' => $unit->total_siswa ?? 0,
+                'total_siswa_laki' => $unit->total_siswa_laki ?? 0,
+                'total_siswa_perempuan' => $unit->total_siswa_perempuan ?? 0,
                 'status' => $unit->is_active ? 'Aktif' : 'Nonaktif',
                 'created_at' => $unit->created_at ? $unit->created_at->format('Y-m-d H:i:s') : '-',
             ];
@@ -229,10 +254,86 @@ class EducationUnitController extends Controller
     public function import(Request $request): JsonResponse
     {
         $rows = $request->input('data', []);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'xlsx');
+            $tmpDir = storage_path('app/imports');
+            if (! is_dir($tmpDir)) {
+                @mkdir($tmpDir, 0755, true);
+            }
+            $tmpName = 'import_unit_' . uniqid() . '.' . $ext;
+            $file->move($tmpDir, $tmpName);
+            $tmpPath = $tmpDir . '/' . $tmpName;
+
+            try {
+                if (in_array($ext, ['csv', 'txt'])) {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Csv();
+                } elseif ($ext === 'xls') {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+                } else {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+                }
+                $spreadsheet = $reader->load($tmpPath);
+                $sheetData = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+                if (count($sheetData) > 1) {
+                    $headers = array_map(function ($h) {
+                        $norm = strtolower(trim((string)$h));
+                        return str_replace([' ', '_', '-', '.', ':', '/'], '', $norm);
+                    }, $sheetData[0]);
+
+                    $rows = [];
+                    for ($i = 1; $i < count($sheetData); $i++) {
+                        $rawRow = $sheetData[$i];
+                        if (empty(array_filter($rawRow, fn($v) => $v !== null && $v !== ''))) {
+                            continue;
+                        }
+                        $item = [];
+                        foreach ($headers as $idx => $normHeader) {
+                            $val = isset($rawRow[$idx]) ? trim((string)$rawRow[$idx]) : '';
+                            if (in_array($normHeader, ['kode', 'kodeunit', 'code', 'unitcode'])) {
+                                $item['kode'] = $val;
+                            } elseif (in_array($normHeader, ['nama', 'namaunit', 'namaunitpendidikan', 'name', 'unitname'])) {
+                                $item['nama'] = $val;
+                            } elseif (in_array($normHeader, ['jenjang', 'tingkat', 'level', 'jenjangpendidikan'])) {
+                                $item['tingkat'] = $val;
+                            } elseif (in_array($normHeader, ['npsn'])) {
+                                $item['npsn'] = $val;
+                            } elseif (in_array($normHeader, ['alamat', 'address', 'alamatunit'])) {
+                                $item['alamat'] = $val;
+                            } elseif (in_array($normHeader, ['kota', 'city', 'kabupaten', 'kabupatenkota'])) {
+                                $item['city'] = $val;
+                            } elseif (in_array($normHeader, ['provinsi', 'province'])) {
+                                $item['province'] = $val;
+                            } elseif (in_array($normHeader, ['namapimpinan', 'pimpinan', 'kepalasekolah', 'kepalaunit', 'principalname'])) {
+                                $item['principal_name'] = $val;
+                            } elseif (in_array($normHeader, ['email', 'emailunit'])) {
+                                $item['email'] = $val;
+                            } elseif (in_array($normHeader, ['telepon', 'notelepon', 'notelp', 'phone', 'nohp'])) {
+                                $item['phone'] = $val;
+                            } elseif (in_array($normHeader, ['status', 'isactive', 'statusaktif'])) {
+                                $item['is_active'] = !in_array(strtolower($val), ['nonaktif', '0', 'false', 'inactive']);
+                            }
+                        }
+                        if (!empty($item['nama']) || !empty($item['kode'])) {
+                            $rows[] = $item;
+                        }
+                    }
+                }
+                @unlink($tmpPath);
+            } catch (\Exception $e) {
+                @unlink($tmpPath);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
+
         if (! is_array($rows) || empty($rows)) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Payload data impor tidak boleh kosong.',
+                'message' => 'Payload data impor tidak boleh kosong atau tidak ada baris data yang valid.',
             ], 422);
         }
 
@@ -278,6 +379,7 @@ class EducationUnitController extends Controller
                         'npsn' => $row['npsn'] ?? null,
                         'email' => $row['email'] ?? null,
                         'phone' => $row['phone'] ?? $row['telepon'] ?? null,
+                        'address' => $row['address'] ?? $row['alamat'] ?? null,
                         'city' => $row['city'] ?? $row['kabupaten_kota'] ?? 'Padang',
                         'province' => $row['province'] ?? $row['provinsi'] ?? 'Sumatera Barat',
                         'principal_name' => $row['principal_name'] ?? $row['pimpinan'] ?? null,

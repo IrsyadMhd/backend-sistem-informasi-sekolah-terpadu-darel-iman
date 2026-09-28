@@ -107,15 +107,19 @@ class StudentReportService
         // 2. Single-Query Aggregations for Unit Recap & Unit Chart Distribution (Eliminates N+1 loop)
         $units = EducationUnit::with(['jenisUnit'])->get();
 
+        $isPgsql = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql';
+        $newStudentClause = $isPgsql ? "metadata->>'is_new_student'" : "metadata->>'$.is_new_student'";
+        $mutasiClause = $isPgsql ? "metadata->>'mutasi_type'" : "metadata->>'$.mutasi_type'";
+
         $statsByUnit = Student::query()
-            ->selectRaw('
+            ->selectRaw("
                 unit_id,
-                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_count,
-                SUM(CASE WHEN is_active = 1 AND LOWER(gender) IN ("l", "laki-laki", "male") THEN 1 ELSE 0 END) as male_count,
-                SUM(CASE WHEN is_active = 1 AND (tahun_masuk = ? OR metadata->>\'$.is_new_student\' = "true") THEN 1 ELSE 0 END) as new_student_count,
-                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "masuk" THEN 1 ELSE 0 END) as mutasi_masuk_count,
-                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "keluar" THEN 1 ELSE 0 END) as mutasi_keluar_count
-            ', [$currentYearNum])
+                SUM(CASE WHEN (is_active = true OR is_active IS TRUE) THEN 1 ELSE 0 END) as active_count,
+                SUM(CASE WHEN (is_active = true OR is_active IS TRUE) AND LOWER(gender) IN ('l', 'laki-laki', 'male') THEN 1 ELSE 0 END) as male_count,
+                SUM(CASE WHEN (is_active = true OR is_active IS TRUE) AND (tahun_masuk = ? OR {$newStudentClause} = 'true') THEN 1 ELSE 0 END) as new_student_count,
+                SUM(CASE WHEN {$mutasiClause} = 'masuk' THEN 1 ELSE 0 END) as mutasi_masuk_count,
+                SUM(CASE WHEN {$mutasiClause} = 'keluar' THEN 1 ELSE 0 END) as mutasi_keluar_count
+            ", [$currentYearNum])
             ->groupBy('unit_id')
             ->get()
             ->keyBy('unit_id');

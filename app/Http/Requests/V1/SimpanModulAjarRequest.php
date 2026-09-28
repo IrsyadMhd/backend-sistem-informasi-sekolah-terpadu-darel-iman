@@ -27,6 +27,24 @@ class SimpanModulAjarRequest extends FormRequest
         if (! empty($updates)) {
             $this->merge($updates);
         }
+
+        $user = $this->user();
+        $injected = [];
+        if ($user && empty($this->guru_id)) {
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            if ($employeeId) {
+                $injected['guru_id'] = $employeeId;
+            }
+        }
+        if (empty($this->unit_pendidikan_id) && ! empty($this->kelas_id)) {
+            $unitId = \App\Models\Kelas::where('id', $this->kelas_id)->value('unit_pendidikan_id');
+            if ($unitId) {
+                $injected['unit_pendidikan_id'] = $unitId;
+            }
+        }
+        if (! empty($injected)) {
+            $this->merge($injected);
+        }
     }
 
     public function rules(): array

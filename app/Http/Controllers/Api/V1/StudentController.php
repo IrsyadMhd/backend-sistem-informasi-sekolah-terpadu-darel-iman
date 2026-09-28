@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\StudentExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\IndexRequest;
 use App\Http\Requests\V1\StoreStudentRequest;
@@ -13,6 +14,8 @@ use App\Repositories\Contracts\StudentRepositoryInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Facades\Excel;
 
 class StudentController extends Controller
 {
@@ -26,13 +29,28 @@ class StudentController extends Controller
             ?? $request->query('unit_id')
             ?? $request->query('unit_pendidikan_id');
 
-        $effectiveUnitId = $requestedUnitId ?: $unitId;
+        if (! $canAccessAllUnits) {
+            abort_unless($unitId, 403, 'Akun tidak memiliki cakupan unit pendidikan.');
+            abort_if($requestedUnitId && $requestedUnitId !== $unitId, 403, 'Akses data lintas unit tidak diizinkan.');
+            $effectiveUnitId = $unitId;
+        } else {
+            $effectiveUnitId = $requestedUnitId;
+        }
+
+        $requestedKelasId = $request->validated('kelas_id')
+            ?? $request->query('kelas_id')
+            ?? $request->query('class_id');
+
+        $requestedStatus = $request->validated('status')
+            ?? $request->query('status');
 
         $data = $this->studentRepository->paginate(
             search: (string) $request->validated('search', ''),
             perPage: (int) $request->validated('per_page', 15),
             unitId: $effectiveUnitId,
-            canAccessAllUnits: $canAccessAllUnits && empty($requestedUnitId)
+            canAccessAllUnits: $canAccessAllUnits && empty($requestedUnitId),
+            kelasId: $requestedKelasId,
+            status: $requestedStatus
         );
 
         return response()->json($data);
@@ -53,11 +71,25 @@ class StudentController extends Controller
 
     public function show(Request $request, string $student): JsonResponse
     {
+        if (! Str::isUuid($student)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data siswa tidak ditemukan.',
+            ], 404);
+        }
+
         return response()->json($this->scopedStudentQuery($request->user())->findOrFail($student));
     }
 
     public function update(StoreStudentRequest $request, string $student): JsonResponse
     {
+        if (! Str::isUuid($student)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data siswa tidak ditemukan.',
+            ], 404);
+        }
+
         $model = $this->scopedStudentQuery($request->user())->findOrFail($student);
         $validated = $request->validated();
         $payload = $this->mappedPayload($validated);
@@ -84,6 +116,13 @@ class StudentController extends Controller
 
     public function destroy(Request $request, string $student): JsonResponse
     {
+        if (! Str::isUuid($student)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data siswa tidak ditemukan.',
+            ], 404);
+        }
+
         $this->scopedStudentQuery($request->user())->findOrFail($student)->delete();
 
         return response()->json([
@@ -96,101 +135,116 @@ class StudentController extends Controller
         [$bolehSemuaUnit, $unitPengguna, $employee] = $this->scopeForUser($request->user());
         $requestedUnitId = $request->query('unit_id') ?? $request->query('unit_pendidikan_id');
 
+        if (! $bolehSemuaUnit) {
+            abort_unless($unitPengguna, 403, 'Akun tidak memiliki cakupan unit pendidikan.');
+            abort_if($requestedUnitId && $requestedUnitId !== $unitPengguna, 403, 'Akses data lintas unit tidak diizinkan.');
+            $effectiveUnitId = $unitPengguna;
+        } else {
+            $effectiveUnitId = $requestedUnitId;
+        }
+
         $studentQuery = Student::query()
             ->with([
                 'educationUnit:id,name,level',
                 'kelas:id,nama_kelas,tingkat',
             ]);
 
-        if (! empty($requestedUnitId)) {
-            $studentQuery->where('unit_id', $requestedUnitId);
+        if (! empty($effectiveUnitId)) {
+            $studentQuery->where('unit_id', $effectiveUnitId);
         } else {
             $this->applyUnitScope($studentQuery, $bolehSemuaUnit, $unitPengguna);
         }
 
-        $students = $studentQuery
-            ->orderBy('full_name')
-            ->get([
-                'id',
-                'nis',
-                'full_name',
-                'kelas_id',
-                'unit_id',
-                'gender',
-                'birth_place',
-                'birth_date',
-                'address',
-                'is_active',
-                'metadata',
-                'created_at',
-            ]);
+        $counts = (clone $studentQuery)
+            ->selectRaw("
+                COUNT(*) as total_siswa,
+                COUNT(CASE WHEN is_active = true THEN 1 END) as siswa_aktif,
+                COUNT(CASE WHEN is_active = false THEN 1 END) as siswa_nonaktif,
+                COUNT(CASE WHEN created_at >= ? THEN 1 END) as siswa_baru,
+                COUNT(CASE WHEN is_active = false THEN 1 END) as mutasi_keluar,
+                COUNT(CASE WHEN LOWER(COALESCE(metadata->>'status', '')) IN ('alumni', 'lulus') THEN 1 END) as alumni,
+                COUNT(CASE WHEN metadata->>'mutasi_type' = 'masuk' THEN 1 END) as mutasi_masuk,
+                COUNT(CASE WHEN LOWER(gender) IN ('l', 'laki-laki', 'laki laki', 'male') THEN 1 END) as laki_laki,
+                COUNT(CASE WHEN LOWER(gender) IN ('p', 'perempuan', 'female') THEN 1 END) as perempuan
+            ", [now()->startOfYear()])
+            ->first();
 
-        $classIds = $students->pluck('kelas_id')->filter()->unique()->values();
-        $classes = Kelas::query()
-            ->whereIn('id', $classIds)
+        $totalSiswa = (int) ($counts->total_siswa ?? 0);
+        $siswaAktif = (int) ($counts->siswa_aktif ?? 0);
+        $siswaNonaktif = (int) ($counts->siswa_nonaktif ?? 0);
+        $siswaBaru = (int) ($counts->siswa_baru ?? 0);
+        $mutasiKeluar = (int) ($counts->mutasi_keluar ?? 0);
+        $alumni = (int) ($counts->alumni ?? 0);
+        $mutasiMasuk = (int) ($counts->mutasi_masuk ?? 0);
+        $lakiLaki = (int) ($counts->laki_laki ?? 0);
+        $perempuan = (int) ($counts->perempuan ?? 0);
+
+        $classQuery = Kelas::query();
+        if (! empty($effectiveUnitId)) {
+            $classQuery->where('unit_pendidikan_id', $effectiveUnitId);
+        }
+        $totalKelas = (clone $classQuery)->count();
+        $classes = (clone $classQuery)
+            ->withCount('siswa')
             ->orderBy('nama_kelas')
             ->get(['id', 'nama_kelas', 'tingkat', 'wali_kelas_id', 'kapasitas']);
 
-        $totalSiswa = $students->count();
-        $totalKelas = $classes->count();
-        $siswaBaru = $students->where('created_at', '>=', now()->startOfYear())->count();
-        $mutasiKeluar = $students->where('is_active', false)->count();
-        $alumni = $students->filter(fn (Student $student) => in_array(
-            strtolower((string) data_get($student->metadata, 'status')),
-            ['alumni', 'lulus'],
-            true
-        ))->count();
-
-        $selected = $students->first();
-        $siswaAktif = $students->where('is_active', true)->count();
-        $siswaNonaktif = $students->where('is_active', false)->count();
-        $lakiLaki = $students->filter(fn (Student $student) => in_array(
-            strtolower((string) $student->gender),
-            ['l', 'laki-laki', 'laki laki', 'male'],
-            true
-        ))->count();
-        $perempuan = $students->filter(fn (Student $student) => in_array(
-            strtolower((string) $student->gender),
-            ['p', 'perempuan', 'female'],
-            true
-        ))->count();
-
-        $daftarSiswa = $students->map(function (Student $student) {
-            return [
-                'id' => $student->id,
-                'nis' => $student->nis,
-                'nama' => $student->full_name,
-                'unit' => $student->educationUnit?->name ?? ($student->metadata['unit_pendidikan'] ?? '-'),
-                'jenjang' => $student->educationUnit?->level ?? $student->kelas?->tingkat ?? '-',
-                'kelas' => $student->kelas?->nama_kelas ?? '-',
-                'jenis_kelamin' => $student->gender,
-                'aktif' => (bool) $student->is_active,
-            ];
-        })->values();
-
-        $daftarKelas = $classes->map(function (Kelas $class) use ($students) {
+        $daftarKelas = $classes->map(function (Kelas $class) {
             return [
                 'id' => $class->id,
-            'nama' => $class->nama_kelas,
-            'level' => $class->tingkat,
-            'wali_kelas_id' => $class->wali_kelas_id,
-            'kapasitas' => (int) $class->kapasitas,
-            'jumlah_siswa' => $students->where('kelas_id', $class->id)->count(),
+                'nama' => $class->nama_kelas,
+                'level' => $class->tingkat,
+                'wali_kelas_id' => $class->wali_kelas_id,
+                'kapasitas' => (int) $class->kapasitas,
+                'jumlah_siswa' => (int) ($class->siswa_count ?? 0),
             ];
         })->values();
 
         $tahunSekarang = (int) now()->format('Y');
+        $grafikRaw = (clone $studentQuery)
+            ->where('created_at', '>=', now()->subYears(3)->startOfYear())
+            ->selectRaw("EXTRACT(YEAR FROM created_at)::int as tahun, COUNT(*) as jumlah")
+            ->groupByRaw("EXTRACT(YEAR FROM created_at)")
+            ->pluck('jumlah', 'tahun')
+            ->all();
+
         $grafik = collect(range($tahunSekarang - 3, $tahunSekarang))
             ->map(fn (int $tahun) => [
                 'tahun' => (string) $tahun,
-                'jumlah' => $students->filter(
-                    fn (Student $student) => $student->created_at?->year === $tahun
-                )->count(),
+                'jumlah' => (int) ($grafikRaw[$tahun] ?? 0),
             ])
             ->values();
-        $mutasiMasuk = $students->filter(
-            fn (Student $student) => data_get($student->metadata, 'mutasi_type') === 'masuk'
-        )->count();
+
+        // Selected single student for quick preview card (limit 1)
+        $selected = (clone $studentQuery)
+            ->with([
+                'educationUnit:id,name,level',
+                'kelas:id,nama_kelas,tingkat',
+            ])
+            ->orderBy('full_name')
+            ->first();
+
+        // Include daftar_siswa if requested (with_list=true) or default for backwards compatibility
+        // Uses high-speed DB query instead of hydrating thousands of Eloquent models
+        $includeList = $request->boolean('with_list', true);
+        $daftarSiswa = $includeList
+            ? \Illuminate\Support\Facades\DB::table('students')
+                ->leftJoin('education_units', 'students.unit_id', '=', 'education_units.id')
+                ->leftJoin('tbl_kelas', 'students.kelas_id', '=', 'tbl_kelas.id')
+                ->when(! empty($effectiveUnitId), fn ($q) => $q->where('students.unit_id', $effectiveUnitId))
+                ->select([
+                    'students.id',
+                    'students.nis',
+                    'students.full_name as nama',
+                    'education_units.name as unit',
+                    'education_units.level as jenjang',
+                    'tbl_kelas.nama_kelas as kelas',
+                    'students.gender as jenis_kelamin',
+                    'students.is_active as aktif',
+                ])
+                ->orderBy('students.full_name')
+                ->get()
+            : [];
 
         return response()->json([
             'akses' => [
@@ -322,16 +376,9 @@ class StudentController extends Controller
             ])
             ->where('user_id', $user->id)
             ->first();
-        $canAccessAllUnits = $user->hasAnyRole([
-            'Super Admin',
-            'Yayasan',
-            'Ketua Yayasan',
-            'ketua_yayasan',
-            'sekretaris_yayasan',
-            'bendahara_yayasan',
-            'pengurus_yayasan',
-        ])
+        $canAccessAllUnits = $user->can('student.view_all')
             || $user->can('foundation.student.view')
+            || $user->can('report.cross_unit.view')
             || $employee?->position?->scope_akses === 'semua_unit'
             || str_contains(strtolower((string) $employee?->position?->name), 'yayasan');
         $unitId = $employee?->unit_id
@@ -341,16 +388,22 @@ class StudentController extends Controller
         return [$canAccessAllUnits, $unitId, $employee];
     }
 
-    public function export(Request $request): JsonResponse
+    public function export(Request $request)
     {
         [$canAccessAllUnits, $unitId] = $this->scopeForUser($request->user());
         $requestedUnitId = $request->query('unit_id') ?? $request->query('unit_pendidikan_id');
-        $effectiveUnitId = $requestedUnitId ?: $unitId;
+
+        if (! $canAccessAllUnits) {
+            abort_unless($unitId, 403, 'Akun tidak memiliki cakupan unit pendidikan.');
+            abort_if($requestedUnitId && $requestedUnitId !== $unitId, 403, 'Akses ekspor data lintas unit tidak diizinkan.');
+            $effectiveUnitId = $unitId;
+        } else {
+            $effectiveUnitId = $requestedUnitId;
+        }
 
         $query = Student::query()
-            ->with(['educationUnit', 'schoolClass'])
-            ->when(! $canAccessAllUnits && $effectiveUnitId, fn ($q) => $q->where('unit_id', $effectiveUnitId))
-            ->when($requestedUnitId, fn ($q) => $q->where('unit_id', $requestedUnitId));
+            ->with(['educationUnit', 'kelas.waliKelas', 'schoolClass', 'parent', 'user'])
+            ->when($effectiveUnitId, fn ($q) => $q->where('unit_id', $effectiveUnitId));
 
         if ($request->filled('search')) {
             $search = (string) $request->query('search');
@@ -362,27 +415,54 @@ class StudentController extends Controller
         }
 
         if ($request->filled('kelas_id')) {
-            $query->where('kelas_id', $request->query('kelas_id'));
+            $kId = $request->query('kelas_id');
+            if (Str::isUuid($kId)) {
+                $query->where(fn ($q) => $q->where('kelas_id', $kId)->orWhere('class_id', $kId));
+            } else {
+                $query->whereHas('kelas', fn ($q) => $q->where('nama_kelas', 'ilike', "%{$kId}%"));
+            }
         }
 
-        $students = $query->orderBy('full_name', 'asc')->get();
+        if ($request->filled('status')) {
+            $st = strtolower(trim($request->query('status')));
+            if ($st === 'aktif') {
+                $query->where('is_active', true);
+            } elseif ($st === 'mutasi') {
+                $query->where(fn ($q) => $q->whereRaw("LOWER(metadata->>'status_siswa') = 'mutasi'")->orWhereNotNull('metadata->mutasi_type'));
+            } elseif ($st === 'lulus' || $st === 'alumni') {
+                $query->where(fn ($q) => $q->whereRaw("LOWER(metadata->>'status_siswa') in ('lulus', 'alumni')")->orWhere('metadata->is_alumni', true));
+            } elseif ($st === 'nonaktif') {
+                $query->where('is_active', false);
+            }
+        }
 
-        $rows = $students->map(function ($std, $idx) {
-            return [
-                'no' => $idx + 1,
-                'nis' => $std->nis ?? '-',
-                'nisn' => $std->nisn ?? '-',
-                'nama_lengkap' => $std->full_name,
-                'jenis_kelamin' => $std->gender === 'female' ? 'Perempuan' : 'Laki-Laki',
-                'unit_pendidikan' => $std->educationUnit?->name ?? '-',
-                'kelas' => $std->schoolClass?->nama_kelas ?? '-',
-                'status' => $std->is_active ? 'Aktif' : 'Nonaktif',
-            ];
+        $query->orderBy('full_name', 'asc');
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            @ini_set('memory_limit', '512M');
+            @set_time_limit(180);
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $filename = 'data_siswa_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new StudentExport($query), $filename, $excelFormat);
+        }
+
+        $students = $query->get();
+        $exporter = new StudentExport($query);
+        $headings = $exporter->headings();
+
+        $rows = $students->map(function ($std) use ($exporter) {
+            return $exporter->map($std);
         });
 
         return response()->json([
             'status' => 'success',
             'message' => 'Data siswa berhasil diexport.',
+            'headers' => $headings,
             'data' => $rows,
         ]);
     }
@@ -390,6 +470,73 @@ class StudentController extends Controller
     public function import(Request $request): JsonResponse
     {
         $rows = $request->input('data', []);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'xlsx');
+            $tmpDir = storage_path('app/imports');
+            if (! is_dir($tmpDir)) {
+                @mkdir($tmpDir, 0755, true);
+            }
+            $tmpName = 'import_' . uniqid() . '.' . $ext;
+            $file->move($tmpDir, $tmpName);
+            $tmpPath = $tmpDir . '/' . $tmpName;
+
+            try {
+                if (in_array($ext, ['csv', 'txt'])) {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Csv();
+                } elseif ($ext === 'xls') {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+                } else {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+                }
+                $spreadsheet = $reader->load($tmpPath);
+                $sheetData = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+                if (count($sheetData) > 1) {
+                    $headers = array_map(function ($h) {
+                        $norm = strtolower(trim((string)$h));
+                        $norm = str_replace([' ', '_', '-', '(', ')', '/', '.'], '', $norm);
+                        return $norm;
+                    }, $sheetData[0]);
+
+                    $rows = [];
+                    for ($i = 1; $i < count($sheetData); $i++) {
+                        $rawRow = $sheetData[$i];
+                        if (empty(array_filter($rawRow, fn($v) => $v !== null && $v !== ''))) {
+                            continue;
+                        }
+                        $item = [];
+                        foreach ($headers as $idx => $normHeader) {
+                            $val = $rawRow[$idx] ?? null;
+                            if (in_array($normHeader, ['nis', 'nomorinduk', 'nomorinduksiswa', 'nissekolah'])) {
+                                $item['nis'] = (string)$val;
+                            } elseif (in_array($normHeader, ['nisn', 'nisnnasional'])) {
+                                $item['nisn'] = (string)$val;
+                            } elseif (in_array($normHeader, ['fullname', 'namalengkap', 'nama'])) {
+                                $item['full_name'] = (string)$val;
+                            } elseif (in_array($normHeader, ['gender', 'jeniskelamin', 'jk'])) {
+                                $item['gender'] = (string)$val;
+                            } elseif (in_array($normHeader, ['unitid', 'unit', 'unitpendidikan'])) {
+                                $item['unit_id'] = $val;
+                            } elseif (in_array($normHeader, ['kelasid', 'kelas'])) {
+                                $item['kelas_id'] = $val;
+                            } else {
+                                $item[$normHeader] = $val;
+                            }
+                        }
+                        $rows[] = $item;
+                    }
+                }
+            } catch (\Exception $e) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas import: ' . $e->getMessage(),
+                ], 422);
+            } finally {
+                @unlink($tmpPath);
+            }
+        }
+
         if (! is_array($rows) || empty($rows)) {
             return response()->json([
                 'status' => 'error',
@@ -404,7 +551,7 @@ class StudentController extends Controller
 
         foreach ($rows as $index => $row) {
             $rowNum = $index + 1;
-            $nama = trim($row['full_name'] ?? $row['nama_lengkap'] ?? $row['nama'] ?? '');
+            $nama = trim($row['full_name'] ?? $row['namalengkap'] ?? $row['nama'] ?? '');
             $nis = trim($row['nis'] ?? '');
             $nisn = trim($row['nisn'] ?? '');
 
@@ -417,10 +564,17 @@ class StudentController extends Controller
             $nama = preg_replace('/\s+/', ' ', $nama);
             $nis = preg_replace('/\s+/', ' ', $nis);
 
-            if (Student::query()->where('nis', $nis)->exists()) {
+            if (Student::withTrashed()->where('nis', $nis)->exists()) {
                 $duplikat++;
                 $errors[] = "Baris {$rowNum}: NIS '{$nis}' sudah terdaftar.";
                 continue;
+            }
+
+            $rowMetadata = [];
+            foreach ($row as $k => $v) {
+                if (! in_array($k, ['nis', 'nisn', 'full_name', 'gender', 'unit_id', 'kelas_id', 'birth_date', 'birth_place', 'address'])) {
+                    $rowMetadata[$k] = $v;
+                }
             }
 
             try {
@@ -428,10 +582,14 @@ class StudentController extends Controller
                     'nis' => $nis,
                     'nisn' => $nisn ?: null,
                     'full_name' => $nama,
-                    'gender' => in_array(strtolower($row['gender'] ?? $row['jenis_kelamin'] ?? ''), ['female', 'p', 'perempuan']) ? 'female' : 'male',
+                    'gender' => in_array(strtolower($row['gender'] ?? $row['jeniskelamin'] ?? ''), ['female', 'p', 'perempuan']) ? 'female' : 'male',
                     'unit_id' => $row['unit_id'] ?? null,
                     'kelas_id' => $row['kelas_id'] ?? null,
+                    'birth_date' => ! empty($row['birth_date']) ? $row['birth_date'] : null,
+                    'birth_place' => $row['birth_place'] ?? null,
+                    'address' => $row['address'] ?? $row['alamatsiswa'] ?? null,
                     'is_active' => true,
+                    'metadata' => $rowMetadata,
                 ]);
                 $berhasil++;
             } catch (\Exception $e) {
@@ -455,16 +613,9 @@ class StudentController extends Controller
 
     public function template(): JsonResponse
     {
+        $exporter = new StudentExport(Student::query());
         return response()->json([
-            'headers' => ['nis', 'nisn', 'full_name', 'gender', 'unit_id', 'kelas_id'],
-            'sample' => [
-                'nis' => '20261001',
-                'nisn' => '0012345678',
-                'full_name' => 'Muhammad Abdullah',
-                'gender' => 'male',
-                'unit_id' => '',
-                'kelas_id' => '',
-            ],
+            'headers' => $exporter->headings(),
         ]);
     }
 }

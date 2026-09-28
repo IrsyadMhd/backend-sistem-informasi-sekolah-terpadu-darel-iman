@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\KelasExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\SimpanKelasRequest;
 use App\Http\Requests\V1\UbahKelasRequest;
@@ -12,6 +13,8 @@ use App\Services\KelasService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Facades\Excel;
 
 /**
  * Class KelasController
@@ -39,6 +42,21 @@ class KelasController extends Controller
             'status' => $request->query('status'),
             'dengan_sampah' => $request->query('dengan_sampah'),
         ];
+
+        if ($filters['unit_pendidikan_id'] && $filters['unit_pendidikan_id'] !== 'all') {
+            if (! $this->accessScopeService->hasGlobalScope($request->user())) {
+                $allowedUnitIds = $this->accessScopeService
+                    ->accessibleEducationUnits($request->user())
+                    ->pluck('id')
+                    ->all();
+                abort_unless(
+                    in_array($filters['unit_pendidikan_id'], $allowedUnitIds, true),
+                    403,
+                    'Unit pendidikan tidak berada dalam cakupan akun.'
+                );
+            }
+        }
+
         $allowedKelasIds = $this->accessibleRombelIds(
             $request,
             $request->query('dengan_sampah') === 'true'
@@ -208,6 +226,71 @@ class KelasController extends Controller
     }
 
     /**
+     * Ekspor data kelas ke format XLSX, XLS, CSV, atau JSON.
+     */
+    public function export(Request $request)
+    {
+        $filters = [
+            'search' => $request->query('search'),
+            'unit_pendidikan_id' => $request->query('unit_pendidikan_id') ?? $request->query('unit_id'),
+            'tahun_ajaran_id' => $request->query('tahun_ajaran_id'),
+            'semester_id' => $request->query('semester_id'),
+            'jenjang' => $request->query('jenjang'),
+            'tingkat' => $request->query('tingkat'),
+            'status' => $request->query('status'),
+        ];
+
+        $query = $this->accessScopeService->accessibleRombels($request->user())
+            ->with(['unitPendidikan', 'waliKelas', 'siswa'])
+            ->withCount('siswa');
+
+        if (! empty($filters['unit_pendidikan_id']) && $filters['unit_pendidikan_id'] !== 'all') {
+            $query->where('unit_pendidikan_id', $filters['unit_pendidikan_id']);
+        }
+        if (! empty($filters['tahun_ajaran_id']) && $filters['tahun_ajaran_id'] !== 'all') {
+            $query->where('tahun_ajaran_id', $filters['tahun_ajaran_id']);
+        }
+        if (! empty($filters['semester_id']) && $filters['semester_id'] !== 'all') {
+            $query->where('semester_id', $filters['semester_id']);
+        }
+        if (! empty($filters['jenjang']) && $filters['jenjang'] !== 'all') {
+            $query->where('jenjang', $filters['jenjang']);
+        }
+        if (! empty($filters['tingkat']) && $filters['tingkat'] !== 'all') {
+            $query->where('tingkat', $filters['tingkat']);
+        }
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
+            $query->where('status', $filters['status']);
+        }
+        if (! empty($filters['search'])) {
+            $search = $filters['search'];
+            $query->where(function ($q) use ($search) {
+                $q->where('nama_kelas', 'like', "%{$search}%")
+                  ->orWhere('kode_kelas', 'like', "%{$search}%")
+                  ->orWhere('ruangan', 'like', "%{$search}%");
+            });
+        }
+
+        $classes = $query->orderBy('nama_kelas', 'asc')->get();
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $filename = 'data_kelas_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new KelasExport($classes), $filename, $excelFormat);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $classes,
+        ]);
+    }
+
+    /**
      * Impor data kelas dari file / payload JSON.
      */
     public function import(Request $request): JsonResponse
@@ -236,27 +319,39 @@ class KelasController extends Controller
             $query->withTrashed();
         }
 
-        $kelas = (clone $query)->where(function ($q) use ($id) {
-            $q->where('id', $id)->orWhere('kode_kelas', $id);
+        $isUuid = Str::isUuid($id);
+
+        $kelas = (clone $query)->where(function ($q) use ($id, $isUuid) {
+            if ($isUuid) {
+                $q->where('id', $id)->orWhere('kode_kelas', $id);
+            } else {
+                $q->where('kode_kelas', $id);
+            }
         })->first();
 
         if ($kelas) {
             return $kelas;
         }
 
-        $legacyClass = \App\Models\SchoolClass::find($id);
-        if ($legacyClass) {
-            $matchedKelas = Kelas::where('nama_kelas', $legacyClass->name)
-                ->orWhere('kode_kelas', $legacyClass->code ?? $legacyClass->name)
-                ->first();
-            if ($matchedKelas) {
-                return $matchedKelas;
+        if ($isUuid) {
+            $legacyClass = \App\Models\SchoolClass::find($id);
+            if ($legacyClass) {
+                $matchedKelas = Kelas::where('nama_kelas', $legacyClass->name)
+                    ->orWhere('kode_kelas', $legacyClass->code ?? $legacyClass->name)
+                    ->first();
+                if ($matchedKelas) {
+                    return $matchedKelas;
+                }
+                $fallback = new Kelas();
+                $fallback->id = $legacyClass->id;
+                $fallback->nama_kelas = $legacyClass->name;
+                $fallback->kode_kelas = $legacyClass->code ?? $legacyClass->name;
+                return $fallback;
             }
-            $fallback = new Kelas();
-            $fallback->id = $legacyClass->id;
-            $fallback->nama_kelas = $legacyClass->name;
-            $fallback->kode_kelas = $legacyClass->code ?? $legacyClass->name;
-            return $fallback;
+        }
+
+        if (! $isUuid) {
+            abort(Response::HTTP_NOT_FOUND, 'Data kelas tidak ditemukan.');
         }
 
         return $query->whereKey($id)->firstOrFail();

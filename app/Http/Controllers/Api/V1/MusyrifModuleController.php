@@ -9,28 +9,61 @@ use App\Models\DormitoryDeposit;
 use App\Models\Student;
 use App\Models\StudentPointTransaction;
 use App\Models\TahfizhExam;
+use App\Models\User;
+use App\Services\AccessScopeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class MusyrifModuleController extends Controller
 {
+    public function __construct(
+        protected AccessScopeService $accessScope,
+    ) {}
+
+    /**
+     * Assert that the authenticated user has access to the student's educational unit.
+     */
+    protected function assertStudentAccess(Student $student, ?User $user = null): void
+    {
+        $user = $user ?: request()->user();
+        abort_unless($user, 401, 'Unauthenticated.');
+
+        if ($this->accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+        $studentUnitId = $student->unit_id ?: $student->kelas?->unit_pendidikan_id;
+
+        abort_unless(
+            $studentUnitId && $accessibleUnitIds->contains($studentUnitId),
+            403,
+            'Akses ditolak: Santri berada di luar unit pendidikan Anda.'
+        );
+    }
+
     /**
      * Daftar Santri / Siswa Binaan untuk Dropdown Modal Musyrif
      */
     public function students(Request $request): JsonResponse
     {
-        $query = Student::select('id', 'full_name', 'nama_lengkap', 'nis', 'nisn', 'kelas_id', 'status')
-            ->where(function ($q) {
-                $q->where('status', 'aktif')
-                  ->orWhereNull('status');
+        $query = Student::select('id', 'full_name', 'nis', 'nisn', 'kelas_id', 'unit_id', 'is_active')
+            ->where('is_active', true);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->where(function ($q) use ($accessibleUnitIds) {
+                $q->whereIn('unit_id', $accessibleUnitIds)
+                  ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
             });
+        }
 
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('full_name', 'like', "%{$search}%")
-                  ->orWhere('nama_lengkap', 'like', "%{$search}%")
                   ->orWhere('nis', 'like', "%{$search}%");
             });
         }
@@ -56,6 +89,7 @@ class MusyrifModuleController extends Controller
         ]);
 
         $student = Student::findOrFail($validated['student_id']);
+        $this->assertStudentAccess($student, $request->user());
         $today = now()->toDateString();
 
         $sunnahList = ['tahajud', 'witir', 'dhuha', 'rawatib', 'tarawih', 'syuruq'];
@@ -113,7 +147,10 @@ class MusyrifModuleController extends Controller
      */
     public function lastLog(Request $request): JsonResponse
     {
-        $request->validate(['student_id' => 'required|uuid']);
+        $request->validate(['student_id' => 'required|uuid|exists:students,id']);
+
+        $student = Student::findOrFail($request->student_id);
+        $this->assertStudentAccess($student, $request->user());
 
         $lastLog = \App\Models\TahfizhDailyLog::where('student_id', $request->student_id)
             ->whereNotNull('hafalan_surah_number')
@@ -145,6 +182,7 @@ class MusyrifModuleController extends Controller
         ]);
 
         $student = Student::findOrFail($validated['student_id']);
+        $this->assertStudentAccess($student, $request->user());
         $surah = DB::table('quran_surahs')->where('nomor', $validated['surah_number'])->first();
 
         $log = \App\Models\TahfizhDailyLog::create([
@@ -173,6 +211,15 @@ class MusyrifModuleController extends Controller
     public function indexExams(Request $request): JsonResponse
     {
         $query = TahfizhExam::with(['student:id,full_name,nis,kelas_id', 'examiner:id,name']);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereHas('student', function ($sq) use ($accessibleUnitIds) {
+                $sq->whereIn('unit_id', $accessibleUnitIds)
+                   ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        }
 
         if ($request->filled('student_id')) {
             $query->where('student_id', $request->student_id);
@@ -208,6 +255,9 @@ class MusyrifModuleController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        $student = Student::findOrFail($validated['student_id']);
+        $this->assertStudentAccess($student, $request->user());
+
         $validated['examiner_id'] = $request->user()?->id;
         $exam = TahfizhExam::create($validated);
 
@@ -241,6 +291,15 @@ class MusyrifModuleController extends Controller
     {
         $query = StudentPointTransaction::with(['student:id,full_name,nis', 'category', 'reportedBy:id,name']);
 
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereHas('student', function ($sq) use ($accessibleUnitIds) {
+                $sq->whereIn('unit_id', $accessibleUnitIds)
+                   ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        }
+
         if ($request->filled('student_id')) {
             $query->where('student_id', $request->student_id);
         }
@@ -271,6 +330,9 @@ class MusyrifModuleController extends Controller
             'status' => 'nullable|in:dalam_pengawasan,selesai_sanksi,dirujuk_bk,tercatat',
         ]);
 
+        $student = Student::findOrFail($validated['student_id']);
+        $this->assertStudentAccess($student, $request->user());
+
         $validated['reported_by_id'] = $request->user()?->id;
         $transaction = StudentPointTransaction::create($validated);
 
@@ -287,6 +349,15 @@ class MusyrifModuleController extends Controller
     public function indexClinicLogs(Request $request): JsonResponse
     {
         $query = ClinicLog::with(['student:id,full_name,nis', 'handledBy:id,name']);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereHas('student', function ($sq) use ($accessibleUnitIds) {
+                $sq->whereIn('unit_id', $accessibleUnitIds)
+                   ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        }
 
         if ($request->filled('student_id')) {
             $query->where('student_id', $request->student_id);
@@ -316,6 +387,9 @@ class MusyrifModuleController extends Controller
             'status' => 'required|in:rawat_jalan,istirahat_uksh,dirujuk_rs,sembuh',
         ]);
 
+        $student = Student::findOrFail($validated['student_id']);
+        $this->assertStudentAccess($student, $request->user());
+
         $validated['handled_by_musyrif_id'] = $request->user()?->id;
         $log = ClinicLog::create($validated);
 
@@ -332,6 +406,15 @@ class MusyrifModuleController extends Controller
     public function indexDeposits(Request $request): JsonResponse
     {
         $query = DormitoryDeposit::with(['student:id,full_name,nis', 'musyrif:id,name']);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereHas('student', function ($sq) use ($accessibleUnitIds) {
+                $sq->whereIn('unit_id', $accessibleUnitIds)
+                   ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        }
 
         if ($request->filled('student_id')) {
             $query->where('student_id', $request->student_id);
@@ -365,6 +448,9 @@ class MusyrifModuleController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        $student = Student::findOrFail($validated['student_id']);
+        $this->assertStudentAccess($student, $request->user());
+
         $validated['musyrif_id'] = $request->user()?->id;
         $validated['status'] = 'deposited';
         $deposit = DormitoryDeposit::create($validated);
@@ -376,9 +462,13 @@ class MusyrifModuleController extends Controller
         ], 201);
     }
 
-    public function retrieveDeposit(string $id): JsonResponse
+    public function retrieveDeposit(Request $request, string $id): JsonResponse
     {
-        $deposit = DormitoryDeposit::findOrFail($id);
+        $deposit = DormitoryDeposit::with('student.kelas')->findOrFail($id);
+        if ($deposit->student) {
+            $this->assertStudentAccess($deposit->student, $request->user());
+        }
+
         $deposit->update([
             'status' => 'retrieved',
             'retrieved_at' => now(),

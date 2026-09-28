@@ -110,13 +110,13 @@ class PortalStudentContextService
      */
     public function getAcademicContext(): array
     {
-        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first();
-        $activeSemester = Semester::query()->where('is_active', true)->first();
+        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first() ?? AcademicYear::query()->latest()->first();
+        $activeSemester = Semester::query()->where('is_active', true)->first() ?? Semester::query()->latest()->first();
 
         return [
-            'academic_year' => $activeAcademicYear?->name ?? '2025/2026',
+            'academic_year' => $activeAcademicYear?->name ?? '-',
             'academic_year_id' => $activeAcademicYear?->id,
-            'semester' => $activeSemester?->name ?? 'Ganjil',
+            'semester' => $activeSemester?->name ?? '-',
             'semester_id' => $activeSemester?->id,
             'date' => now()->translatedFormat('l, d F Y'),
         ];

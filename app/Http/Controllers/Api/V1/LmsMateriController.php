@@ -7,6 +7,7 @@ use App\Http\Requests\V1\SimpanMateriRequest;
 use App\Http\Requests\V1\UbahMateriRequest;
 use App\Http\Resources\V1\LmsMateriResource;
 use App\Models\Employee;
+use App\Models\LmsModulAjar;
 use App\Models\User;
 use App\Services\LmsMateriService;
 use Illuminate\Http\JsonResponse;
@@ -34,8 +35,12 @@ class LmsMateriController extends Controller
         }
 
         $perPage = (int) $request->query('per_page', 15);
-        $orderBy = (string) $request->query('order_by', 'urutan');
-        $orderDir = (string) $request->query('order_dir', 'asc');
+        $allowedOrderBy = ['id', 'urutan', 'judul', 'tipe', 'created_at'];
+        $rawOrderBy = (string) $request->query('order_by', 'urutan');
+        $orderBy = in_array(strtolower($rawOrderBy), $allowedOrderBy, true) ? strtolower($rawOrderBy) : 'urutan';
+
+        $rawOrderDir = strtolower((string) $request->query('order_dir', 'asc'));
+        $orderDir = in_array($rawOrderDir, ['asc', 'desc'], true) ? $rawOrderDir : 'asc';
 
         $materis = $this->materiService->dapatkanDaftar($filters, $perPage, $orderBy, $orderDir);
 
@@ -79,9 +84,19 @@ class LmsMateriController extends Controller
 
     public function store(SimpanMateriRequest $request): JsonResponse
     {
-        $this->authorizeManage($request->user(), 'create');
+        $user = $request->user();
+        $this->authorizeManage($user, 'create');
         $data = $request->validated();
         $file = $request->file('file');
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            $data['guru_id'] = $employeeId;
+            $modul = LmsModulAjar::find($data['modul_ajar_id']);
+            if ($modul) {
+                abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+            }
+        }
 
         $materi = $this->materiService->simpan($data, $file);
 
@@ -94,7 +109,8 @@ class LmsMateriController extends Controller
 
     public function update(UbahMateriRequest $request, string $id): JsonResponse
     {
-        $this->authorizeManage($request->user(), 'update');
+        $user = $request->user();
+        $this->authorizeManage($user, 'update');
         $materi = $this->materiService->cariBerdasarkanId($id);
 
         if (! $materi) {
@@ -104,7 +120,12 @@ class LmsMateriController extends Controller
             ], 404);
         }
 
-        $this->assertCanViewMateri($request->user(), $materi);
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($materi->guru_id === $employeeId, 403, 'Akses ditolak: Materi milik guru lain.');
+        }
+
+        $this->assertCanViewMateri($user, $materi);
 
         $data = $request->validated();
         $file = $request->file('file');
@@ -120,7 +141,22 @@ class LmsMateriController extends Controller
 
     public function destroy(string $id): JsonResponse
     {
-        $this->authorizeManage(request()->user(), 'delete');
+        $user = request()->user();
+        $this->authorizeManage($user, 'delete');
+        $materi = $this->materiService->cariBerdasarkanId($id);
+
+        if (! $materi) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Materi Pembelajaran tidak ditemukan.',
+            ], 404);
+        }
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($materi->guru_id === $employeeId, 403, 'Akses ditolak: Materi milik guru lain.');
+        }
+
         $berhasil = $this->materiService->hapus($id);
 
         if (! $berhasil) {
@@ -164,13 +200,27 @@ class LmsMateriController extends Controller
         ]);
     }
 
-    public function options(): JsonResponse
+    public function options(Request $request): JsonResponse
     {
-        $this->authorizeView(request()->user());
+        $this->authorizeView($request->user());
+
+        $user = $request->user();
+        $isTeacher = $this->isTeacher($user);
+        $search = $request->query('search');
+        $includeId = $request->query('include_id') ?: $request->query('modul_ajar_id');
+
+        if ($request->has('limit')) {
+            $rawLimit = $request->query('limit');
+            $limit = ($rawLimit === 'all' || $rawLimit === '0') ? null : max(1, min(1000, (int) $rawLimit));
+        } else {
+            // Scoped teachers only have their assigned modules (lightweight), so do not cap them at 50
+            // Super Admin/Leadership defaults to 100 unless explicit limit or search is used
+            $limit = $isTeacher ? null : 100;
+        }
 
         return response()->json([
             'status' => 'success',
-            'data' => $this->materiService->opsi(),
+            'data' => $this->materiService->opsi($user, $search, $limit, $includeId),
         ]);
     }
 
@@ -179,6 +229,8 @@ class LmsMateriController extends Controller
         abort_unless(
             $this->canAccessAllUnits($user)
             || $user->hasAnyPermission([
+                'academic.view',
+                'academic.view_any',
                 'pembelajaran.kurikulum.view',
                 'pembelajaran.materi',
                 'teacher.material.view',
@@ -188,6 +240,16 @@ class LmsMateriController extends Controller
                 'guru',
                 'Guru Mata Pelajaran',
                 'guru_mata_pelajaran',
+                'Kepala Sekolah',
+                'kepala_sekolah',
+                'Waka Kurikulum',
+                'waka_kurikulum',
+                'Waka Kesiswaan',
+                'waka_kesiswaan',
+                'Wakil Kesiswaan',
+                'wakil_kesiswaan',
+                'Tata Usaha',
+                'tata_usaha',
             ]),
             403
         );
@@ -230,7 +292,7 @@ class LmsMateriController extends Controller
 
     private function isTeacher(User $user): bool
     {
-        if ($this->canAccessAllUnits($user) || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Tata Usaha', 'tata_usaha'])) {
+        if ($this->canAccessAllUnits($user) || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan', 'Wakil Kesiswaan', 'wakil_kesiswaan', 'Tata Usaha', 'tata_usaha'])) {
             return false;
         }
 

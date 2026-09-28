@@ -14,7 +14,7 @@ class ParentSeeder extends Seeder
         $parentsData = [
             [
                 'full_name' => 'Ahmad Fauzi',
-                'email' => 'ahmad.fauzi@parent.local',
+                'email' => 'ahmad.fauzi@dareliman.sch.id',
                 'phone' => '081200010001',
                 'nik' => '1201010101010001',
                 'father_nik' => '1201010101010001',
@@ -24,7 +24,7 @@ class ParentSeeder extends Seeder
             ],
             [
                 'full_name' => 'Budi Santoso',
-                'email' => 'budi.santoso@parent.local',
+                'email' => 'budi.santoso@dareliman.sch.id',
                 'phone' => '081200010002',
                 'nik' => '1201010101010003',
                 'father_nik' => '1201010101010003',
@@ -34,7 +34,7 @@ class ParentSeeder extends Seeder
             ],
             [
                 'full_name' => 'Hendra Kurniawan',
-                'email' => 'hendra.kurniawan@parent.local',
+                'email' => 'hendra.kurniawan@dareliman.sch.id',
                 'phone' => '081200010003',
                 'nik' => '1201010101010005',
                 'father_nik' => '1201010101010005',

@@ -51,7 +51,6 @@ class WaliKelasDashboardService
         $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
         $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
 
-        // 2. Query Students in Homeroom Class
         $studentQuery = Student::query();
         if ($targetClassId) {
             $studentQuery->where(function ($q) use ($targetClassId) {
@@ -62,6 +61,8 @@ class WaliKelasDashboardService
             $studentQuery->where(function ($q) use ($classIds) {
                 $q->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds);
             });
+        } else {
+            $studentQuery->whereRaw('1 = 0');
         }
 
         $totalSiswaRombel = (clone $studentQuery)->where('is_active', true)->count();

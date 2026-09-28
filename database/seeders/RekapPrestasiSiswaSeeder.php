@@ -20,7 +20,7 @@ class RekapPrestasiSiswaSeeder extends Seeder
             return;
         }
 
-        $penginput = User::where('email', 'superadmin@simsit.sch.id')->first()
+        $penginput = User::where('email', 'superadmin@dareliman.sch.id')->first()
             ?? User::where('is_active', true)->first()
             ?? User::first();
 

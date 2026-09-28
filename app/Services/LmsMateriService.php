@@ -132,11 +132,54 @@ class LmsMateriService
         return $this->materiRepository->getStats();
     }
 
-    public function opsi(): array
+    public function opsi(?\App\Models\User $user = null, ?string $search = null, ?int $limit = null, ?string $includeId = null): array
     {
-        $modulAjars = LmsModulAjar::with('subject')
-            ->select('id', 'kode_modul', 'judul_modul', 'mata_pelajaran_id', 'fase')
-            ->get();
+        $query = LmsModulAjar::with('subject')
+            ->select('id', 'kode_modul', 'judul_modul', 'mata_pelajaran_id', 'fase', 'guru_id');
+
+        $isGlobalOrLeadership = $user && (
+            $user->hasAnyRole([
+                'Super Admin', 'super_admin', 'Superadmin', 'super-admin',
+                'Admin', 'admin',
+                'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+                'pengurus_yayasan', 'Pengurus Yayasan',
+                'Sekretaris Yayasan', 'sekretaris_yayasan',
+                'Bendahara Yayasan', 'bendahara_yayasan',
+                'Kepala Bidang Pendidikan', 'Divisi Pendidikan', 'divisi_pendidikan',
+                'Kepala Sekolah', 'kepala_sekolah', 'Kepsek', 'kepsek',
+                'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan',
+                'Tata Usaha', 'tata_usaha', 'TU', 'tu',
+            ])
+        );
+
+        if ($user && ! $isGlobalOrLeadership && $user->hasRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran'])) {
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            if ($employeeId) {
+                $query->where('guru_id', $employeeId);
+            }
+        }
+
+        if (! empty($search)) {
+            $query->where(function ($q) use ($search) {
+                $q->where('judul_modul', 'ilike', "%{$search}%")
+                  ->orWhere('kode_modul', 'ilike', "%{$search}%");
+            });
+        }
+
+        if ($limit !== null && $limit > 0) {
+            $query->take($limit);
+        }
+
+        $modulAjars = $query->get();
+
+        if ($includeId && ! $modulAjars->contains('id', $includeId)) {
+            $extra = LmsModulAjar::with('subject')
+                ->select('id', 'kode_modul', 'judul_modul', 'mata_pelajaran_id', 'fase', 'guru_id')
+                ->find($includeId);
+            if ($extra) {
+                $modulAjars->prepend($extra);
+            }
+        }
 
         return [
             'modul_ajar' => $modulAjars,
@@ -149,6 +192,7 @@ class LmsMateriService
             ],
             'status_options' => [
                 ['id' => 'aktif', 'nama' => 'Aktif'],
+                ['id' => 'published', 'nama' => 'Published'],
                 ['id' => 'draft', 'nama' => 'Draft'],
                 ['id' => 'nonaktif', 'nama' => 'Nonaktif'],
             ],

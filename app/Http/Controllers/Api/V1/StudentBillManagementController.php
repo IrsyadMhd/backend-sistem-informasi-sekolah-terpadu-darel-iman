@@ -24,7 +24,7 @@ class StudentBillManagementController extends Controller
     {
         $query = StudentBill::query()
             ->with([
-                'student' => fn ($q) => $q->select('id', 'nis', 'nisn', 'nama_lengkap', 'kelas_id', 'unit_pendidikan_id')
+                'student' => fn ($q) => $q->select('id', 'nis', 'nisn', 'full_name', 'kelas_id', 'unit_id')
                     ->with(['kelas:id,nama_kelas,unit_pendidikan_id', 'kelas.unitPendidikan:id,name']),
                 'feeCategory:id,code,name,default_amount',
                 'academicYear:id,name,is_active',
@@ -35,7 +35,7 @@ class StudentBillManagementController extends Controller
         if ($request->filled('unit_id')) {
             $unitId = $request->input('unit_id');
             $query->whereHas('student', function ($q) use ($unitId) {
-                $q->where('unit_pendidikan_id', $unitId)
+                $q->where('unit_id', $unitId)
                     ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $unitId));
             });
         }
@@ -74,7 +74,7 @@ class StudentBillManagementController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
                     ->orWhereHas('student', function ($sq) use ($search) {
-                        $sq->where('nama_lengkap', 'like', "%{$search}%")
+                        $sq->where('full_name', 'like', "%{$search}%")
                             ->orWhere('nis', 'like', "%{$search}%")
                             ->orWhere('nisn', 'like', "%{$search}%");
                     });
@@ -99,7 +99,7 @@ class StudentBillManagementController extends Controller
         if ($request->filled('unit_id')) {
             $unitId = $request->input('unit_id');
             $query->whereHas('student', function ($q) use ($unitId) {
-                $q->where('unit_pendidikan_id', $unitId)
+                $q->where('unit_id', $unitId)
                     ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $unitId));
             });
         }
@@ -142,7 +142,7 @@ class StudentBillManagementController extends Controller
             'academic_year_id' => 'nullable|uuid|exists:academic_years,id',
             'mode' => 'required|in:single,bulk_class',
             'student_id' => 'required_if:mode,single|nullable|uuid|exists:students,id',
-            'class_id' => 'required_if:mode,bulk_class|nullable|uuid|exists:kelas,id',
+            'class_id' => 'required_if:mode,bulk_class|nullable|uuid|exists:tbl_kelas,id',
         ]);
 
         $academicYearId = $validated['academic_year_id'] ?? AcademicYear::query()->where('is_active', true)->value('id');

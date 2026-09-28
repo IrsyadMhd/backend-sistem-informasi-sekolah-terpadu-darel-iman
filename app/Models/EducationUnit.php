@@ -37,46 +37,26 @@ class EducationUnit extends Model
     public function getLogoUrlAttribute(): ?string
     {
         $meta = $this->metadata ?? [];
-        if (! empty($meta['logo_url'])) {
-            return $meta['logo_url'];
+        $candidates = [
+            $meta['logo_url'] ?? null,
+            $meta['logo'] ?? null,
+        ];
+
+        foreach ($candidates as $cand) {
+            if (! empty($cand)) {
+                // Ignore hardcoded static assets from old seeders/migrations
+                if (str_starts_with($cand, '/assets/logos/') || str_starts_with($cand, 'assets/logos/')) {
+                    continue;
+                }
+                return $cand;
+            }
         }
-        if (! empty($meta['logo'])) {
-            return $meta['logo'];
-        }
+
         if (! empty($meta['logo_path'])) {
             return '/storage/' . ltrim($meta['logo_path'], '/');
         }
 
-        $level = strtoupper($this->level ?? '');
-        $code = strtoupper($this->code ?? '');
-        $name = strtoupper($this->name ?? '');
-
-        if (str_contains($level, 'TK') || str_contains($code, 'TK') || str_contains($name, 'TK')) {
-            return '/assets/logos/tkit.svg';
-        }
-        if (str_contains($level, 'TAUD') || str_contains($code, 'TAUD') || str_contains($name, 'TAUD')) {
-            return '/assets/logos/taud.svg';
-        }
-        if (str_contains($level, 'SD') || str_contains($code, 'SD') || str_contains($name, 'SD')) {
-            return '/assets/logos/sdit.svg';
-        }
-        if (str_contains($level, 'MIT') || str_contains($code, 'MIT') || str_contains($name, 'MIT')) {
-            return '/assets/logos/mit.svg';
-        }
-        if (str_contains($level, 'SMP') || str_contains($code, 'SMP') || str_contains($name, 'SMP')) {
-            return '/assets/logos/smpit.svg';
-        }
-        if (str_contains($level, 'SMA') || str_contains($code, 'SMA') || str_contains($name, 'SMA')) {
-            return '/assets/logos/smait.svg';
-        }
-        if (str_contains($level, 'PONPES') || str_contains($code, 'PONPES') || str_contains($name, 'PONPES') || str_contains($level, 'MA') || str_contains($name, 'PESANTREN')) {
-            return '/assets/logos/ponpes.svg';
-        }
-        if (str_contains($level, 'MAHAD') || str_contains($code, 'MAHAD') || str_contains($name, 'MAHAD')) {
-            return '/assets/logos/mahad.svg';
-        }
-
-        return '/assets/logos/smait.svg';
+        return null;
     }
 
     protected static function booted(): void

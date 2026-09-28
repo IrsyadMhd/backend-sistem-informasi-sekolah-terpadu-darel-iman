@@ -570,10 +570,6 @@ class EQuranSyncService
      */
     public function getDoaList(array $params = []): array
     {
-        if (Doa::count() === 0) {
-            $this->syncDoaList();
-        }
-
         $query = Doa::query();
 
         if (!empty($params['grup'])) {
@@ -640,40 +636,64 @@ class EQuranSyncService
             ];
         }
 
-        try {
-            $response = Http::withoutVerifying()->timeout(5)->get("{$this->doaApiUrl}/{$id}");
-            if ($response->successful()) {
-                $res = $response->json();
-                $item = $res['data'] ?? $res;
-                if ($item && isset($item['nama'])) {
-                    $tags = $item['tag'] ?? $item['tags'] ?? [];
-                    if (is_string($tags)) {
-                        $tags = array_map('trim', explode(',', $tags));
-                    }
-                    $saved = Doa::updateOrCreate(
-                        ['id' => (int)$id],
-                        [
-                            'nama' => $item['nama'],
-                            'grup' => $item['grup'] ?? 'Doa Harian',
-                            'ar' => $item['ar'] ?? '',
-                            'tr' => $item['tr'] ?? '',
-                            'idn' => $item['idn'] ?? '',
-                            'tentang' => $item['tentang'] ?? null,
-                            'tag' => is_array($tags) ? array_values($tags) : [],
-                        ]
-                    );
+        return null;
+    }
 
+    /** Read the EQuran catalogue without changing the local master data. */
+    public function getRemoteDoaList(): array
+    {
+        try {
+            $response = Http::withoutVerifying()->timeout(10)->get($this->doaApiUrl);
+            if ($response->successful()) {
+                $payload = $response->json();
+                $items = is_array($payload) ? ($payload['data'] ?? $payload) : [];
+
+                if (is_array($items)) {
                     return [
                         'success' => true,
-                        'data' => $saved->toArray(),
+                        'data' => array_values($items),
                     ];
                 }
             }
         } catch (\Exception $e) {
-            Log::info("EQuranSyncService getDoaDetail API error: " . $e->getMessage());
+            Log::warning('EQuranSyncService getRemoteDoaList error: ' . $e->getMessage());
         }
 
-        return null;
+        return ['success' => false, 'message' => 'Gagal menarik katalog doa dari EQuran.id.', 'data' => []];
+    }
+
+    /** Import exactly one selected record from EQuran into the local master data. */
+    public function importRemoteDoa(int $id): array
+    {
+        try {
+            $response = Http::withoutVerifying()->timeout(10)->get("{$this->doaApiUrl}/{$id}");
+            $payload = $response->successful() ? $response->json() : null;
+            $item = is_array($payload) ? ($payload['data'] ?? $payload) : null;
+
+            if (!is_array($item) || empty($item['nama'])) {
+                return ['success' => false, 'message' => 'Data doa tidak ditemukan pada EQuran.id.'];
+            }
+
+            $tags = $item['tag'] ?? $item['tags'] ?? [];
+            if (is_string($tags)) {
+                $tags = array_filter(array_map('trim', explode(',', $tags)));
+            }
+
+            $doa = Doa::updateOrCreate(['id' => $id], [
+                'nama' => $item['nama'],
+                'grup' => $item['grup'] ?? $item['kategori'] ?? 'Doa Harian',
+                'ar' => $item['ar'] ?? $item['teks_arab'] ?? '',
+                'tr' => $item['tr'] ?? $item['teks_latin'] ?? '',
+                'idn' => $item['idn'] ?? $item['terjemahan'] ?? $item['arti'] ?? '',
+                'tentang' => $item['tentang'] ?? $item['referensi'] ?? $item['sumber'] ?? null,
+                'tag' => is_array($tags) ? array_values($tags) : [],
+            ]);
+
+            return ['success' => true, 'message' => 'Doa berhasil diimpor dari EQuran.id.', 'data' => $doa->toArray()];
+        } catch (\Exception $e) {
+            Log::warning('EQuranSyncService importRemoteDoa error: ' . $e->getMessage());
+            return ['success' => false, 'message' => 'Gagal mengimpor doa dari EQuran.id.'];
+        }
     }
 
     /**
@@ -835,5 +855,4 @@ class EQuranSyncService
         ];
     }
 }
-
 

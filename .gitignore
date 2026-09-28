@@ -22,3 +22,10 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Database Backups & Dumps
+/database/backups/
+*.sql
+*.dump
+*.bak
+/scratch/

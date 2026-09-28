@@ -16,7 +16,7 @@ class SuperAdminAcceptanceSeeder extends Seeder
 {
     public function run(): void
     {
-        if (! app()->environment(['local', 'development', 'testing'])) {
+        if (! app()->environment(['local', 'development', 'testing', 'staging'])) {
             return;
         }
 

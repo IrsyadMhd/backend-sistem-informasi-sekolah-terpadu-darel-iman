@@ -26,16 +26,20 @@ class RealtimeBroadcastService
 
         DB::table('realtime_events')->insert($record);
 
-        // Ping WebSocket Gateway server if running on port 6001
+        // Ping WebSocket Gateway server if explicitly configured
         try {
-            Http::timeout(0.5)->post('http://127.0.0.1:6001/publish', [
-                'id' => $id,
-                'channel' => $channel,
-                'event' => $event,
-                'payload' => $payload,
-                'sender_id' => $senderId,
-                'timestamp' => now()->toISOString(),
-            ]);
+            $gatewayUrl = env('WEBSOCKET_GATEWAY_URL');
+            if (!empty($gatewayUrl)) {
+                $publishUrl = rtrim($gatewayUrl, '/') . '/publish';
+                Http::timeout(0.5)->post($publishUrl, [
+                    'id' => $id,
+                    'channel' => $channel,
+                    'event' => $event,
+                    'payload' => $payload,
+                    'sender_id' => $senderId,
+                    'timestamp' => now()->toISOString(),
+                ]);
+            }
         } catch (\Throwable) {
             // Non-blocking: will still be caught by polling or SSE fallback
         }

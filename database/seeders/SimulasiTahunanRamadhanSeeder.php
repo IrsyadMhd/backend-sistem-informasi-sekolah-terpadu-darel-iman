@@ -12,6 +12,7 @@ use App\Models\LmsRapor;
 use App\Models\LmsUjian;
 use App\Models\MutabaahDailyHeader;
 use App\Models\MutabaahDailyDetail;
+use App\Models\MutabaahSupervisorAssignment;
 use App\Models\MutabaahTemplate;
 use App\Models\MutabaahTemplateItem;
 use App\Models\PengumumanSekolah;
@@ -114,7 +115,7 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
             );
 
         // Ambil User Penerbit untuk Pengumuman & Log
-        $publisher = User::where('email', 'superadmin@simsit.sch.id')->first()
+        $publisher = User::where('email', 'superadmin@dareliman.sch.id')->first()
             ?? User::where('is_active', true)->first()
             ?? User::first();
 
@@ -782,8 +783,44 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
             $sampleStudents = Student::take(20)->get();
         }
 
-        $template = MutabaahTemplate::first();
-        $supervisor = \App\Models\MutabaahSupervisorAssignment::first();
+        $template = MutabaahTemplate::first() ?? MutabaahTemplate::where('is_active', true)->first();
+        $supervisor = MutabaahSupervisorAssignment::first();
+
+        // Fallback: Jika belum ada supervisor assignment, buatkan otomatis
+        if (!$supervisor && $template) {
+            $employee = Employee::where('status', 'Aktif')->first();
+            $unit = EducationUnit::first();
+
+            if ($employee && $unit) {
+                $supervisor = MutabaahSupervisorAssignment::firstOrCreate(
+                    [
+                        'employee_id' => $employee->id,
+                        'education_unit_id' => $unit->id,
+                        'academic_year_id' => $ay->id,
+                        'semester_id' => $semGanjil->id,
+                    ],
+                    [
+                        'id' => (string) Str::uuid(),
+                        'supervisor_type' => 'pembimbing',
+                        'template_id' => $template->id,
+                        'start_date' => $ay->start_date ?? '2026-07-01',
+                        'end_date' => $ay->end_date ?? '2027-06-30',
+                        'is_primary' => true,
+                        'can_input' => true,
+                        'can_edit' => true,
+                        'can_finalize' => true,
+                        'can_view_report' => true,
+                        'status' => 'active',
+                    ]
+                );
+            }
+        }
+
+        // Guard: Lewati jika master template atau supervisor belum siap
+        if (!$template || !$supervisor) {
+            $this->command?->warn('  ⚠ MutabaahTemplate atau MutabaahSupervisorAssignment belum tersedia, melewati seeding mutabaah.');
+            return;
+        }
 
         $mutabaahDates = [
             // Semester 1 (Juli - Desember 2026)
@@ -814,9 +851,9 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                     ],
                     [
                         'id' => (string) Str::uuid(),
-                        'template_id' => $template?->id,
-                        'supervisor_assignment_id' => $supervisor?->id,
-                        'education_unit_id' => $st->unit_id,
+                        'template_id' => $template->id,
+                        'supervisor_assignment_id' => $supervisor->id,
+                        'education_unit_id' => $st->unit_id ?? $supervisor->education_unit_id,
                         'kelas_id' => $st->kelas_id,
                         'academic_year_id' => $ay->id,
                         'semester_id' => $md['sem']->id,

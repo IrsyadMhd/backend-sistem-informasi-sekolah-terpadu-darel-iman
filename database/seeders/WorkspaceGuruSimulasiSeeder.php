@@ -119,7 +119,7 @@ class WorkspaceGuruSimulasiSeeder extends Seeder
         $semester = Semester::query()->where('is_active', true)->first()
             ?? Semester::query()->where('academic_year_id', $academicYear->id)->orderBy('sequence')->first();
 
-        foreach (['guru@school-erp.local', 'guru.tahfizh@school-erp.local'] as $email) {
+        foreach (['guru@dareliman.sch.id', 'guru.tahfizh@dareliman.sch.id'] as $email) {
             $user = User::query()->where('email', $email)->first();
             if (! $user) { $this->command?->warn("  User {$email} tidak ditemukan, skip."); continue; }
 

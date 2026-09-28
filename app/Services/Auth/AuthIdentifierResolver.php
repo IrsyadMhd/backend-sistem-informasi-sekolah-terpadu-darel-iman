@@ -33,7 +33,7 @@ class AuthIdentifierResolver
      * ===================================================================== */
 
     /**
-     * Resolve user portal admin (Super Admin / Admin) via email atau No. HP.
+     * Resolve user portal admin (Super Admin / Admin) via email, No. HP, atau NIY.
      */
     public function resolveAdminUser(string $identifier): ?User
     {
@@ -44,7 +44,25 @@ class AuthIdentifierResolver
             return User::query()->where('email', $email)->first();
         }
 
-        return $this->userByPhoneVariants($input);
+        $byPhone = $this->userByPhoneVariants($input);
+        if ($byPhone) {
+            return $byPhone;
+        }
+
+        // Lookup via NIY Pegawai yang ditautkan ke akun Admin/Pimpinan
+        $employeeUser = Employee::query()
+            ->where(function (Builder $q) use ($input) {
+                $q->where('niy', $input)
+                    ->orWhere('niy', strtoupper($input));
+            })
+            ->whereNotNull('user_id')
+            ->first()?->user;
+
+        if ($employeeUser) {
+            return $employeeUser;
+        }
+
+        return User::query()->where('metadata->username', $input)->first();
     }
 
     /**
@@ -105,9 +123,9 @@ class AuthIdentifierResolver
     }
 
     /**
-     * Resolve orang tua dari No. HP / NIK / NIK Ayah / NIK Ibu / Email /
+     * Resolve orang tua dari No. HP / NIK / No. KK / NIK Ayah / NIK Ibu / Email /
      * NIS salah satu anak. Urutan deterministic:
-     * phone → nik → father_nik → mother_nik → email → child NIS/NISN.
+     * phone → nik → no_kk → father_nik → mother_nik → email → child KK → child NIS/NISN.
      *
      * @return array{parent: ?ParentModel, user: ?User, child: ?Student, matched_by: ?string, child_matched: bool}
      */
@@ -118,6 +136,11 @@ class AuthIdentifierResolver
         $lookups = [
             'phone' => fn (Builder $q) => $q->whereIn('phone', PhoneNormalizer::variants($input)),
             'nik' => fn (Builder $q) => $q->where('nik', $input),
+            'no_kk' => fn (Builder $q) => $q->where(function (Builder $sq) use ($input) {
+                $sq->where('metadata->no_kk', $input)
+                    ->orWhere('metadata->kartu_keluarga', $input)
+                    ->orWhere('metadata->kk', $input);
+            }),
             'father_nik' => fn (Builder $q) => $q->where('father_nik', $input),
             'mother_nik' => fn (Builder $q) => $q->where('mother_nik', $input),
             'email' => fn (Builder $q) => $q->where('email', strtolower($input)),
@@ -132,6 +155,22 @@ class AuthIdentifierResolver
 
             if ($parent) {
                 return $this->parentResult($parent, $source, null);
+            }
+        }
+
+        // Lookup fallback via No. KK anak dalam Kartu Keluarga
+        $studentByKk = Student::query()
+            ->where(function (Builder $q) use ($input) {
+                $q->where('metadata->no_kk', $input)
+                    ->orWhere('metadata->kartu_keluarga', $input)
+                    ->orWhere('metadata->kk', $input);
+            })
+            ->first();
+
+        if ($studentByKk) {
+            $parent = $this->firstParentOfStudent($studentByKk);
+            if ($parent) {
+                return $this->parentResult($parent, 'kk', $studentByKk);
             }
         }
 

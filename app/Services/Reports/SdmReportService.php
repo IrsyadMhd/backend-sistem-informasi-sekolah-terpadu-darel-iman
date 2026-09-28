@@ -160,11 +160,11 @@ class SdmReportService
             ->selectRaw('
                 unit_id,
                 COUNT(*) as total_sdm,
-                SUM(CASE WHEN LOWER(status) IN ("aktif", "active", "1") OR status IS NULL THEN 1 ELSE 0 END) as sdm_aktif,
-                SUM(CASE WHEN LOWER(jenis_kelamin) LIKE "l%" OR LOWER(jenis_kelamin) LIKE "male%" THEN 1 ELSE 0 END) as male_count,
+                SUM(CASE WHEN LOWER(status) IN (\'aktif\', \'active\', \'1\') OR status IS NULL THEN 1 ELSE 0 END) as sdm_aktif,
+                SUM(CASE WHEN LOWER(jenis_kelamin) LIKE \'l%\' OR LOWER(jenis_kelamin) LIKE \'male%\' THEN 1 ELSE 0 END) as male_count,
                 SUM(CASE WHEN (SELECT 1 FROM teachers WHERE teachers.employee_id = employees.id LIMIT 1) IS NOT NULL
                           OR (SELECT 1 FROM employee_teachings WHERE employee_teachings.employee_id = employees.id LIMIT 1) IS NOT NULL
-                          OR (SELECT 1 FROM positions WHERE positions.id = employees.jabatan_id AND (positions.name ' . $like . ' "%Guru%" OR positions.name ' . $like . ' "%Pendidik%" OR positions.level_jabatan IN (8, 9)) LIMIT 1) IS NOT NULL
+                          OR (SELECT 1 FROM positions WHERE positions.id = employees.jabatan_id AND (positions.name ' . $like . ' \'%Guru%\' OR positions.name ' . $like . ' \'%Pendidik%\' OR positions.level_jabatan IN (8, 9)) LIMIT 1) IS NOT NULL
                     THEN 1 ELSE 0 END) as guru_count
             ')
             ->groupBy('unit_id')
@@ -187,7 +187,7 @@ class SdmReportService
 
         // Status kepegawaian chart via SQL Grouping
         $statusCounts = Employee::query()
-            ->selectRaw('COALESCE(status_pegawai, "Lainnya") as name, COUNT(*) as value')
+            ->selectRaw("COALESCE(status_pegawai, 'Lainnya') as name, COUNT(*) as value")
             ->groupBy('status_pegawai')
             ->get();
 
@@ -213,7 +213,7 @@ class SdmReportService
         ];
 
         // 3. Rekap Per Unit (Constructed from single pre-computed SQL aggregations)
-        $unitRecaps = $units->map(function ($u) use ($statsByUnit) {
+        $unitRecaps = $units->map(function ($u) use ($statsByUnit, $totalSdm) {
             $st = $statsByUnit->get($u->id);
             $totalSub = (int) ($st->total_sdm ?? 0);
             $gCount = (int) ($st->guru_count ?? 0);

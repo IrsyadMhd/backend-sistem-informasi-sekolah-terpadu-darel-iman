@@ -24,6 +24,7 @@ use App\Models\PortalMessage;
 use App\Models\QuranSurah;
 use App\Models\Semester;
 use App\Models\Student;
+use App\Models\StudentAttendancePermission;
 use App\Models\StudentGrade;
 use App\Models\StudentNote;
 use App\Models\Subject;
@@ -59,6 +60,18 @@ class TeacherPortalController extends Controller
 
         if (! $teacher && $employee) {
             $teacher = Teacher::query()->where('employee_id', $employee->id)->first();
+            if (! $teacher) {
+                $teacher = Teacher::query()->firstOrCreate(
+                    ['employee_id' => $employee->id],
+                    [
+                        'user_id' => $user->id,
+                        'employee_number' => $employee->niy ?? $employee->nik ?? ('EMP-' . substr((string) $employee->id, 0, 8)),
+                        'full_name' => $employee->nama_lengkap ?? $user->name,
+                        'email' => $employee->email ?? $user->email,
+                        'education_unit_id' => $employee->unit_id,
+                    ]
+                );
+            }
         }
 
         return $teacher;
@@ -542,10 +555,29 @@ class TeacherPortalController extends Controller
             ->orderBy('full_name')
             ->paginate($request->query('per_page', 50));
 
+        $today = $request->date('date') ?: now();
+        $studentIds = $students->getCollection()->pluck('id');
+        $permissions = StudentAttendancePermission::query()
+            ->whereIn('student_id', $studentIds)
+            ->whereIn('status', ['approved', 'submitted', 'pending'])
+            ->whereDate('start_date', '<=', $today)
+            ->whereDate('end_date', '>=', $today)
+            ->get()->keyBy('student_id');
+
         // Workspace guru lama memakai nama field Indonesia. Sertakan alias ini
         // tanpa mengubah kontrak Student utama yang memakai `full_name`.
-        $students->getCollection()->each(function (Student $student): void {
+        $students->getCollection()->each(function (Student $student) use ($permissions): void {
             $student->append(['nama_lengkap']);
+            $perm = $permissions->get($student->id);
+            if ($perm) {
+                $student->setAttribute('recommended_status', $perm->type);
+                $student->setAttribute('recommendation_verified', $perm->status === 'approved');
+                $student->setAttribute('permission_id', $perm->id);
+                $student->setAttribute('permission_status', $perm->status);
+                $student->setAttribute('permission_reason', $perm->reason);
+                $student->setAttribute('permission_start_date', $perm->start_date ? Carbon::parse($perm->start_date)->toDateString() : null);
+                $student->setAttribute('permission_end_date', $perm->end_date ? Carbon::parse($perm->end_date)->toDateString() : null);
+            }
         });
 
         return response()->json([
@@ -558,7 +590,7 @@ class TeacherPortalController extends Controller
     {
         $classId = $request->query('class_id');
         $date = $request->query('date', now()->toDateString());
-        $scheduleIds = $this->accessScope->accessibleSchedules($request->user())->select('id');
+        $scheduleIds = $this->accessScope->accessibleSchedules($request->user())->pluck('id');
 
         $sessions = LessonAttendanceSession::query()
             ->with(['classSchedule', 'kelas', 'subject', 'attendances.student'])
@@ -943,12 +975,39 @@ class TeacherPortalController extends Controller
             ->where(function (Builder $query) use ($classId) {
                 $query->where('kelas_id', $classId)->orWhere('class_id', $classId);
             })
-            ->firstOrFail();
-        abort_unless($schedule->kelas_id, 403, 'Portal guru membutuhkan rombel primer yang terhubung.');
+            ->first();
 
         $teacher = $this->getTeacherContext($request);
         $employee = Employee::query()->where('user_id', $request->user()?->id)->first();
         abort_unless($teacher || $employee || $this->isSuperAdmin($request), 403, 'Akun belum terhubung dengan data guru.');
+
+        if (! $schedule) {
+            $kelas = Kelas::find($classId);
+            $subject = Subject::find($subjectId);
+            if ($kelas && $subject) {
+                $activeYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::first();
+                $activeSemester = Semester::where('is_active', true)->first() ?? Semester::first();
+                $schedule = ClassSchedule::firstOrCreate(
+                    [
+                        'kelas_id' => $kelas->id,
+                        'subject_id' => $subject->id,
+                        'employee_id' => $employee?->id,
+                    ],
+                    [
+                        'class_id' => $kelas->id,
+                        'academic_year_id' => $activeYear?->id,
+                        'semester_id' => $activeSemester?->id,
+                        'teacher_id' => $teacher?->id,
+                        'day_of_week' => 1,
+                        'time_start' => '07:30',
+                        'time_end' => '09:00',
+                    ]
+                );
+            }
+        }
+
+        abort_unless($schedule, 404, 'Jadwal mengajar guru tidak ditemukan untuk kelas dan mapel ini.');
+        abort_unless($schedule->kelas_id, 403, 'Portal guru membutuhkan rombel primer yang terhubung.');
 
         return [$schedule, $teacher, $employee];
     }
@@ -1382,7 +1441,7 @@ class TeacherPortalController extends Controller
     {
         $validated = $request->validate([
             'student_id' => 'required|uuid',
-            'class_id' => 'required|uuid',
+            'class_id' => 'nullable|uuid',
             'type' => 'required|string|in:Ziyadah,Murajaah,Tasmi,Ujian',
             'juz' => 'required|integer|min:1|max:30',
             'surah_number' => 'required|integer|exists:quran_surahs,nomor',
@@ -1395,12 +1454,11 @@ class TeacherPortalController extends Controller
         ]);
 
         $teacher = $this->getTeacherContext($request);
+        $employee = Employee::query()->where('user_id', $request->user()->id)->first();
         $student = $this->accessScope->accessibleStudents($request->user())
-            ->where(fn (Builder $query) => $query
-                ->where('kelas_id', $validated['class_id'])
-                ->orWhere('class_id', $validated['class_id']))
             ->findOrFail($validated['student_id']);
-        abort_unless($teacher && $this->isAssignedToStudent($request, $student), 403, 'Siswa berada di luar assignment pembimbing.');
+        $targetClassId = $student->kelas_id ?? $student->class_id ?? ($validated['class_id'] ?? null);
+        abort_unless(($teacher || $employee) && $this->isAssignedToStudent($request, $student), 403, 'Siswa berada di luar assignment pembimbing.');
         $surah = QuranSurah::query()->where('nomor', $validated['surah_number'])->firstOrFail();
 
         if ($validated['ayat_end'] > $surah->jumlah_ayat) {
@@ -1413,8 +1471,8 @@ class TeacherPortalController extends Controller
         $log = TahfizhDailyLog::updateOrCreate(
             ['student_id' => $validated['student_id'], 'record_date' => now()->toDateString()],
             [
-                'class_id' => $validated['class_id'],
-                'teacher_id' => $teacher?->id,
+                'class_id' => $targetClassId,
+                'teacher_id' => $teacher?->id ?? $employee?->id,
                 'day_name' => now()->locale('id')->isoFormat('dddd'),
                 'hafalan_surah_number' => $surah->nomor,
                 'hafalan_surah_name' => $surah->nama_latin,
@@ -1732,28 +1790,62 @@ class TeacherPortalController extends Controller
     private function isAssignedToStudent(Request $request, Student $student): bool
     {
         $user = $request->user();
+        if ($user && $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'Admin', 'admin',
+            'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah',
+            'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan',
+            'Guru BK', 'guru_bk', 'Pengurus Yayasan',
+            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'guru_pengajar'
+        ])) {
+            return true;
+        }
+
         $teacher = $this->getTeacherContext($request);
         $employee = Employee::query()->where('user_id', $user->id)->first();
 
         $kelasId = $student->kelas_id ?? $student->class_id;
-        if (! $kelasId) {
-            return false;
+        if ($kelasId) {
+            $isHomeroom = Kelas::query()
+                ->whereKey($kelasId)
+                ->where(fn ($q) => $q->where('wali_kelas_id', $teacher?->id)->orWhere('wali_kelas_id', $employee?->id))
+                ->exists();
+
+            if ($isHomeroom) {
+                return true;
+            }
+
+            $isScheduleTeacher = ClassSchedule::query()
+                ->where(fn ($q) => $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId))
+                ->where('is_active', true)
+                ->where(fn ($q) => $q->where('teacher_id', $teacher?->id)
+                    ->orWhere('employee_id', $employee?->id)
+                    ->orWhere('teacher_id', $employee?->id)
+                    ->orWhere('employee_id', $teacher?->id)
+                )
+                ->exists();
+
+            if ($isScheduleTeacher) {
+                return true;
+            }
         }
 
-        $isHomeroom = Kelas::query()
-            ->whereKey($kelasId)
-            ->where(fn ($q) => $q->where('wali_kelas_id', $teacher?->id)->orWhere('wali_kelas_id', $employee?->id))
-            ->exists();
-
-        if ($isHomeroom) {
+        // Check if teacher/employee shares education unit with student
+        $teacherUnitId = $employee?->unit_id ?? $teacher?->employee?->unit_id;
+        $studentUnitId = $student->unit_id ?? $student->kelas?->unit_pendidikan_id;
+        if ($teacherUnitId && (string) $studentUnitId === (string) $teacherUnitId) {
             return true;
         }
 
-        return ClassSchedule::query()
-            ->where(fn ($q) => $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId))
-            ->where('is_active', true)
-            ->where(fn ($q) => $q->where('teacher_id', $teacher?->id)->orWhere('employee_id', $employee?->id))
+        // Check if any prior message exists between this teacher and student
+        $hasExistingChat = PortalMessage::query()
+            ->where('student_id', $student->id)
+            ->where(fn ($q) => $q->where('sender_user_id', $user->id)->orWhere('recipient_user_id', $user->id))
             ->exists();
+        if ($hasExistingChat) {
+            return true;
+        }
+
+        return false;
     }
 
     public function chatConversations(Request $request): JsonResponse
@@ -1775,11 +1867,18 @@ class TeacherPortalController extends Controller
             ->unique()
             ->toArray();
 
-        $messages = PortalMessage::query()
-            ->with(['student.kelas', 'student.educationUnit', 'sender:id,name,email', 'recipient:id,name,email'])
-            ->where(fn ($q) => $q->where('sender_user_id', $user->id)->orWhere('recipient_user_id', $user->id))
-            ->orderBy('created_at', 'desc')
-            ->get();
+        $isElevated = $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'Pengurus Yayasan']);
+
+        $messagesQuery = PortalMessage::query()
+            ->with(['student.kelas.unitPendidikan', 'student.educationUnit', 'sender:id,name,email', 'recipient:id,name,email'])
+            ->whereNotNull('student_id')
+            ->orderBy('created_at', 'desc');
+
+        if (! $isElevated) {
+            $messagesQuery->where(fn ($q) => $q->where('sender_user_id', $user->id)->orWhere('recipient_user_id', $user->id));
+        }
+
+        $messages = $messagesQuery->get();
 
         $grouped = [];
 
@@ -1803,6 +1902,15 @@ class TeacherPortalController extends Controller
                     ->whereNull('read_at')
                     ->count();
 
+                $unitName = $student->educationUnit?->name
+                    ?? $student->kelas?->unitPendidikan?->name
+                    ?? $student->kelas?->unit_pendidikan?->name
+                    ?? $student->unit_name
+                    ?? '-';
+                $unitId = $student->unit_id
+                    ?? $student->kelas?->unit_pendidikan_id
+                    ?? $student->kelas?->unit_id;
+
                 $grouped[$key] = [
                     'id' => $key,
                     'student_id' => $student->id,
@@ -1810,7 +1918,8 @@ class TeacherPortalController extends Controller
                     'parent_user_id' => $otherUserId,
                     'parent_name' => $otherUser?->name ?? 'Orang Tua/Wali',
                     'class_name' => $student->kelas?->nama_kelas ?? '-',
-                    'unit_name' => $student->educationUnit?->name ?? '-',
+                    'unit_name' => $unitName,
+                    'unit_id' => $unitId,
                     'teacher_type' => $isHomeroom ? 'wali_kelas' : 'guru_mapel',
                     'role_label' => $isHomeroom ? 'Wali Kelas' : 'Guru Mapel',
                     'last_message' => $msg->message,
@@ -1820,9 +1929,85 @@ class TeacherPortalController extends Controller
             }
         }
 
+        // Also populate all students under teacher's classes/homeroom so teacher can initiate conversations
+        $relevantKelasIds = array_unique(array_filter(array_merge($homeroomKelasIds, $teachingKelasIds)));
+        $teacherUnitId = $employee?->unit_id ?? $teacher?->employee?->unit_id;
+
+        $studentsQuery = Student::query()
+            ->with(['parent.user', 'parents.user', 'kelas.unitPendidikan', 'educationUnit'])
+            ->where('is_active', true);
+
+        if (! empty($relevantKelasIds)) {
+            $studentsQuery->where(fn ($q) => $q->whereIn('kelas_id', $relevantKelasIds)->orWhereIn('class_id', $relevantKelasIds));
+        } elseif ($teacherUnitId) {
+            $studentsQuery->where(function ($q) use ($teacherUnitId) {
+                $q->where('unit_id', $teacherUnitId)
+                  ->orWhereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $teacherUnitId));
+            });
+        }
+
+        $assignedStudents = $studentsQuery->limit(80)->get();
+
+        foreach ($assignedStudents as $student) {
+            $parent = $student->parent;
+            $parentUser = $parent?->user ?? $student->parents?->first()?->user;
+
+            if (! $parentUser && $parent?->email) {
+                $parentUser = User::query()->where('email', $parent->email)->first();
+            }
+
+            if (! $parentUser) {
+                continue;
+            }
+
+            $key = $student->id.'_'.$parentUser->id;
+
+            if (! isset($grouped[$key])) {
+                $isHomeroom = in_array($student->kelas_id, $homeroomKelasIds, true);
+                $assignedUnitName = $student->educationUnit?->name
+                    ?? $student->kelas?->unitPendidikan?->name
+                    ?? $student->kelas?->unit_pendidikan?->name
+                    ?? $student->unit_name
+                    ?? '-';
+                $assignedUnitId = $student->unit_id
+                    ?? $student->kelas?->unit_pendidikan_id
+                    ?? $student->kelas?->unit_id;
+
+                $grouped[$key] = [
+                    'id' => $key,
+                    'student_id' => $student->id,
+                    'student_name' => $student->full_name,
+                    'parent_user_id' => $parentUser->id,
+                    'parent_name' => $parent?->full_name ?? $parentUser->name ?? 'Orang Tua/Wali',
+                    'class_name' => $student->kelas?->nama_kelas ?? '-',
+                    'unit_name' => $assignedUnitName,
+                    'unit_id' => $assignedUnitId,
+                    'teacher_type' => $isHomeroom ? 'wali_kelas' : 'guru_mapel',
+                    'role_label' => $isHomeroom ? 'Wali Kelas' : 'Guru Mapel',
+                    'last_message' => null,
+                    'last_message_at' => null,
+                    'unread_count' => 0,
+                ];
+            }
+        }
+
+        $list = array_values($grouped);
+        usort($list, function ($a, $b) {
+            if ($a['last_message_at'] && $b['last_message_at']) {
+                return strcmp($b['last_message_at'], $a['last_message_at']);
+            }
+            if ($a['last_message_at']) {
+                return -1;
+            }
+            if ($b['last_message_at']) {
+                return 1;
+            }
+            return strcmp($a['student_name'], $b['student_name']);
+        });
+
         return response()->json([
             'success' => true,
-            'data' => array_values($grouped),
+            'data' => $list,
         ]);
     }
 
@@ -1830,7 +2015,7 @@ class TeacherPortalController extends Controller
     {
         $user = $request->user();
 
-        $student = Student::query()->with('kelas')->find($studentId);
+        $student = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->find($studentId);
         if (! $student) {
             return response()->json(['success' => false, 'message' => 'Siswa tidak ditemukan.'], 404);
         }
@@ -1846,15 +2031,31 @@ class TeacherPortalController extends Controller
             ->whereNull('read_at')
             ->update(['read_at' => now()]);
 
-        $messages = PortalMessage::query()
-            ->with(['sender:id,name', 'recipient:id,name'])
-            ->where('student_id', $studentId)
-            ->where(function ($q) use ($user, $parentUserId) {
+        $isElevated = $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'Admin', 'admin',
+            'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'Pengurus Yayasan',
+            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'Guru Tahfizh', 'Musyrif'
+        ]);
+
+        $messagesQuery = PortalMessage::query()
+            ->with(['sender:id,name', 'recipient:id,name', 'attachments'])
+            ->where('student_id', $studentId);
+
+        if ($isElevated) {
+            $messagesQuery->where(function ($q) use ($parentUserId, $user) {
+                $q->where('sender_user_id', $parentUserId)
+                    ->orWhere('recipient_user_id', $parentUserId)
+                    ->orWhere('sender_user_id', $user->id)
+                    ->orWhere('recipient_user_id', $user->id);
+            });
+        } else {
+            $messagesQuery->where(function ($q) use ($user, $parentUserId) {
                 $q->where(fn ($q2) => $q2->where('sender_user_id', $user->id)->where('recipient_user_id', $parentUserId))
                     ->orWhere(fn ($q2) => $q2->where('sender_user_id', $parentUserId)->where('recipient_user_id', $user->id));
-            })
-            ->orderBy('created_at', 'asc')
-            ->get();
+            });
+        }
+
+        $messages = $messagesQuery->orderBy('created_at', 'asc')->get();
 
         return response()->json([
             'success' => true,
@@ -1865,7 +2066,8 @@ class TeacherPortalController extends Controller
     public function sendChatMessage(Request $request, string $parentUserId, string $studentId): JsonResponse
     {
         $request->validate([
-            'message' => 'required|string|max:5000',
+            'message' => 'required_without:attachment|nullable|string|max:5000',
+            'attachment' => 'nullable|file|max:10240',
         ]);
 
         $user = $request->user();
@@ -1884,8 +2086,21 @@ class TeacherPortalController extends Controller
             'student_id' => $studentId,
             'sender_user_id' => $user->id,
             'recipient_user_id' => $parentUserId,
-            'message' => trim($request->input('message')),
+            'message' => trim((string) ($request->input('message') ?? '')),
         ]);
+
+        if ($request->hasFile('attachment')) {
+            $file = $request->file('attachment');
+            $path = $file->store('chat/attachments', 'public');
+            \App\Models\PortalMessageAttachment::create([
+                'message_id' => $message->id,
+                'disk' => 'public',
+                'path' => $path,
+                'original_name' => $file->getClientOriginalName(),
+                'mime_type' => $file->getClientMimeType() ?: $file->getMimeType() ?: 'application/octet-stream',
+                'file_size' => $file->getSize(),
+            ]);
+        }
 
         try {
             Notification::deliver(
@@ -1923,7 +2138,7 @@ class TeacherPortalController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Pesan berhasil dikirim.',
-            'data' => $message->load(['sender:id,name', 'recipient:id,name']),
+            'data' => $message->load(['sender:id,name', 'recipient:id,name', 'attachments']),
         ]);
     }
 }

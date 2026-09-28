@@ -301,7 +301,7 @@ class PrayerAssessmentController extends Controller
         $parent = ParentModel::where('user_id', $user->id)->first();
         if ($parent) {
             $isChild = $parent->students()->where('students.id', $studentId)->exists();
-            if (! $isChild && ! $user->hasRole(['Super Admin', 'Admin', 'Kepala Sekolah', 'Tata Usaha'])) {
+            if (! $isChild && ! $user->can('student.view_all') && ! $user->can('prayer_assessment.view')) {
                 return response()->json(['success' => false, 'message' => 'Akses ditolak. Ananda bukan tanggungan Anda.'], 403);
             }
         }

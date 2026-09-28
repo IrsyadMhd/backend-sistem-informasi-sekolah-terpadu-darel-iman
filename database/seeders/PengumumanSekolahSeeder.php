@@ -24,7 +24,7 @@ class PengumumanSekolahSeeder extends Seeder
         }
 
         // 1. Dapatkan user penerbit (Superadmin / Admin / User pertama)
-        $penerbit = User::where('email', 'superadmin@simsit.sch.id')->first()
+        $penerbit = User::where('email', 'superadmin@dareliman.sch.id')->first()
             ?? User::where('is_active', true)->first()
             ?? User::first();
 

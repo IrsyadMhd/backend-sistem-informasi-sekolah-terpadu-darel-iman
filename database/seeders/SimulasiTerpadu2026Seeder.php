@@ -175,7 +175,10 @@ class SimulasiTerpadu2026Seeder extends Seeder
         foreach ($waliData as $idx => $wd) {
             $cleanName = $wd['nama'];
             $this->usedNames[$cleanName] = true;
-            $unitTarget = $units[$wd['unit']] ?? $units->first();
+            $unitTarget = $units[$wd['unit']] ?? null;
+            if (!$unitTarget) {
+                continue;
+            }
             $email = 'wali' . ($idx + 1) . '@dareliman.sch.id';
 
             $user = User::firstOrCreate(
@@ -187,6 +190,10 @@ class SimulasiTerpadu2026Seeder extends Seeder
                     'updated_at' => now(),
                 ]
             );
+
+            // DEF-ORPHAN-001 FIX: Assign canonical role to user
+            $targetRole = str_contains($wd['role'], 'Musyrif') ? 'Musyrif' : 'Wali Kelas';
+            $user->syncRoles([$targetRole]);
 
             $emp = Employee::firstOrCreate(
                 ['nama_lengkap' => $cleanName],
@@ -300,8 +307,14 @@ class SimulasiTerpadu2026Seeder extends Seeder
 
         $kelasCollection = [];
         foreach ($classDefinitions as $cd) {
-            $unitTarget = $units[$cd['unit']] ?? $units->first();
-            $waliEmp = $waliKelasList[$cd['wali_idx']];
+            $unitTarget = $units[$cd['unit']] ?? null;
+            if (!$unitTarget) {
+                continue;
+            }
+            $waliEmp = $waliKelasList[$cd['wali_idx']] ?? null;
+            if (!$waliEmp) {
+                continue;
+            }
 
             // 1 baris di tbl_kelas
             $kelas = Kelas::firstOrCreate(
@@ -835,8 +848,10 @@ class SimulasiTerpadu2026Seeder extends Seeder
             // CBT Ujian
             $kisi = \App\Models\LmsKisiKisi::first();
             if (!$kisi) {
+                $kurikulumId = DB::table('master_kurikulum')->value('id');
                 $kisi = \App\Models\LmsKisiKisi::create([
                     'id' => (string) Str::uuid(),
+                    'kurikulum_id' => $kurikulumId,
                     'mata_pelajaran_id' => $sampleSubj->id,
                     'kelas_id' => $sampleKelas->id,
                     'semester_id' => $semesterGanjil->id,
@@ -846,7 +861,7 @@ class SimulasiTerpadu2026Seeder extends Seeder
                     'jenis_ujian' => 'PTS',
                     'jumlah_soal' => 25,
                     'alokasi_waktu_menit' => 60,
-                    'status' => 'final',
+                    'status' => true,
                 ]);
             }
 

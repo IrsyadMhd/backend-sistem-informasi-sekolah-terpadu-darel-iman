@@ -410,6 +410,7 @@ class FoundationDashboardController extends Controller
         }
 
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
+            $this->assertResourceUnitAccess($request->query('unit_id'));
             $query->where('unit_pendidikan_id', $request->query('unit_id'));
         }
 
@@ -468,6 +469,7 @@ class FoundationDashboardController extends Controller
         }
 
         if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
+            $this->assertResourceUnitAccess($request->query('unit_id'));
             $query->where('unit_pendidikan_id', $request->query('unit_id'));
         }
 
@@ -517,11 +519,37 @@ class FoundationDashboardController extends Controller
     }
 
     /**
+    /**
+     * Assert that the authenticated user has authorization to view a resource
+     * in the given education unit.
+     */
+    protected function assertResourceUnitAccess(?string $unitId): void
+    {
+        $user = request()->user();
+        if (! $user || $this->accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        if (! $unitId) {
+            abort(403, 'Akses ditolak: Unit data tidak valid.');
+        }
+
+        $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+        abort_unless(
+            $accessibleUnitIds->contains($unitId),
+            403,
+            'Akses ditolak: Data berada di luar cakupan unit pendidikan Anda.'
+        );
+    }
+
+    /**
      * Employee detail.
      */
     public function employeeDetail(string $id): JsonResponse
     {
         $employee = Employee::with(['unit', 'position', 'division'])->findOrFail($id);
+        $this->assertResourceUnitAccess($employee->unit_id);
+
         return response()->json(['status' => 'success', 'data' => $employee]);
     }
 
@@ -531,6 +559,7 @@ class FoundationDashboardController extends Controller
     public function teacherDetail(string $id): JsonResponse
     {
         $teacher = Teacher::with(['employee.unit', 'employee.position'])->findOrFail($id);
+        $this->assertResourceUnitAccess($teacher->employee?->unit_id ?? $teacher->education_unit_id);
 
         return response()->json(['status' => 'success', 'data' => $this->serializeTeacher($teacher)]);
     }
@@ -541,6 +570,8 @@ class FoundationDashboardController extends Controller
     public function studentDetail(string $id): JsonResponse
     {
         $student = Student::with(['educationUnit', 'kelas.waliKelas', 'parent'])->findOrFail($id);
+        $this->assertResourceUnitAccess($student->unit_id ?? $student->education_unit_id);
+
         return response()->json(['status' => 'success', 'data' => $student]);
     }
 
@@ -559,6 +590,14 @@ class FoundationDashboardController extends Controller
             ->concat($parent->studentsPivot)
             ->unique('id')
             ->values();
+
+        $user = request()->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $hasCommonUnit = $children->some(fn ($c) => $accessibleUnitIds->contains($c->unit_id ?? $c->education_unit_id));
+            abort_unless($hasCommonUnit, 403, 'Akses ditolak: Data wali murid berada di luar cakupan unit Anda.');
+        }
+
         $parent->setRelation('students', $children);
         $parent->unsetRelation('studentsPivot');
 
@@ -571,6 +610,8 @@ class FoundationDashboardController extends Controller
     public function alumniDetail(string $id): JsonResponse
     {
         $alumni = Student::with(['educationUnit', 'kelas'])->findOrFail($id);
+        $this->assertResourceUnitAccess($alumni->unit_id ?? $alumni->education_unit_id);
+
         return response()->json(['status' => 'success', 'data' => $alumni]);
     }
 
@@ -580,7 +621,9 @@ class FoundationDashboardController extends Controller
     public function classDetail(string $id): JsonResponse
     {
         $class = Kelas::with(['waliKelas', 'unitPendidikan', 'siswa', 'siswaLegacy'])->findOrFail($id);
+        $this->assertResourceUnitAccess($class->unit_pendidikan_id);
         $class = $this->serializeKelas($class);
+
         return response()->json(['status' => 'success', 'data' => $class]);
     }
 
@@ -590,7 +633,9 @@ class FoundationDashboardController extends Controller
     public function rombelDetail(string $id): JsonResponse
     {
         $rombel = Kelas::with(['waliKelas', 'unitPendidikan', 'siswa', 'siswaLegacy'])->findOrFail($id);
+        $this->assertResourceUnitAccess($rombel->unit_pendidikan_id);
         $rombel = $this->serializeKelas($rombel);
+
         return response()->json(['status' => 'success', 'data' => $rombel]);
     }
 

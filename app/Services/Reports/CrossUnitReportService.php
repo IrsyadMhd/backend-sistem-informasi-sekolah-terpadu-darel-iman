@@ -31,13 +31,19 @@ class CrossUnitReportService
         $like = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
         $currentYearNum = (int) date('Y');
 
+        $isPgsql = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql';
+        $newStudentClause = $isPgsql ? "metadata->>'is_new_student'" : "metadata->>'$.is_new_student'";
+        $mutasiClause = $isPgsql ? "metadata->>'mutasi_type'" : "metadata->>'$.mutasi_type'";
+        $statusSiswaClause = $isPgsql ? "metadata->>'status_siswa'" : "metadata->>'$.status_siswa'";
+        $isAlumniClause = $isPgsql ? "metadata->>'is_alumni'" : "metadata->>'$.is_alumni'";
+
         $sdmStatsByUnit = Employee::query()
             ->selectRaw('
                 unit_id,
                 COUNT(*) as total_sdm,
                 SUM(CASE WHEN (SELECT 1 FROM teachers WHERE teachers.employee_id = employees.id LIMIT 1) IS NOT NULL
                           OR (SELECT 1 FROM employee_teachings WHERE employee_teachings.employee_id = employees.id LIMIT 1) IS NOT NULL
-                          OR (SELECT 1 FROM positions WHERE positions.id = employees.jabatan_id AND (positions.name ' . $like . ' "%Guru%" OR positions.name ' . $like . ' "%Pendidik%" OR positions.level_jabatan IN (8, 9)) LIMIT 1) IS NOT NULL
+                          OR (SELECT 1 FROM positions WHERE positions.id = employees.jabatan_id AND (positions.name ' . $like . ' \'%Guru%\' OR positions.name ' . $like . ' \'%Pendidik%\' OR positions.level_jabatan IN (8, 9)) LIMIT 1) IS NOT NULL
                     THEN 1 ELSE 0 END) as guru_count
             ')
             ->groupBy('unit_id')
@@ -45,15 +51,15 @@ class CrossUnitReportService
             ->keyBy('unit_id');
 
         $studentStatsByUnit = Student::query()
-            ->selectRaw('
+            ->selectRaw("
                 unit_id,
-                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as siswa_aktif,
-                SUM(CASE WHEN is_active = 1 AND (tahun_masuk = ? OR metadata->>\'$.is_new_student\' = "true") THEN 1 ELSE 0 END) as siswa_baru,
-                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "masuk" THEN 1 ELSE 0 END) as mutasi_masuk,
-                SUM(CASE WHEN metadata->>\'$.mutasi_type\' = "keluar" THEN 1 ELSE 0 END) as mutasi_keluar,
-                SUM(CASE WHEN is_active = 0 AND metadata->>\'$.status_siswa\' = "lulus" THEN 1 ELSE 0 END) as lulus,
-                SUM(CASE WHEN is_active = 0 OR metadata->>\'$.is_alumni\' = "true" THEN 1 ELSE 0 END) as alumni
-            ', [$currentYearNum])
+                SUM(CASE WHEN (is_active = true OR is_active IS TRUE) THEN 1 ELSE 0 END) as siswa_aktif,
+                SUM(CASE WHEN (is_active = true OR is_active IS TRUE) AND (tahun_masuk = ? OR {$newStudentClause} = 'true') THEN 1 ELSE 0 END) as siswa_baru,
+                SUM(CASE WHEN {$mutasiClause} = 'masuk' THEN 1 ELSE 0 END) as mutasi_masuk,
+                SUM(CASE WHEN {$mutasiClause} = 'keluar' THEN 1 ELSE 0 END) as mutasi_keluar,
+                SUM(CASE WHEN (is_active = false OR is_active IS FALSE) AND {$statusSiswaClause} = 'lulus' THEN 1 ELSE 0 END) as lulus,
+                SUM(CASE WHEN (is_active = false OR is_active IS FALSE) OR {$isAlumniClause} = 'true' THEN 1 ELSE 0 END) as alumni
+            ", [$currentYearNum])
             ->groupBy('unit_id')
             ->get()
             ->keyBy('unit_id');

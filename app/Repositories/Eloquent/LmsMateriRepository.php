@@ -34,7 +34,23 @@ class LmsMateriRepository implements LmsMateriRepositoryInterface
         }
 
         if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
+            $statusVal = strtolower((string) $filters['status']);
+            if (in_array($statusVal, ['aktif', 'published', 'publish'], true)) {
+                $query->where(function ($q) {
+                    $q->where('is_published', true)
+                      ->orWhere('status', 'aktif')
+                      ->orWhere('status', 'published');
+                });
+            } elseif ($statusVal === 'draft') {
+                $query->where(function ($q) {
+                    $q->where('is_published', false)
+                      ->orWhere('status', 'draft');
+                });
+            } elseif ($statusVal === 'nonaktif') {
+                $query->where('status', 'nonaktif');
+            } else {
+                $query->where('status', $filters['status']);
+            }
         }
 
         if (! empty($filters['search'])) {
@@ -107,7 +123,11 @@ class LmsMateriRepository implements LmsMateriRepositoryInterface
     {
         return [
             'total_materi' => LmsMateri::count(),
-            'materi_aktif' => LmsMateri::where('status', 'aktif')->orWhere('is_published', true)->count(),
+            'materi_aktif' => LmsMateri::where(function ($q) {
+                $q->where('is_published', true)
+                  ->orWhere('status', 'aktif')
+                  ->orWhere('status', 'published');
+            })->count(),
             'materi_dokumen' => LmsMateri::whereIn('tipe', ['dokumen', 'pdf', 'file'])->orWhereIn('tipe_materi', ['dokumen', 'pdf'])->count(),
             'materi_video' => LmsMateri::whereIn('tipe', ['video'])->orWhereIn('tipe_materi', ['video'])->count(),
             'materi_link' => LmsMateri::whereIn('tipe', ['link', 'url'])->orWhereIn('tipe_materi', ['link'])->count(),

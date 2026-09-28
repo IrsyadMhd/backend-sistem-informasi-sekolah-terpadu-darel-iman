@@ -188,8 +188,9 @@ class LmsReferensiController extends Controller
     {
         abort_unless(
             $this->canAccessAllUnits($user)
-            || $user->hasAnyPermission(['pembelajaran.kurikulum.view', 'pembelajaran.materi', 'teacher.material.view'])
+            || $user->hasAnyPermission(['academic.view', 'academic.view_any', 'pembelajaran.kurikulum.view', 'pembelajaran.materi', 'teacher.material.view'])
             || $this->isTeacher($user)
+            || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan', 'Wakil Kesiswaan', 'wakil_kesiswaan', 'Tata Usaha', 'tata_usaha'])
             || $user->hasAnyRole(['Siswa', 'siswa', 'student', 'Orang Tua', 'orang_tua', 'parent']),
             403
         );
@@ -225,7 +226,7 @@ class LmsReferensiController extends Controller
 
     private function isTeacher(User $user): bool
     {
-        if ($this->canAccessAllUnits($user) || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Tata Usaha', 'tata_usaha'])) {
+        if ($this->canAccessAllUnits($user) || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan', 'Wakil Kesiswaan', 'wakil_kesiswaan', 'Tata Usaha', 'tata_usaha'])) {
             return false;
         }
 

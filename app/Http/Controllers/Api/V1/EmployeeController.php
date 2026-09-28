@@ -2,13 +2,18 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\EmployeeExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreEmployeeRequest;
 use App\Http\Requests\UpdateEmployeeRequest;
+use App\Models\EducationUnit;
 use App\Models\Employee;
+use App\Models\Position;
 use App\Services\AccessScopeService;
 use App\Services\EmployeeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Maatwebsite\Excel\Facades\Excel;
 
 class EmployeeController extends Controller
 {
@@ -29,15 +34,19 @@ class EmployeeController extends Controller
 
         $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
 
-        if (empty($filters['unit_id']) && ! $isGlobalUser && $userUnitId) {
-            $filters['unit_id'] = $userUnitId;
+        if (! $isGlobalUser) {
+            if (! empty($filters['unit_id'])) {
+                $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
+            } elseif ($userUnitId) {
+                $filters['unit_id'] = $userUnitId;
+            } else {
+                $filters['allowed_unit_ids'] = $this->accessScopeService->accessibleEducationUnits($request->user())->pluck('id')->all();
+            }
         }
 
         $filters['allowed_unit_ids'] = $this->accessScopeService
-            ->accessibleEmployees($request->user())
-            ->select('unit_id')
-            ->distinct()
-            ->pluck('unit_id')
+            ->accessibleEducationUnits($request->user())
+            ->pluck('id')
             ->all();
 
         $stats = $this->employeeService->getDashboardStats($filters);
@@ -56,16 +65,16 @@ class EmployeeController extends Controller
 
         $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
 
-        if (empty($filters['unit_id']) && ! $isGlobalUser && $userUnitId) {
-            $filters['unit_id'] = $userUnitId;
+        if (! $isGlobalUser) {
+            if (! empty($filters['unit_id'])) {
+                $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
+            } elseif ($userUnitId) {
+                $filters['unit_id'] = $userUnitId;
+            } else {
+                $filters['allowed_unit_ids'] = $this->accessScopeService->accessibleEducationUnits($request->user())->pluck('id')->all();
+            }
         }
 
-        $filters['allowed_unit_ids'] = $this->accessScopeService
-            ->accessibleEmployees($request->user())
-            ->select('unit_id')
-            ->distinct()
-            ->pluck('unit_id')
-            ->all();
         $perPage = (int) $request->get('per_page', 15);
 
         $result = $this->employeeService->list($filters, $perPage);
@@ -75,6 +84,13 @@ class EmployeeController extends Controller
 
     public function show(Request $request, string $id)
     {
+        if (! Str::isUuid($id)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data pegawai tidak ditemukan',
+            ], 404);
+        }
+
         $employee = $this->accessScopeService
             ->accessibleEmployees($request->user())
             ->whereKey($id)
@@ -190,6 +206,10 @@ class EmployeeController extends Controller
     public function export(Request $request)
     {
         $filters = $request->only(['search', 'unit_id', 'jabatan_id', 'status_pegawai', 'status', 'jenis_kelamin']);
+        $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
+        if (! $isGlobalUser && ! empty($filters['unit_id'])) {
+            $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
+        }
         $employees = $this->accessScopeService
             ->accessibleEmployees($request->user())
             ->with(['unit', 'position'])
@@ -208,6 +228,17 @@ class EmployeeController extends Controller
             ->when(! empty($filters['status']), fn ($q) => $q->where('status', $filters['status']))
             ->orderBy('nama_lengkap', 'asc')
             ->get();
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $filename = 'data_pegawai_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new EmployeeExport($employees), $filename, $excelFormat);
+        }
 
         $rows = $employees->map(function ($emp, $idx) {
             return [
@@ -238,17 +269,211 @@ class EmployeeController extends Controller
         $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
 
         $rows = $request->input('data', []);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'xlsx');
+            $tmpDir = storage_path('app/imports');
+            if (! is_dir($tmpDir)) {
+                @mkdir($tmpDir, 0755, true);
+            }
+            $tmpName = 'import_emp_' . uniqid() . '.' . $ext;
+            $file->move($tmpDir, $tmpName);
+            $tmpPath = $tmpDir . '/' . $tmpName;
+
+            try {
+                if (in_array($ext, ['csv', 'txt'])) {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Csv();
+                } elseif ($ext === 'xls') {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+                } else {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+                }
+                $spreadsheet = $reader->load($tmpPath);
+                $sheetData = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+                if (count($sheetData) > 1) {
+                    $headers = array_map(function ($h) {
+                        $norm = strtolower(trim((string)$h));
+                        return str_replace([' ', '_', '-', '.', ':', '/'], '', $norm);
+                    }, $sheetData[0]);
+
+                    $rows = [];
+                    for ($i = 1; $i < count($sheetData); $i++) {
+                        $rawRow = $sheetData[$i];
+                        if (empty(array_filter($rawRow, fn($v) => $v !== null && $v !== ''))) {
+                            continue;
+                        }
+                        $item = [];
+                        foreach ($headers as $idx => $normHeader) {
+                            $val = isset($rawRow[$idx]) ? trim((string)$rawRow[$idx]) : '';
+                            if (in_array($normHeader, ['niy', 'nomorindukyayasan', 'nip', 'noinduk', 'idpegawai', 'nopegawai', 'nomorinduk', 'nomor', 'nikpegawai', 'kodepegawai'])) {
+                                $item['niy'] = $val;
+                            } elseif (in_array($normHeader, ['nik', 'nomorindukkependudukan', 'ktp', 'noktp', 'nomorktp'])) {
+                                $item['nik'] = $val;
+                            } elseif (in_array($normHeader, ['namalengkap', 'nama', 'fullname', 'name', 'namapegawai', 'namaguru', 'namakaryawan', 'namapendidik', 'pegawai', 'guru', 'namatenagapendidik', 'namastaf', 'namanama'])) {
+                                $item['nama_lengkap'] = $val;
+                            } elseif (in_array($normHeader, ['jeniskelamin', 'jk', 'gender', 'kelamin', 'sex'])) {
+                                $item['jenis_kelamin'] = $val;
+                            } elseif (in_array($normHeader, ['gelardepan', 'gelarawal', 'titlefront', 'prefix'])) {
+                                $item['gelar_depan'] = $val;
+                            } elseif (in_array($normHeader, ['gelarbelakang', 'gelarakhir', 'titleback', 'suffix'])) {
+                                $item['gelar_belakang'] = $val;
+                            } elseif (in_array($normHeader, ['jabatan', 'jabatanid', 'position', 'posisi', 'namajabatan', 'tugas', 'role', 'pekerjaan'])) {
+                                $item['jabatan'] = $val;
+                            } elseif (in_array($normHeader, ['unitkerja', 'unit', 'unitid', 'educationunit', 'namasatuan', 'unitpendidikan', 'satuanpendidikan', 'sekolah', 'cabang', 'jenjang'])) {
+                                $item['unit'] = $val;
+                            } elseif (in_array($normHeader, ['statuspegawai', 'employmentstatus', 'statuskepegawaian', 'jeniskepegawaian', 'tipepegawai'])) {
+                                $item['status_pegawai'] = $val;
+                            } elseif (in_array($normHeader, ['statuskeaktifan', 'status', 'isactive', 'keaktifan'])) {
+                                $item['status'] = $val;
+                            } elseif (in_array($normHeader, ['nohp', 'nomorhp', 'phone', 'telepon', 'telp', 'handphone', 'wa', 'whatsapp'])) {
+                                $item['no_hp'] = $val;
+                            } elseif (in_array($normHeader, ['email', 'surel', 'mail'])) {
+                                $item['email'] = $val;
+                            } elseif (in_array($normHeader, ['alamat', 'address', 'domisili', 'tempattinggal'])) {
+                                $item['alamat'] = $val;
+                            }
+                        }
+
+                        // Fallback jika header nama tidak terdeteksi tapi ada kolom teks nama
+                        if (empty($item['nama_lengkap'])) {
+                            foreach ($rawRow as $cIdx => $cVal) {
+                                $cValStr = trim((string)$cVal);
+                                if (!empty($cValStr) && strlen($cValStr) >= 3 && !is_numeric($cValStr) && preg_match('/[a-zA-Z]/', $cValStr)) {
+                                    $item['nama_lengkap'] = $cValStr;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!empty($item['nama_lengkap']) || !empty($item['niy'])) {
+                            $rows[] = $item;
+                        }
+                    }
+                }
+                @unlink($tmpPath);
+            } catch (\Exception $e) {
+                @unlink($tmpPath);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
+
         if (! is_array($rows) || empty($rows)) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Payload data impor pegawai tidak boleh kosong.',
+                'message' => 'Payload data impor pegawai tidak boleh kosong atau format berkas tidak sesuai.',
             ], 422);
         }
 
         $berhasil = 0;
+        $diperbarui = 0;
         $gagal = 0;
-        $duplikat = 0;
         $errors = [];
+
+        // Preload Units and Positions for fast lookup without N+1 queries
+        $allUnits = EducationUnit::query()->get(['id', 'name', 'code', 'level']);
+        $allPositions = Position::query()->get(['id', 'name', 'code']);
+
+        $emp = Employee::where('user_id', $request->user()->id)->first();
+        $fallbackUnitId = $emp?->unit_id ?? data_get($request->user()->metadata, 'education_unit_id') ?? data_get($request->user()->metadata, 'unit_id');
+
+        $resolveUnitId = function (?string $rawUnit) use ($allUnits, $fallbackUnitId): ?string {
+            if (empty($rawUnit)) {
+                return $fallbackUnitId;
+            }
+            $cleanRaw = strtolower(trim($rawUnit));
+            $strippedRaw = preg_replace('/[^a-z0-9]/', '', $cleanRaw);
+
+            // 1. Exact match by name or code
+            foreach ($allUnits as $u) {
+                if (strtolower(trim($u->name)) === $cleanRaw || strtolower(trim($u->code)) === $cleanRaw) {
+                    return $u->id;
+                }
+            }
+
+            // 2. Stripped match
+            foreach ($allUnits as $u) {
+                $strippedName = preg_replace('/[^a-z0-9]/', '', strtolower($u->name));
+                $strippedCode = preg_replace('/[^a-z0-9]/', '', strtolower($u->code));
+                if ($strippedRaw === $strippedName || $strippedRaw === $strippedCode) {
+                    return $u->id;
+                }
+            }
+
+            // 3. Keyword / Level match (e.g. "SD IT", "SDIT", "SMP IT", "SMPIT", "SMA IT", "SMAIT", "TK IT", "TKIT", "MIT")
+            $levels = [
+                'tkit' => 'TKIT', 'sdit' => 'SDIT', 'smpit' => 'SMPIT', 'smait' => 'SMAIT',
+                'mit' => 'MIT', 'taud' => 'TAUD', 'ponpes' => 'PONPES',
+                'tk' => 'TKIT', 'sd' => 'SDIT', 'smp' => 'SMPIT', 'sma' => 'SMAIT',
+            ];
+            foreach ($levels as $keyword => $targetLevel) {
+                if (str_contains($strippedRaw, $keyword)) {
+                    $matched = $allUnits->first(function ($u) use ($targetLevel, $strippedRaw) {
+                        if (str_contains($strippedRaw, '2') && (str_contains(strtolower($u->name), '2') || str_contains(strtolower($u->code), '02'))) {
+                            return true;
+                        }
+                        if (str_contains($strippedRaw, '1') && (str_contains(strtolower($u->name), '1') || str_contains(strtolower($u->code), '01'))) {
+                            return true;
+                        }
+                        return strtoupper((string)$u->level) === $targetLevel || str_contains(strtoupper($u->name), $targetLevel) || str_contains(strtoupper($u->code), $targetLevel);
+                    });
+                    if ($matched) {
+                        return $matched->id;
+                    }
+                }
+            }
+
+            // 4. Substring in name
+            foreach ($allUnits as $u) {
+                if (str_contains(strtolower($u->name), $cleanRaw) || str_contains($cleanRaw, strtolower($u->name))) {
+                    return $u->id;
+                }
+            }
+
+            return $fallbackUnitId;
+        };
+
+        $resolvePositionId = function (?string $rawJabatan) use ($allPositions): ?string {
+            if (empty($rawJabatan)) {
+                return null;
+            }
+            $cleanRaw = strtolower(trim($rawJabatan));
+            $strippedRaw = preg_replace('/[^a-z0-9]/', '', $cleanRaw);
+
+            // 1. Exact match
+            foreach ($allPositions as $p) {
+                if (strtolower(trim($p->name)) === $cleanRaw || strtolower(trim($p->code ?? '')) === $cleanRaw) {
+                    return $p->id;
+                }
+            }
+
+            // 2. Stripped match
+            foreach ($allPositions as $p) {
+                $strippedName = preg_replace('/[^a-z0-9]/', '', strtolower($p->name));
+                if ($strippedRaw === $strippedName) {
+                    return $p->id;
+                }
+            }
+
+            // 3. Keyword match
+            if (str_contains($cleanRaw, 'kepala') || str_contains($cleanRaw, 'kepsek')) {
+                $found = $allPositions->first(fn($p) => str_contains(strtolower($p->name), 'kepala'));
+                if ($found) return $found->id;
+            }
+            if (str_contains($cleanRaw, 'guru')) {
+                $found = $allPositions->first(fn($p) => str_contains(strtolower($p->name), 'guru'));
+                if ($found) return $found->id;
+            }
+            if (str_contains($cleanRaw, 'tu') || str_contains($cleanRaw, 'tata usaha') || str_contains($cleanRaw, 'admin') || str_contains($cleanRaw, 'staf')) {
+                $found = $allPositions->first(fn($p) => str_contains(strtolower($p->name), 'tata usaha') || str_contains(strtolower($p->name), 'staf'));
+                if ($found) return $found->id;
+            }
+
+            return null;
+        };
 
         foreach ($rows as $index => $row) {
             $rowNum = $index + 1;
@@ -266,41 +491,88 @@ class EmployeeController extends Controller
             $nama = preg_replace('/\s+/', ' ', $nama);
             if (! empty($niy)) {
                 $niy = preg_replace('/\s+/', ' ', $niy);
-                if (Employee::query()->where('niy', $niy)->exists()) {
-                    $duplikat++;
-                    $errors[] = "Baris {$rowNum}: NIY '{$niy}' sudah terdaftar.";
-                    continue;
-                }
             }
 
+            // Resolve unit_id and jabatan_id
+            $unitId = $row['unit_id'] ?? $resolveUnitId($row['unit'] ?? null);
+            $jabatanId = $row['jabatan_id'] ?? $resolvePositionId($row['jabatan'] ?? null);
+
+            // Check if existing employee by NIY, NIK, or Email (for upsert)
+            $existing = null;
+            if (! empty($niy)) {
+                $existing = Employee::query()->where('niy', $niy)->first();
+            }
+            if (! $existing && ! empty($nik)) {
+                $existing = Employee::query()->where('nik', $nik)->first();
+            }
+            if (! $existing && ! empty($email)) {
+                $existing = Employee::query()->where('email', $email)->first();
+            }
+
+            $rawGender = strtoupper(trim((string)($row['jenis_kelamin'] ?? 'L')));
+            $gender = in_array($rawGender, ['P', 'PEREMPUAN', 'WANITA', 'FEMALE']) ? 'P' : 'L';
+
             try {
-                Employee::query()->create([
-                    'niy' => $niy ?: null,
-                    'nik' => $nik ?: null,
-                    'nama_lengkap' => $nama,
-                    'jenis_kelamin' => in_array(strtoupper($row['jenis_kelamin'] ?? 'L'), ['P', 'PEREMPUAN']) ? 'P' : 'L',
-                    'unit_id' => $row['unit_id'] ?? null,
-                    'jabatan_id' => $row['jabatan_id'] ?? null,
-                    'status_pegawai' => $row['status_pegawai'] ?? 'Tetap',
-                    'no_hp' => $row['no_hp'] ?? null,
-                    'email' => $email ?: null,
-                    'alamat' => $row['alamat'] ?? null,
-                    'status' => $row['status'] ?? 'Aktif',
-                ]);
-                $berhasil++;
+                if ($existing) {
+                    $updatePayload = [
+                        'nama_lengkap' => $nama,
+                    ];
+                    if (!empty($nik)) $updatePayload['nik'] = $nik;
+                    if (!empty($unitId)) $updatePayload['unit_id'] = $unitId;
+                    if (!empty($jabatanId)) $updatePayload['jabatan_id'] = $jabatanId;
+                    if (!empty($row['status_pegawai'])) $updatePayload['status_pegawai'] = $row['status_pegawai'];
+                    if (!empty($row['no_hp'])) $updatePayload['no_hp'] = $row['no_hp'];
+                    if (!empty($email)) $updatePayload['email'] = $email;
+                    if (!empty($row['alamat'])) $updatePayload['alamat'] = $row['alamat'];
+                    if (!empty($row['status'])) $updatePayload['status'] = $row['status'];
+                    if (!empty($row['jenis_kelamin'])) $updatePayload['jenis_kelamin'] = $gender;
+                    if (!empty($row['gelar_depan'])) $updatePayload['gelar_depan'] = $row['gelar_depan'];
+                    if (!empty($row['gelar_belakang'])) $updatePayload['gelar_belakang'] = $row['gelar_belakang'];
+
+                    $existing->update($updatePayload);
+                    $diperbarui++;
+                    $berhasil++;
+                } else {
+                    $niyToSave = $niy ?: ('NIY-' . date('Ym') . str_pad((string) rand(100, 999), 3, '0', STR_PAD_LEFT));
+                    Employee::query()->create([
+                        'niy' => $niyToSave,
+                        'nik' => $nik ?: null,
+                        'nama_lengkap' => $nama,
+                        'gelar_depan' => $row['gelar_depan'] ?? null,
+                        'gelar_belakang' => $row['gelar_belakang'] ?? null,
+                        'jenis_kelamin' => $gender,
+                        'unit_id' => $unitId,
+                        'jabatan_id' => $jabatanId,
+                        'status_pegawai' => $row['status_pegawai'] ?? 'Tetap',
+                        'no_hp' => $row['no_hp'] ?? null,
+                        'email' => $email ?: null,
+                        'alamat' => $row['alamat'] ?? null,
+                        'status' => $row['status'] ?? 'Aktif',
+                    ]);
+                    $berhasil++;
+                }
             } catch (\Exception $e) {
                 $gagal++;
                 $errors[] = "Baris {$rowNum}: ".$e->getMessage();
             }
         }
 
+        $summaryMsg = "Proses impor selesai. Total: " . count($rows) . ", Berhasil: {$berhasil}";
+        if ($diperbarui > 0) {
+            $summaryMsg .= " ({$diperbarui} data diperbarui)";
+        }
+        if ($gagal > 0) {
+            $summaryMsg .= ", Gagal: {$gagal}";
+        }
+
         return response()->json([
             'status' => 'success',
-            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Duplikat/Skip: {$duplikat}, Gagal: {$gagal}.",
+            'message' => $summaryMsg,
             'data' => [
                 'total' => count($rows),
                 'berhasil' => $berhasil,
-                'duplikat' => $duplikat,
+                'diperbarui' => $diperbarui,
+                'duplikat' => 0,
                 'gagal' => $gagal,
                 'errors' => $errors,
             ],
@@ -326,6 +598,10 @@ class EmployeeController extends Controller
 
     private function scopedEmployee(Request $request, string $id): Employee
     {
+        if (! Str::isUuid($id)) {
+            abort(404, 'Data pegawai tidak ditemukan');
+        }
+
         return $this->accessScopeService
             ->accessibleEmployees($request->user())
             ->whereKey($id)

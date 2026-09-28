@@ -3,40 +3,73 @@
 namespace App\Services;
 
 use App\Models\AcademicYear;
+use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Semester;
 use App\Models\StudentNote;
 use App\Models\Teacher;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
 
 class GuruBkDashboardService
 {
+    public function __construct(private readonly AccessScopeService $accessScope) {}
+
     public function getDashboardOverview($user, array $filters = []): array
     {
         $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
         $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
 
-        $teacher = Teacher::where('user_id', $user->id)->first();
-        $employee = Employee::where('user_id', $user->id)->first();
-        $teacherId = $teacher?->id;
-        $employeeId = $employee?->id;
+        $isGlobal = $this->accessScope->hasGlobalScope($user);
 
-        // Scoped Notes for Counselors (Confidentiality Protected)
-        $notesQuery = StudentNote::query()
-            ->when($teacherId || $employeeId, function ($q) use ($teacherId, $employeeId) {
-                $q->where(function ($sq) use ($teacherId, $employeeId) {
-                    if ($teacherId) {
-                        $sq->where('teacher_id', $teacherId);
-                    }
-                    if ($employeeId) {
-                        $sq->orWhere('teacher_id', $employeeId);
-                    }
+        // Enforce server-side authorization scope via AccessScopeService
+        if (! empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
+            if (! $isGlobal) {
+                $this->accessScope->assertEducationUnitAccess($user, (string) $filters['unit_id']);
+            }
+            $targetUnitIds = collect([(string) $filters['unit_id']]);
+        } else {
+            if ($isGlobal) {
+                $targetUnitIds = EducationUnit::pluck('id');
+            } else {
+                $targetUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            }
+        }
+
+        if (! empty($filters['student_id'])) {
+            if (! $isGlobal) {
+                abort_unless(
+                    $this->accessScope->accessibleStudents($user)->whereKey($filters['student_id'])->exists(),
+                    403,
+                    'Siswa berada di luar cakupan unit akun.'
+                );
+            }
+        }
+
+        // CRITICAL: If non-global user has no accessible units, force restrictive empty query (prevent unbounded foundation query)
+        if (! $isGlobal && $targetUnitIds->isEmpty()) {
+            $notesQuery = StudentNote::query()->whereRaw('1 = 0');
+        } else {
+            $notesQuery = StudentNote::query()
+                ->where(function (Builder $q) use ($targetUnitIds) {
+                    $q->whereIn('education_unit_id', $targetUnitIds)
+                      ->orWhere(function (Builder $sq) use ($targetUnitIds) {
+                          $sq->whereNull('education_unit_id')
+                             ->whereHas('student', fn ($st) => $st->whereIn('unit_id', $targetUnitIds));
+                      });
+                })
+                ->whereHas('student', function (Builder $sq) use ($targetUnitIds) {
+                    $sq->whereIn('unit_id', $targetUnitIds);
                 });
-            });
+
+            if (! empty($filters['student_id'])) {
+                $notesQuery->where('student_id', $filters['student_id']);
+            }
+        }
 
         $totalCatatan = (clone $notesQuery)->count();
         $siswaDalamPendampingan = (clone $notesQuery)->distinct('student_id')->count('student_id');
-        $kasusMenungguTindakLanjut = (clone $notesQuery)->whereNotNull('follow_up')->count();
+        $kasusMenungguTindakLanjut = (clone $notesQuery)->whereNotNull('follow_up')->where('follow_up', '!=', '')->count();
         $kasusPrioritasTinggi = (clone $notesQuery)->whereIn('priority', ['tinggi', 'high', 'urgent'])->count();
 
         $kpis = [

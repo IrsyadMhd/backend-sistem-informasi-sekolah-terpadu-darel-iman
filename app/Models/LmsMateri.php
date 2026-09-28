@@ -68,8 +68,8 @@ class LmsMateri extends Model
             if (Auth::check() && empty($model->created_by)) {
                 $model->created_by = Auth::id();
             }
-            if (empty($model->status)) {
-                $model->status = 'aktif';
+            if (! isset($model->attributes['is_published']) && ! isset($model->attributes['status'])) {
+                $model->status = 'published';
             }
             if (empty($model->tipe)) {
                 $model->tipe = $model->tipe_materi ?? 'teks';
@@ -146,7 +146,9 @@ class LmsMateri extends Model
 
     public function setStatusAttribute($value): void
     {
-        $this->attributes['is_published'] = in_array($value, ['published', 'dipublikasikan', '1', 1, true], true);
+        $isPublished = in_array($value, ['published', 'dipublikasikan', 'aktif', 'active', '1', 1, true], true);
+        $this->attributes['is_published'] = $isPublished;
+        $this->attributes['status'] = $isPublished ? 'published' : 'draft';
     }
 
     public function getStatusAttribute(): string

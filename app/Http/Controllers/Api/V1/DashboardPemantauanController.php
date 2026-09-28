@@ -427,9 +427,17 @@ class DashboardPemantauanController extends Controller
     private function pastikanHakAkses(Request $request, bool $butuhKelola = false): void
     {
         $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated.');
+        }
+
+        if ($user->hasAnyRole(['Super Admin', 'Kepala Sekolah', 'Divisi Pendidikan', 'Yayasan', 'Admin'])) {
+            return;
+        }
+
         $izin = $butuhKelola ? self::PERMISSION_KELOLA : self::PERMISSION_AKSES;
 
-        if (! $user || ! $user->can($izin)) {
+        if (! $user->can($izin)) {
             abort(403, 'Anda tidak memiliki izin modul dashboard pemantauan.');
         }
     }

@@ -18,7 +18,8 @@ class DeleteRequestController extends Controller
         $query = DeleteRequest::query()->with(['requester', 'reviewer', 'educationUnit']);
 
         // If not Superadmin, limit to user's own submitted requests
-        if (! $user->hasRole('Super Admin') && ! $user->hasPermissionTo('superadmin.delete.approve')) {
+        $canApproveAll = $user->hasRole('Super Admin') || $user->can('superadmin.delete.approve');
+        if (! $canApproveAll) {
             $query->where('requested_by', $user->id);
         }
 

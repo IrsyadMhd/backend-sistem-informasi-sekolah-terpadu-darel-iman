@@ -84,19 +84,24 @@ class KelasSeeder extends Seeder
             ],
         ];
 
-        $employeeIndex = 0;
-
         foreach ($units as $unit) {
             $levelKey = strtoupper(preg_replace('/[^A-Za-z]/', '', $unit->level ?? 'SDIT'));
             if (! isset($sampleClasses[$levelKey])) {
                 $levelKey = 'SDIT';
             }
 
+            // DEF-SCOPE-002 FIX: Ambil employee yang HANYA berasal dari unit yang bersangkutan
+            $unitEmployees = Employee::where('status', 'Aktif')
+                ->where('unit_id', $unit->id)
+                ->orderBy('id')
+                ->get();
+            $employeeIndex = 0;
+
             foreach ($sampleClasses[$levelKey] as $c) {
-                // Tentukan Wali Kelas secara berurutan tanpa duplikasi per tahun ajaran
+                // Tentukan Wali Kelas dari pegawai di unit yang sama secara berurutan
                 $waliKelasId = null;
-                if ($employees->isNotEmpty() && $employeeIndex < $employees->count()) {
-                    $waliKelasId = $employees[$employeeIndex]->id;
+                if ($unitEmployees->isNotEmpty() && $employeeIndex < $unitEmployees->count()) {
+                    $waliKelasId = $unitEmployees[$employeeIndex]->id;
                     $employeeIndex++;
                 }
 

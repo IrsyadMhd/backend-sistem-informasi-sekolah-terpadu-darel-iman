@@ -3,6 +3,7 @@
 namespace App\Repositories\Eloquent;
 
 use App\Models\AcademicYear;
+use App\Models\ClassSchedule;
 use App\Models\LmsPengumpulanTugas;
 use App\Models\LmsUjianSesi;
 use App\Models\Student;
@@ -49,7 +50,9 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
             });
         }
 
-        if (! empty($filters['kelas_id'])) {
+        if (! empty($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
+            $query->whereIn('kelas_id', $filters['kelas_ids']);
+        } elseif (! empty($filters['kelas_id'])) {
             $query->where('kelas_id', $filters['kelas_id']);
         }
 
@@ -95,7 +98,7 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
     public function create(array $data): StudentGrade
     {
         if (empty($data['academic_year_id'])) {
-            $data['academic_year_id'] = AcademicYear::first()?->id;
+            $data['academic_year_id'] = AcademicYear::where('is_active', true)->value('id') ?? AcademicYear::latest()->value('id');
         }
 
         [$finalScore, $formula] = $this->calculateUsingActiveFormula($data);
@@ -162,7 +165,14 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
         $semester = Semester::query()->findOrFail($semesterId);
         $kelas = Kelas::query()->findOrFail($kelasId);
         $subject = Subject::query()->findOrFail($subjectId);
-        if ($subject->unit_pendidikan_id !== $kelas->unit_pendidikan_id) {
+        $isScheduledTogether = ClassSchedule::query()
+            ->where(function ($q) use ($kelasId) {
+                $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId);
+            })
+            ->where('subject_id', $subjectId)
+            ->exists();
+
+        if (! $isScheduledTogether && $subject->unit_pendidikan_id && $kelas->unit_pendidikan_id && $subject->unit_pendidikan_id !== $kelas->unit_pendidikan_id) {
             throw ValidationException::withMessages([
                 'subject_id' => 'Mata pelajaran tidak berada pada unit pendidikan kelas yang dipilih.',
             ]);
@@ -284,7 +294,9 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
     {
         $query = StudentGrade::query();
 
-        if (! empty($filters['kelas_id'])) {
+        if (! empty($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
+            $query->whereIn('kelas_id', $filters['kelas_ids']);
+        } elseif (! empty($filters['kelas_id'])) {
             $query->where('kelas_id', $filters['kelas_id']);
         }
         if (! empty($filters['subject_id'])) {
@@ -353,11 +365,11 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
         if (! $formula) return [$this->calculateFinalScoreFromData($data), null];
 
         return [$this->formulaService->calculate($formula, [
-            'assignment' => $data['score_assignment'] ?? null,
-            'quiz' => $data['score_quiz'] ?? null,
-            'project' => $data['score_project'] ?? null,
-            'midterm' => $data['score_midterm'] ?? null,
-            'final_exam' => $data['score_final'] ?? null,
+            'assignment' => $data['score_assignment'] ?? 0,
+            'quiz' => $data['score_quiz'] ?? 0,
+            'project' => $data['score_project'] ?? $data['score_assignment'] ?? 0,
+            'midterm' => $data['score_midterm'] ?? 0,
+            'final_exam' => $data['score_final'] ?? 0,
         ]), $formula];
     }
 }

@@ -30,7 +30,7 @@ class UbahTahunAjaranRequest extends FormRequest
                 'required',
                 'string',
                 'max:32',
-                Rule::unique('academic_years', 'name')->ignore($id),
+                Rule::unique('academic_years', 'name')->ignore($id)->whereNull('deleted_at'),
             ],
             'start_date' => ['required', 'date'],
             'end_date' => ['required', 'date', 'after:start_date'],

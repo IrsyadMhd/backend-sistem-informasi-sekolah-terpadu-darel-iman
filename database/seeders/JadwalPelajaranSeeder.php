@@ -68,7 +68,7 @@ class JadwalPelajaranSeeder extends Seeder
         $units = EducationUnit::query()->orderBy('code')->get();
 
         // 4. Ambil / Pastikan Guru / Pegawai Tersedia (Dinamis)
-        $guruList = Employee::query()->orderBy('id')->get();
+        $guruList = Employee::query()->whereIn('unit_id', $units->pluck('id'))->orderBy('id')->get();
         if ($guruList->isEmpty()) {
             $namaGuruDummy = [
                 'Ustadz Abdullah Faqih, S.Pd.I',
@@ -81,12 +81,14 @@ class JadwalPelajaranSeeder extends Seeder
                 'Ustadz Ibrahim Al-Hafiz, S.Ag',
             ];
             $guruList = new Collection;
+            $unitFirst = $units->first();
             foreach ($namaGuruDummy as $index => $nama) {
                 $employee = Employee::create([
                     'nama_lengkap' => $nama,
                     'niy' => 'NIY-'.str_pad($index + 1, 4, '0', STR_PAD_LEFT),
                     'email' => 'guru'.($index + 1).'@dareliman.sch.id',
                     'status' => 'Aktif',
+                    'unit_id' => $units[$index % max(1, $units->count())]->id ?? $unitFirst?->id,
                     'jenis_kelamin' => $index % 2 === 0 ? 'L' : 'P',
                 ]);
                 $guruList->push($employee);
@@ -178,12 +180,26 @@ class JadwalPelajaranSeeder extends Seeder
         ) {
             $totalTeachers = $guruList->count();
             $totalSubjects = $mapelList->count();
+            $teachersByUnit = $guruList->groupBy('unit_id');
 
             foreach ($kelasList as $kelasIndex => $kelas) {
+                // DEF-SCOPE-001 FIX: Hanya gunakan guru dari unit yang sama dengan kelas
+                $unitTeachers = $teachersByUnit->get($kelas->unit_pendidikan_id);
+                if (! $unitTeachers || $unitTeachers->isEmpty()) {
+                    $unitTeachers = Employee::where('unit_id', $kelas->unit_pendidikan_id)
+                        ->where('status', 'Aktif')
+                        ->get();
+                }
+
+                if (! $unitTeachers || $unitTeachers->isEmpty()) {
+                    continue; // Lewati kelas jika tidak ada guru di unit ini, JANGAN fallback lintas unit!
+                }
+
+                $totalUnitTeachers = $unitTeachers->count();
                 $scheduleIndex = 0;
                 foreach ($hariBelajar as $day) {
                     foreach ($jamBelajar as $slot) {
-                        $teacher = $guruList[($kelasIndex + $scheduleIndex) % $totalTeachers];
+                        $teacher = $unitTeachers[($kelasIndex + $scheduleIndex) % $totalUnitTeachers];
                         $subject = $mapelList[($scheduleIndex + $kelasIndex * 2) % $totalSubjects];
 
                         // Jadwal Semester Ganjil

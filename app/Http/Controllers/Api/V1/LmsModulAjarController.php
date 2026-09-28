@@ -17,6 +17,7 @@ use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\TujuanPembelajaran;
 use App\Models\User;
+use App\Services\AccessScopeService;
 use App\Services\LmsModulAjarService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +25,8 @@ use Illuminate\Http\Request;
 class LmsModulAjarController extends Controller
 {
     public function __construct(
-        protected LmsModulAjarService $modulAjarService
+        protected LmsModulAjarService $modulAjarService,
+        protected AccessScopeService $accessScope
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -123,6 +125,27 @@ class LmsModulAjarController extends Controller
             ->when($request->query('semester_id'), fn ($query, $semesterId) => $query->where('semester_id', $semesterId))
             ->get();
 
+        if ($this->isTeacher($request->user())) {
+            $employeeId = $this->teacherEmployeeId($request->user());
+            $teachers = Employee::query()
+                ->select('id', 'nama_lengkap', 'niy', 'nik')
+                ->where('id', $employeeId)
+                ->get();
+            $classes = $this->accessScope->accessibleRombels($request->user())
+                ->select('id', 'nama_kelas', 'kode_kelas')
+                ->get();
+            $allowedMapelIds = $this->accessScope->accessibleSchedules($request->user())
+                ->pluck('subject_id')
+                ->filter()
+                ->unique();
+            if ($allowedMapelIds->isNotEmpty()) {
+                $subjects = Subject::query()
+                    ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code')
+                    ->whereIn('id', $allowedMapelIds)
+                    ->get();
+            }
+        }
+
         $years = AcademicYear::select('id', 'name')->get()->map(function ($item) {
             return [
                 'id' => $item->id,
@@ -197,8 +220,19 @@ class LmsModulAjarController extends Controller
 
     public function store(SimpanModulAjarRequest $request): JsonResponse
     {
-        $this->authorizeManage($request->user(), 'create');
+        $user = $request->user();
+        $this->authorizeManage($user, 'create');
         $data = $request->validated();
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            if (! empty($request->input('guru_id')) && $request->input('guru_id') !== $employeeId) {
+                abort(403, 'Akses ditolak: Anda tidak dapat membuat Modul Ajar untuk guru lain.');
+            }
+            $data['guru_id'] = $employeeId;
+            $this->assertTeacherAssignment($user, $data['kelas_id'] ?? null, $data['mata_pelajaran_id'] ?? null);
+        }
+
         $modul = $this->modulAjarService->simpan($data);
 
         return response()->json([
@@ -210,16 +244,32 @@ class LmsModulAjarController extends Controller
 
     public function update(UbahModulAjarRequest $request, string $id): JsonResponse
     {
-        $this->authorizeManage($request->user(), 'edit');
-        $data = $request->validated();
-        $modul = $this->modulAjarService->ubah($id, $data);
+        $user = $request->user();
+        $this->authorizeManage($user, 'edit');
 
+        $modul = $this->modulAjarService->cariBerdasarkanId($id);
         if (! $modul) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Data Modul Ajar tidak ditemukan.',
             ], 404);
         }
+
+        $data = $request->validated();
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+            if (! empty($request->input('guru_id')) && $request->input('guru_id') !== $employeeId) {
+                abort(403, 'Akses ditolak: Anda tidak dapat mengubah kepemilikan guru Modul Ajar.');
+            }
+            $data['guru_id'] = $employeeId;
+            $kelasId = $data['kelas_id'] ?? $modul->kelas_id;
+            $mapelId = $data['mata_pelajaran_id'] ?? $modul->mata_pelajaran_id;
+            $this->assertTeacherAssignment($user, $kelasId, $mapelId);
+        }
+
+        $modul = $this->modulAjarService->ubah($id, $data);
 
         return response()->json([
             'status' => 'success',
@@ -230,7 +280,22 @@ class LmsModulAjarController extends Controller
 
     public function destroy(string $id): JsonResponse
     {
-        $this->authorizeManage(request()->user(), 'delete');
+        $user = request()->user();
+        $this->authorizeManage($user, 'delete');
+
+        $modul = $this->modulAjarService->cariBerdasarkanId($id);
+        if (! $modul) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Data Modul Ajar tidak ditemukan.',
+            ], 404);
+        }
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+        }
+
         $deleted = $this->modulAjarService->hapus($id);
         if (! $deleted) {
             return response()->json([
@@ -247,7 +312,22 @@ class LmsModulAjarController extends Controller
 
     public function restore(string $id): JsonResponse
     {
-        $this->authorizeManage(request()->user(), 'restore');
+        $user = request()->user();
+        $this->authorizeManage($user, 'restore');
+
+        $modul = $this->modulAjarService->cariBerdasarkanIdDenganSampah($id);
+        if (! $modul) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Gagal memulihkan Modul Ajar atau data tidak ditemukan.',
+            ], 404);
+        }
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+        }
+
         $restored = $this->modulAjarService->pulihkan($id);
         if (! $restored) {
             return response()->json([
@@ -264,7 +344,22 @@ class LmsModulAjarController extends Controller
 
     public function publish(string $id): JsonResponse
     {
-        $this->authorizeManage(request()->user(), 'edit');
+        $user = request()->user();
+        $this->authorizeManage($user, 'edit');
+
+        $modul = $this->modulAjarService->cariBerdasarkanId($id);
+        if (! $modul) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Gagal mempublikasikan Modul Ajar.',
+            ], 404);
+        }
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+        }
+
         $modul = $this->modulAjarService->publikasikan($id);
         if (! $modul) {
             return response()->json([
@@ -282,7 +377,22 @@ class LmsModulAjarController extends Controller
 
     public function duplicate(string $id): JsonResponse
     {
-        $this->authorizeManage(request()->user(), 'create');
+        $user = request()->user();
+        $this->authorizeManage($user, 'create');
+
+        $modul = $this->modulAjarService->cariBerdasarkanId($id);
+        if (! $modul) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Gagal menduplikasi Modul Ajar.',
+            ], 404);
+        }
+
+        if ($this->isTeacher($user)) {
+            $employeeId = $this->teacherEmployeeId($user);
+            abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+        }
+
         $modul = $this->modulAjarService->duplikasi($id);
         if (! $modul) {
             return response()->json([
@@ -394,6 +504,8 @@ class LmsModulAjarController extends Controller
         abort_unless(
             $this->canAccessAllUnits($user)
             || $user->hasAnyPermission([
+                'academic.view',
+                'academic.view_any',
                 'pembelajaran.kurikulum.view',
                 'pembelajaran.materi',
                 'teacher.material.view',
@@ -403,6 +515,16 @@ class LmsModulAjarController extends Controller
                 'guru',
                 'Guru Mata Pelajaran',
                 'guru_mata_pelajaran',
+                'Kepala Sekolah',
+                'kepala_sekolah',
+                'Waka Kurikulum',
+                'waka_kurikulum',
+                'Waka Kesiswaan',
+                'waka_kesiswaan',
+                'Wakil Kesiswaan',
+                'wakil_kesiswaan',
+                'Tata Usaha',
+                'tata_usaha',
             ]),
             403
         );
@@ -410,11 +532,44 @@ class LmsModulAjarController extends Controller
 
     private function authorizeManage(User $user, string $action): void
     {
-        abort_unless(
-            $this->canAccessAllUnits($user)
-            || $user->hasAnyPermission(["pembelajaran.kurikulum.{$action}"]),
-            403
-        );
+        if ($this->canAccessAllUnits($user) || $user->hasAnyPermission(["pembelajaran.kurikulum.{$action}"])) {
+            return;
+        }
+
+        if ($this->isTeacher($user)) {
+            $teacherPermMap = [
+                'create' => 'teacher.material.create',
+                'edit' => 'teacher.material.update',
+                'delete' => 'teacher.material.delete',
+                'restore' => 'teacher.material.update',
+                'force_delete' => 'teacher.material.delete',
+            ];
+            $perm = $teacherPermMap[$action] ?? null;
+            if ($user->hasRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']) || ($perm && $user->hasPermissionTo($perm))) {
+                return;
+            }
+        }
+
+        abort(403, 'Akses ditolak: Anda tidak memiliki izin untuk mengelola Modul Ajar.');
+    }
+
+    private function assertTeacherAssignment(User $user, ?string $kelasId, ?string $mataPelajaranId): void
+    {
+        if ($this->canAccessAllUnits($user)) {
+            return;
+        }
+
+        if ($kelasId) {
+            $allowedKelasIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            abort_unless(in_array($kelasId, $allowedKelasIds, true), 403, 'Akses ditolak: Rombel di luar penugasan mengajar Anda.');
+        }
+
+        if ($mataPelajaranId) {
+            $allowedMapelIds = $this->accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique()->all();
+            if (! empty($allowedMapelIds)) {
+                abort_unless(in_array($mataPelajaranId, $allowedMapelIds, true), 403, 'Akses ditolak: Mata pelajaran di luar penugasan mengajar Anda.');
+            }
+        }
     }
 
     private function canAccessAllUnits(User $user): bool
@@ -442,7 +597,7 @@ class LmsModulAjarController extends Controller
 
     private function isTeacher(User $user): bool
     {
-        if ($this->canAccessAllUnits($user) || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Tata Usaha', 'tata_usaha'])) {
+        if ($this->canAccessAllUnits($user) || $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan', 'Wakil Kesiswaan', 'wakil_kesiswaan', 'Tata Usaha', 'tata_usaha'])) {
             return false;
         }
 

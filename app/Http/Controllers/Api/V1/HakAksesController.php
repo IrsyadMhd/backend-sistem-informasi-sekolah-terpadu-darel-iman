@@ -29,7 +29,7 @@ class HakAksesController extends Controller
      */
     public function indexRoles(Request $request): JsonResponse
     {
-        $this->assertCanViewAccessManagement($request);
+        $this->assertSuperAdminRoleAccess($request);
         $search = $request->get('search', '');
 
         $query = Role::withCount(['permissions', 'users'])
@@ -103,7 +103,7 @@ class HakAksesController extends Controller
      */
     public function showRole(Request $request, string $id): JsonResponse
     {
-        $this->assertCanViewAccessManagement($request);
+        $this->assertSuperAdminRoleAccess($request);
         $role = Role::with('permissions')->findOrFail($id);
 
         return response()->json([
@@ -190,7 +190,7 @@ class HakAksesController extends Controller
      */
     public function indexPermissions(Request $request): JsonResponse
     {
-        $this->assertCanViewAccessManagement($request);
+        $this->assertSuperAdminRoleAccess($request);
         $search = $request->get('search', '');
 
         $query = Permission::orderBy('name');
@@ -443,6 +443,16 @@ class HakAksesController extends Controller
                 'message' => 'Gagal memperbarui hak akses pegawai: '.$e->getMessage(),
             ], 500);
         }
+    }
+
+    private function assertSuperAdminRoleAccess(Request $request): void
+    {
+        $user = $request->user();
+        abort_unless(
+            $user && ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin')),
+            403,
+            'Akses ditolak. Hanya Super Admin yang berhak mengakses data peran (roles).'
+        );
     }
 
     private function assertCanViewAccessManagement(Request $request): void

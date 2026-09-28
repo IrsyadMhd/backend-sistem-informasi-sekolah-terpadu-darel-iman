@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\MasterArrayExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\SimpanJabatanRequest;
 use App\Http\Requests\V1\UbahJabatanRequest;
@@ -12,6 +13,7 @@ use App\Services\JabatanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class JabatanController extends Controller
@@ -246,7 +248,7 @@ class JabatanController extends Controller
     /**
      * Ekspor data master jabatan.
      */
-    public function export(Request $request): JsonResponse
+    public function export(Request $request)
     {
         $filters = [
             'search' => $request->query('search'),
@@ -257,6 +259,34 @@ class JabatanController extends Controller
         ];
 
         $data = $this->jabatanService->eksporData($this->applyUnitReadScope($request, $filters));
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $headings = [
+                'Kode Jabatan',
+                'Nama Jabatan',
+                'Satuan Kerja',
+                'Level',
+                'Level Label',
+                'Unit Sekolah',
+                'Atasan Langsung',
+                'Role Sistem',
+                'Urutan',
+                'Status',
+                'Tampil Struktur',
+                'Boleh Login',
+                'Jumlah Pegawai',
+                'Deskripsi',
+            ];
+            $rows = collect($data)->map(fn ($r) => array_values($r));
+            $filename = 'data_master_jabatan_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new MasterArrayExport($rows, $headings), $filename, $excelFormat);
+        }
 
         return response()->json([
             'status' => 'success',

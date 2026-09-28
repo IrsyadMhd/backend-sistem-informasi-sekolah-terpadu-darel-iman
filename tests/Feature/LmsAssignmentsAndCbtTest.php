@@ -22,6 +22,7 @@ use App\Models\Subject;
 use App\Models\TujuanPembelajaran;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 class LmsAssignmentsAndCbtTest extends TestCase
@@ -47,7 +48,8 @@ class LmsAssignmentsAndCbtTest extends TestCase
         parent::setUp();
 
         Role::findOrCreate('Super Admin', 'web');
-        Role::findOrCreate('Guru', 'web');
+        $guruRole = Role::findOrCreate('Guru', 'web');
+        $guruRole->givePermissionTo(Permission::findOrCreate('teacher.assignment.view', 'web'));
         Role::findOrCreate('Siswa', 'web');
 
         $this->unit = EducationUnit::create([

@@ -80,7 +80,7 @@ class Notification extends Model
      */
     public static function deliver(string $userId, string $title, string $body, string $channel, array $metadata = []): ?self
     {
-        $context = \Illuminate\Support\Facades\Cache::remember('active_academic_context', 300, function () {
+        $resolver = function () {
             $activeAy = AcademicYear::query()->where('is_active', true)->first();
             $activeSem = $activeAy
                 ? Semester::query()
@@ -93,7 +93,11 @@ class Notification extends Model
                 'ay_id' => $activeAy?->id,
                 'sem_id' => $activeSem?->id,
             ];
-        });
+        };
+
+        $context = app()->environment('testing')
+            ? $resolver()
+            : \Illuminate\Support\Facades\Cache::remember('active_academic_context', 300, $resolver);
 
         if (! ($context['ay_id'] ?? null) || ! ($context['sem_id'] ?? null)) {
             return null;

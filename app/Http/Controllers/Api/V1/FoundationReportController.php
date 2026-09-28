@@ -188,12 +188,16 @@ class FoundationReportController extends Controller
         $filename = "laporan-{$type}-" . date('Y-m-d');
 
         if ($format === 'pdf') {
+            $siteSetting = \App\Models\SiteSetting::current();
+            $foundationName = $siteSetting->school_name ?: ($siteSetting->application_name ?: config('app.name'));
+
             $pdf = Pdf::loadView("reports.pdf.generic", [
                 'type' => $type,
                 'data' => $reportData,
                 'title' => $reportData['report']['title'] ?? 'Laporan',
                 'period' => $reportData['report']['period']['label'] ?? 'Tahun Ini',
                 'user' => $request->user()?->name ?? 'Pengurus Yayasan',
+                'foundation_name' => $foundationName,
             ])->setPaper('a4', $orientation);
 
             return $pdf->download("{$filename}.pdf");

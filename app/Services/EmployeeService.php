@@ -87,7 +87,7 @@ class EmployeeService
         $scheduleQuery = \App\Models\ClassSchedule::query()->where('is_active', true);
         if (! empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
             $scheduleQuery->whereHas('kelas', function ($q) use ($filters) {
-                $q->where('unit_id', $filters['unit_id']);
+                $q->where('unit_pendidikan_id', $filters['unit_id']);
             });
         }
 

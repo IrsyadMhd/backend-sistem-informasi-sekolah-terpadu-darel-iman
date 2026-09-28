@@ -29,7 +29,12 @@ class EmployeeRepository implements EmployeeRepositoryInterface
         }
 
         if (array_key_exists('allowed_unit_ids', $filters)) {
-            $query->whereIn('unit_id', $filters['allowed_unit_ids']);
+            $query->where(function ($q) use ($filters) {
+                $q->whereIn('unit_id', $filters['allowed_unit_ids']);
+                if (! empty($filters['include_null_unit'])) {
+                    $q->orWhereNull('unit_id');
+                }
+            });
         }
 
         if (! empty($filters['jabatan_id'])) {
@@ -48,7 +53,19 @@ class EmployeeRepository implements EmployeeRepositoryInterface
             $query->where('jenis_kelamin', $filters['jenis_kelamin']);
         }
 
-        return $query->orderBy('nama_lengkap', 'asc')->paginate($perPage);
+        $sortBy = $filters['sort_by'] ?? 'created_at';
+        $sortOrder = strtolower($filters['sort_order'] ?? 'desc');
+        if (! in_array($sortOrder, ['asc', 'desc'])) {
+            $sortOrder = 'desc';
+        }
+
+        if ($sortBy === 'nama_lengkap') {
+            $query->orderBy('nama_lengkap', $sortOrder);
+        } else {
+            $query->orderBy('created_at', 'desc')->orderBy('nama_lengkap', 'asc');
+        }
+
+        return $query->paginate($perPage);
     }
 
     public function findById(string $id): ?Employee

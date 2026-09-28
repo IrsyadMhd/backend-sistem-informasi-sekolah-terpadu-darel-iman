@@ -131,6 +131,14 @@ class Kelas extends Model
     }
 
     /**
+     * Alias relasi siswa untuk kompatibilitas konvensi nama metode bahasa Inggris (students).
+     */
+    public function students()
+    {
+        return $this->siswa();
+    }
+
+    /**
      * Relasi legacy ke siswa via class_id (kolom lama).
      * Gunakan hanya untuk backward compat atau data historis.
      */

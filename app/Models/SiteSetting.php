@@ -8,7 +8,7 @@ class SiteSetting extends Model
 {
     protected $fillable = [
         'application_name', 'school_name', 'logo_text', 'logo_path', 'favicon_path',
-        'footer_text', 'header_style', 'header_sticky', 'sidebar_style',
+        'footer_text', 'address', 'phone', 'sk_pendirian', 'motto', 'header_style', 'header_sticky', 'sidebar_style',
         'sidebar_position', 'sidebar_collapsed', 'template', 'sidebar_color',
         'sidebar_accent_color', 'body_color', 'header_color',
     ];

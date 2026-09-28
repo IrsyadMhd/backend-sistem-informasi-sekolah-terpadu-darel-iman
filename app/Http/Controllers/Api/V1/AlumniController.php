@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\AlumniExport;
 use App\Http\Controllers\Controller;
 use App\Models\RekapPrestasiSiswa;
 use App\Models\Student;
 use App\Services\AccessScopeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Maatwebsite\Excel\Facades\Excel;
 
 class AlumniController extends Controller
 {
@@ -346,7 +348,7 @@ class AlumniController extends Controller
         ]);
     }
 
-    public function export(Request $request): JsonResponse
+    public function export(Request $request)
     {
         $user = $request->user();
         $accessScopeService = app(AccessScopeService::class);
@@ -375,6 +377,17 @@ class AlumniController extends Controller
                   ->orWhere('nis', 'like', "%{$search}%")
                   ->orWhere('nisn', 'like', "%{$search}%");
             });
+        }
+
+        $format = strtolower((string) $request->query('format'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $timestamp = date('Ymd_His');
+            $exportQuery = (clone $query)->reorder()->orderBy('full_name', 'asc');
+            return match ($format) {
+                'csv' => Excel::download(new AlumniExport($exportQuery), "alumni_{$timestamp}.csv", \Maatwebsite\Excel\Excel::CSV),
+                'xls' => Excel::download(new AlumniExport($exportQuery), "alumni_{$timestamp}.xls", \Maatwebsite\Excel\Excel::XLS),
+                default => Excel::download(new AlumniExport($exportQuery), "alumni_{$timestamp}.xlsx", \Maatwebsite\Excel\Excel::XLSX),
+            };
         }
 
         $alumniList = $query->orderBy('full_name', 'asc')->get();

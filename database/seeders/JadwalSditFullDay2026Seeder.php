@@ -11,8 +11,10 @@ use App\Models\MasterKurikulum;
 use App\Models\SchoolClass;
 use App\Models\Semester;
 use App\Models\Subject;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class JadwalSditFullDay2026Seeder extends Seeder
@@ -73,9 +75,10 @@ class JadwalSditFullDay2026Seeder extends Seeder
         $schoolClass = SchoolClass::firstOrCreate([
             'name' => $rombel->nama_kelas,
             'academic_year_id' => $academicYear->id,
+            'semester_id' => $semester->id,
         ], [
-            'grade_level' => '1',
-            'status' => 'active',
+            'level' => '1',
+            'metadata' => ['status' => 'active'],
         ]);
 
         // 4. Guru-guru Sesuai Roster Riil
@@ -96,18 +99,36 @@ class JadwalSditFullDay2026Seeder extends Seeder
                 ->orWhere('niy', $gData['niy'])
                 ->first();
 
+            $email = strtolower(Str::slug($key, '.')) . '@dareliman.sch.id';
+
             if (! $emp) {
                 $emp = Employee::create([
                     'nama_lengkap' => $gData['nama'],
                     'nama_panggilan' => explode(' ', $gData['nama'])[1] ?? 'Guru',
                     'niy' => $gData['niy'],
-                    'email' => strtolower(Str::slug($key, '.')) . '@dareliman.sch.id',
+                    'email' => $email,
                     'unit_id' => $unitSdit?->id,
                     'status' => 'Aktif',
                     'status_pegawai' => 'Tetap',
                     'jenis_kelamin' => str_contains($gData['nama'], 'Ustzh') ? 'P' : 'L',
                 ]);
             }
+
+            // DEF-ORPHAN-002 FIX: Ensure user exists and is linked
+            if (! $emp->user_id) {
+                $user = User::firstOrCreate(
+                    ['email' => $emp->email ?: $email],
+                    [
+                        'name' => $emp->nama_lengkap,
+                        'password' => Hash::make('Password123!'),
+                        'is_active' => true,
+                    ]
+                );
+                $role = ($key === 'Walas') ? 'Wali Kelas' : 'Guru';
+                $user->syncRoles([$role]);
+                $emp->update(['user_id' => $user->id]);
+            }
+
             $guruModels[$key] = $emp;
         }
 

@@ -392,6 +392,7 @@ class RolePermissionSeeder extends Seeder
             'super_admin' => $permissions,
             'Admin' => [
                 'dashboard.view',
+                'dashboard.super-admin.view',
                 'dashboard.pemantauan.lihat',
                 'master.view', 'master.create', 'master.update', 'master.delete',
                 'employee.view', 'employee.view_all', 'employee.create', 'employee.update',
@@ -406,6 +407,7 @@ class RolePermissionSeeder extends Seeder
                 'dashboard.pemantauan.kelola',
                 'employee.view',
                 'divisi.monitoring',
+                'divisi.laporan_bulanan',
                 'kehadiran.siswa.monitoring',
                 'kehadiran.siswa.absensi_digital',
                 'kehadiran.siswa.rekap_keterlambatan',
@@ -768,6 +770,7 @@ class RolePermissionSeeder extends Seeder
         $teacherAcademicPermissions = [
             'teacher.attendance.view', 'teacher.attendance.create', 'teacher.attendance.update',
             'teacher.material.view', 'teacher.material.create', 'teacher.material.update', 'teacher.material.delete',
+            'pembelajaran.materi', 'pembelajaran.kisi_kisi_ujian', 'pembelajaran.bank_soal',
             'teacher.assignment.view', 'teacher.assignment.create', 'teacher.assignment.update', 'teacher.assignment.delete',
             'teacher.submission.view',
             'teacher.grade.view', 'teacher.grade.create', 'teacher.grade.update',
@@ -928,7 +931,6 @@ class RolePermissionSeeder extends Seeder
             'Kepala Bidang Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan',
             'Divisi Bahasa', 'Divisi Program Khusus', 'Wakil Kepala Sekolah',
             'Wakil Kurikulum', 'Wakil Kesiswaan',
-            'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
         ];
 
         // Dashboard role-based access: setiap role hanya menerima permission dashboard

@@ -60,7 +60,7 @@ class MasterJabatanSeeder extends Seeder
             // Level 8: Guru
             ['JBT-010', 'Wali Kelas', 8, 'Unit Pendidikan', 'Wali Kelas', 'rombel_sendiri', 'Users'],
             ['JBT-009', 'Guru Mapel', 8, 'Unit Pendidikan', 'Guru', 'kelas_mapel_sendiri', 'GraduationCap'],
-            ['JBT-022', 'Guru BK', 8, 'Unit Pendidikan', 'Guru', 'siswa_binaan', 'HeartHandshake'],
+            ['JBT-022', 'Guru BK', 8, 'Unit Pendidikan', 'Guru BK', 'siswa_binaan', 'HeartHandshake'],
             ['JBT-024', 'Pembina Ekstrakurikuler', 8, 'Unit Pendidikan', 'Guru', 'siswa_binaan', 'Award'],
 
             // Level 9: Musyrif

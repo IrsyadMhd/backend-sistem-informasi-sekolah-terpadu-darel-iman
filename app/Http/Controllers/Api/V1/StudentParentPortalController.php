@@ -90,9 +90,16 @@ class StudentParentPortalController extends Controller
             return null;
         }
 
+        // Direct student account always resolves to their own active profile
+        if ($user->hasAnyRole(['Siswa', 'siswa', 'student'])) {
+            return Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])
+                ->where('user_id', $user->id)
+                ->where('is_active', true)
+                ->first();
+        }
+
         // If parent has selected a child id in route/header/query/input
-        $selectedChildId = $request->route('id')
-            ?? $request->route('studentId')
+        $selectedChildId = $request->route('studentId')
             ?? $request->route('childId')
             ?? $request->header('X-Child-Id')
             ?? $request->query('child_id')
@@ -120,6 +127,17 @@ class StudentParentPortalController extends Controller
                     ->first();
                 if ($child) {
                     return $child;
+                }
+
+                // Fallback for Super Admin / Admin / Yayasan inspecting specific student in portal
+                if ($user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan'])) {
+                    $child = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])
+                        ->whereKey($selectedChildId)
+                        ->where('is_active', true)
+                        ->first();
+                    if ($child) {
+                        return $child;
+                    }
                 }
 
                 return null;
@@ -285,9 +303,14 @@ class StudentParentPortalController extends Controller
         $schedulesToday = ClassSchedule::query()
             ->with(['subject', 'teacher', 'employee'])
             ->where(fn ($q) => $q->where('class_id', $student->class_id)->orWhere('kelas_id', $student->kelas_id ?? $student->class_id))
+            ->when($activeAcademicYear, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('academic_year_id')->orWhere('academic_year_id', $activeAcademicYear->id)))
+            ->when($activeSemester, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('semester_id')->orWhere('semester_id', $activeSemester->id)))
             ->where('day_of_week', now()->dayOfWeekIso)
             ->orderBy('time_start')
-            ->get();
+            ->get()
+            ->unique(function ($item) {
+                return ($item->day_of_week ?? '').'-'.($item->time_start ?? '').'-'.($item->time_end ?? '').'-'.($item->subject_id ?? '');
+            })->values();
 
         // Attendance status today
         $attendanceToday = LmsPresensi::query()
@@ -521,18 +544,40 @@ class StudentParentPortalController extends Controller
 
     public function schedules(Request $request): JsonResponse
     {
-        $student = $this->getStudentContext($request) ?: Student::whereNotNull('class_id')->orWhereNotNull('kelas_id')->first();
+        // WM-02 PATCH: removed arbitrary Student::first() fallback to prevent cross-parent schedule leakage.
+        // If getStudentContext returns null (foreign/invalid child_id), reject with 404.
+        $student = $this->getStudentContext($request);
         if (! $student) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
-        $classIds = array_values(array_filter([$student->class_id, $student->kelas_id]));
+        $academicYearId = $request->query('academic_year_id') ?: $request->query('academic_year');
+        $semesterId = $request->query('semester_id') ?: $request->query('semester');
+
+        // Otomatis prioritaskan semester dan tahun ajaran aktif jika tidak dispesifikasikan secara eksplisit
+        if (! $semesterId) {
+            $activeSemester = Semester::query()->where('is_active', true)->first();
+            $semesterId = $activeSemester?->id;
+        }
+        if (! $academicYearId) {
+            $activeYear = AcademicYear::query()->where('is_active', true)->first();
+            $academicYearId = $activeYear?->id;
+        }
+
+        $classIds = array_values(array_unique(array_filter([$student->class_id, $student->kelas_id])));
         $schedules = ClassSchedule::query()
             ->with(['subject', 'teacher', 'employee'])
             ->when($classIds, fn ($q) => $q->where(fn ($sub) => $sub->whereIn('class_id', $classIds)->orWhereIn('kelas_id', $classIds)))
+            ->when($academicYearId, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('academic_year_id')->orWhere('academic_year_id', $academicYearId)))
+            ->when($semesterId, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('semester_id')->orWhere('semester_id', $semesterId)))
             ->orderBy('day_of_week')
             ->orderBy('time_start')
             ->get();
+
+        // Bersihkan data kembar jika ada duplikasi entri jadwal (hari, jam mulai, jam selesai, mapel yang sama)
+        $schedules = $schedules->unique(function ($item) {
+            return ($item->day_of_week ?? '').'-'.($item->time_start ?? '').'-'.($item->time_end ?? '').'-'.($item->subject_id ?? '');
+        })->values();
 
         $dateParam = $request->query('date');
         $selectedDate = $dateParam ? Carbon::parse($dateParam) : now();
@@ -622,6 +667,8 @@ class StudentParentPortalController extends Controller
                     'id' => $s->subject?->id,
                     'name' => $s->subject?->name ?? $s->subject?->nama_mapel ?? 'Mata Pelajaran',
                     'code' => $s->subject?->code ?? $s->subject?->kode_mapel ?? '',
+                    'icon' => $s->subject?->ikon ?? $s->subject?->icon ?? null,
+                    'color' => $s->subject?->warna ?? $s->subject?->color ?? null,
                 ],
                 'room' => $s->room ?? $s->ruangan ?? 'Ruang Kelas',
                 'teacher' => [
@@ -769,12 +816,20 @@ class StudentParentPortalController extends Controller
             ->orderBy('mulai_tampil')
             ->get();
 
+        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first();
+        $activeSemester = Semester::query()->where('is_active', true)->first();
+
         $classSchedules = \App\Models\ClassSchedule::query()
             ->with(['subject', 'teacher', 'employee'])
             ->where(fn ($q) => $q->where('class_id', $student->class_id)->orWhere('kelas_id', $student->kelas_id ?? $student->class_id))
+            ->when($activeAcademicYear, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('academic_year_id')->orWhere('academic_year_id', $activeAcademicYear->id)))
+            ->when($activeSemester, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('semester_id')->orWhere('semester_id', $activeSemester->id)))
             ->where('is_active', true)
             ->orderBy('time_start')
-            ->get();
+            ->get()
+            ->unique(function ($item) {
+                return ($item->day_of_week ?? '').'-'.($item->time_start ?? '').'-'.($item->time_end ?? '').'-'.($item->subject_id ?? '');
+            })->values();
 
         $events = collect();
 
@@ -1120,7 +1175,11 @@ class StudentParentPortalController extends Controller
                 'class' => $student->kelas?->name ?? $student->kelas?->nama_kelas ?? 'Kelas',
                 'unit' => $student->educationUnit?->name ?? 'Unit Sekolah',
                 'nis' => $student->nis ?? $student->nisn ?? null,
-                'foto_url' => $student->foto_url ?? null,
+                'foto_url' => $student->photo ?? $student->foto_url ?? $student->foto ?? null,
+                'photo' => $student->photo ?? null,
+                'foto' => $student->foto ?? $student->photo ?? null,
+                'gender' => $student->gender ?? $student->jenis_kelamin ?? null,
+                'jenis_kelamin' => $student->jenis_kelamin ?? $student->gender ?? null,
             ],
         ]);
     }
@@ -1185,7 +1244,11 @@ class StudentParentPortalController extends Controller
                 'class' => $student->kelas?->name ?? $student->kelas?->nama_kelas ?? 'Kelas',
                 'unit' => $student->educationUnit?->name ?? 'Unit Sekolah',
                 'nis' => $student->nis ?? $student->nisn ?? null,
-                'foto_url' => $student->foto_url ?? null,
+                'foto_url' => $student->photo ?? $student->foto_url ?? $student->foto ?? null,
+                'photo' => $student->photo ?? null,
+                'foto' => $student->foto ?? $student->photo ?? null,
+                'gender' => $student->gender ?? $student->jenis_kelamin ?? null,
+                'jenis_kelamin' => $student->jenis_kelamin ?? $student->gender ?? null,
             ],
         ]);
     }
@@ -1345,7 +1408,92 @@ class StudentParentPortalController extends Controller
         ];
 
         if (! $publishedReport) {
-            return response()->json(['success' => true, 'data' => $emptyResponse]);
+            $hasGrades = StudentGrade::query()
+                ->where('student_id', $student->id)
+                ->whereNotNull('final_score')
+                ->exists();
+
+            if (! $hasGrades) {
+                return response()->json(['success' => true, 'data' => $emptyResponse]);
+            }
+
+            $latestGrade = StudentGrade::query()
+                ->where('student_id', $student->id)
+                ->whereNotNull('final_score')
+                ->latest('updated_at')
+                ->first();
+
+            $ayId = $latestGrade?->academic_year_id ?? $student->academic_year_id;
+            $semId = $latestGrade?->semester_id;
+            $kId = $latestGrade?->kelas_id ?? $student->kelas_id ?? $student->class_id;
+
+            $grades = StudentGrade::query()
+                ->with(['subject', 'kelas.unitPendidikan'])
+                ->where('student_id', $student->id)
+                ->whereNotNull('final_score')
+                ->when($ayId, fn ($q) => $q->where('academic_year_id', $ayId))
+                ->when($semId, fn ($q) => $q->where('semester_id', $semId))
+                ->when($kId, fn ($q) => $q->where('kelas_id', $kId))
+                ->get();
+
+            if ($grades->isEmpty()) {
+                return response()->json(['success' => true, 'data' => $emptyResponse]);
+            }
+
+            $avgScore = $grades->avg('final_score');
+            $highestScore = $grades->max('final_score');
+            $passed = $grades->filter(fn ($g) => $g->final_score >= ($g->subject?->kkm ?? 75))->count();
+            $remedial = $grades->count() - $passed;
+
+            $items = $grades->map(function (StudentGrade $grade) {
+                $kkm = $grade->subject?->kkm ?? 75;
+                $score = $grade->final_score;
+                $isPassed = $score !== null ? $score >= $kkm : null;
+                return [
+                    'id' => $grade->id,
+                    'subject' => [
+                        'id' => $grade->subject?->id,
+                        'name' => $grade->subject?->name ?? $grade->subject?->nama_mapel,
+                        'code' => $grade->subject?->code ?? $grade->subject?->kode_mapel,
+                    ],
+                    'score' => $score,
+                    'final_score' => $score,
+                    'kkm' => $kkm,
+                    'grade_letter' => $grade->grade_letter ?? StudentGrade::getGradeLetter((float) $score),
+                    'predicate' => $grade->grade_letter ?? StudentGrade::getGradeLetter((float) $score),
+                    'is_passed' => $isPassed,
+                    'score_assignment' => $grade->score_assignment,
+                    'score_mid' => $grade->score_mid,
+                    'score_final' => $grade->score_final,
+                    'notes' => $grade->notes,
+                ];
+            })->values();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'items' => $items,
+                    'summary' => [
+                        'average_score' => $avgScore ? round((float) $avgScore, 2) : null,
+                        'highest_score' => $highestScore ? round((float) $highestScore, 2) : null,
+                        'passed_subjects' => $passed,
+                        'remedial_subjects' => $remedial,
+                        'total_subjects' => $grades->count(),
+                    ],
+                    'student' => $emptyResponse['student'],
+                    'period' => [
+                        'class_name' => $studentContext['class_name'],
+                        'unit_name' => $studentContext['unit_name'],
+                        'semester' => 'Semester 1',
+                        'academic_year' => '2026/2027',
+                    ],
+                    'publication' => [
+                        'is_published' => false,
+                        'status' => 'draft',
+                        'title' => 'Nilai Berjalan',
+                    ],
+                ],
+            ]);
         }
 
         $reportClass = $publishedReport->kelas;
@@ -1856,7 +2004,7 @@ class StudentParentPortalController extends Controller
      */
     public function schoolInformation(Request $request): JsonResponse
     {
-        $student = $this->getStudentContext($request) ?: Student::first();
+        $student = $this->getStudentContext($request);
         if (! $student) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
@@ -1901,7 +2049,7 @@ class StudentParentPortalController extends Controller
 
     public function schoolInformationSummary(Request $request): JsonResponse
     {
-        $student = $this->getStudentContext($request) ?: Student::first();
+        $student = $this->getStudentContext($request);
         if (! $student) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
@@ -2051,7 +2199,22 @@ class StudentParentPortalController extends Controller
         $bills = StudentBill::query()->with(['feeCategory', 'academicYear', 'payments'])
             ->where('student_id', $student->id)->orderBy('due_date', 'desc')->paginate(20);
 
-        return response()->json(['success' => true, 'data' => $bills]);
+        $unit = $student->educationUnit;
+        $unitMeta = is_array($unit?->metadata) ? $unit->metadata : [];
+        $siteSetting = \App\Models\SiteSetting::current();
+
+        $paymentInfo = [
+            'bank_name' => $unitMeta['bank_name'] ?? $unitMeta['nama_bank'] ?? 'BSI Syariah',
+            'account_number' => $unitMeta['bank_account_number'] ?? $unitMeta['nomor_rekening'] ?? '777-1234-567',
+            'account_holder' => $unitMeta['bank_account_holder'] ?? $unitMeta['atas_nama'] ?? ($unit?->name ?: ($siteSetting->school_name ?: 'Yayasan Dar El-Iman')),
+            'institution_name' => $unit?->name ?: ($siteSetting->school_name ?: 'Sekolah'),
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => $bills,
+            'payment_info' => $paymentInfo,
+        ]);
     }
 
     public function signStudentNote(Request $request, string $noteId): JsonResponse
@@ -2261,6 +2424,67 @@ class StudentParentPortalController extends Controller
             'success' => true,
             'student' => $student->loadMissing(['kelas.unitPendidikan', 'educationUnit']),
             'data' => $grids,
+        ]);
+    }
+
+    public function bankSoal(Request $request): JsonResponse
+    {
+        $student = $this->getStudentContext($request);
+        if (! $student) {
+            return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+        }
+
+        $classIds = array_values(array_filter([$student->kelas_id, $student->class_id]));
+        $kisiIds = LmsKisiKisi::query()
+            ->whereIn('kelas_id', $classIds)
+            ->where('status', true)
+            ->pluck('id')
+            ->all();
+
+        $query = LmsBankSoal::query()
+            ->with(['subject', 'kisiKisi.guru', 'kisiKisi.kelas'])
+            ->where('status', true);
+
+        if (! empty($kisiIds)) {
+            $query->where(function ($q) use ($kisiIds) {
+                $q->whereIn('kisi_kisi_id', $kisiIds)
+                  ->orWhereNull('kisi_kisi_id');
+            });
+        }
+
+        if ($request->filled('search')) {
+            $s = trim($request->string('search'));
+            $query->where(function ($inner) use ($s) {
+                $inner->where('pertanyaan', 'like', "%{$s}%")
+                    ->orWhere('kode_soal', 'like', "%{$s}%")
+                    ->orWhere('indikator', 'like', "%{$s}%")
+                    ->orWhereHas('subject', fn ($sub) => $sub->where('name', 'like', "%{$s}%"));
+            });
+        }
+
+        if ($request->filled('mata_pelajaran_id')) {
+            $query->where('mata_pelajaran_id', $request->mata_pelajaran_id);
+        }
+
+        if ($request->filled('tipe_soal')) {
+            $query->where('tipe_soal', $request->tipe_soal);
+        }
+
+        if ($request->filled('tingkat_kesulitan')) {
+            $query->where('tingkat_kesulitan', $request->tingkat_kesulitan);
+        }
+
+        if ($request->filled('kisi_kisi_id')) {
+            $query->where('kisi_kisi_id', $request->kisi_kisi_id);
+        }
+
+        $perPage = (int) $request->get('per_page', 20);
+        $questions = $query->orderBy('created_at', 'desc')->paginate($perPage);
+
+        return response()->json([
+            'success' => true,
+            'student' => $student->loadMissing(['kelas.unitPendidikan', 'educationUnit']),
+            'data' => $questions,
         ]);
     }
 
@@ -2532,12 +2756,19 @@ class StudentParentPortalController extends Controller
         if ($student) {
             $kelasId = $student->kelas_id ?? $student->class_id;
             if ($kelasId && Str::isUuid($kelasId)) {
-                $kelas = Kelas::query()->with(['waliKelas.user'])->find($kelasId);
+                $kelas = Kelas::query()->with(['waliKelas.user', 'unitPendidikan'])->find($kelasId);
                 $waliKelasEmp = $kelas?->waliKelas;
                 $waliUser = $waliKelasEmp?->user;
                 if (! $waliUser && $waliKelasEmp?->email) {
                     $waliUser = User::query()->where('email', $waliKelasEmp->email)->first();
                 }
+
+                $resolvedUnitName = $student->educationUnit?->name
+                    ?? $student->kelas?->unitPendidikan?->name
+                    ?? $kelas?->unitPendidikan?->name
+                    ?? $student->kelas?->unit_pendidikan?->name
+                    ?? $student->unit_name
+                    ?? '-';
 
                 if ($waliUser) {
                     $contactsMap[$waliUser->id] = [
@@ -2548,7 +2779,7 @@ class StudentParentPortalController extends Controller
                         'teacher_type' => 'wali_kelas',
                         'subject' => 'Wali Kelas (' . ($kelas->nama_kelas ?? '-') . ')',
                         'class_name' => $kelas->nama_kelas ?? '-',
-                        'unit_name' => $student->educationUnit?->name ?? '-',
+                        'unit_name' => $resolvedUnitName,
                         'student_id' => $student->id,
                         'student_name' => $student->full_name,
                         'last_message' => null,
@@ -2563,7 +2794,7 @@ class StudentParentPortalController extends Controller
                     ->where('is_active', true)
                     ->get();
 
-                $allowedTeacherRoles = ['Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Guru Tahfizh', 'Wali Kelas', 'Teacher'];
+                $allowedTeacherRoles = ['Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Guru Tahfizh', 'Wali Kelas', 'Teacher', 'Guru BK', 'Musyrif', 'Musyrifah', 'Musyrif / Musyrifah', 'Pembimbing'];
                 $disallowedTeacherRoles = [
                     'Yayasan', 'Ketua Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Pengurus Yayasan',
                     'Kepala Sekolah', 'Wakil Kepala Sekolah', 'Tata Usaha', 'TU', 'Admin', 'Super Admin',
@@ -2584,57 +2815,119 @@ class StudentParentPortalController extends Controller
                     if ($hasDisallowed || ! $hasAllowed) {
                         continue;
                     }
-                        $teacherName = $sched->employee?->nama_lengkap ?? $sched->teacher?->full_name ?? $teacherUser->name;
-                        $subjectName = $sched->subject?->name ?? $sched->subject?->nama_mata_pelajaran ?? 'Mata Pelajaran';
+                    $teacherName = $sched->employee?->nama_lengkap ?? $sched->teacher?->full_name ?? $teacherUser->name;
+                    $subjectName = $sched->subject?->name ?? $sched->subject?->nama_mata_pelajaran ?? 'Mata Pelajaran';
 
-                        $contactsMap[$teacherUser->id] = [
-                            'user_id' => $teacherUser->id,
-                            'name' => $teacherName,
-                            'photo' => $teacherUser->avatar_url ?? null,
-                            'role' => 'Guru Mapel',
-                            'teacher_type' => 'guru_mapel',
-                            'subject' => $subjectName,
-                            'class_name' => $student->kelas?->nama_kelas ?? '-',
-                            'unit_name' => $student->educationUnit?->name ?? '-',
+                    $contactsMap[$teacherUser->id] = [
+                        'user_id' => $teacherUser->id,
+                        'name' => $teacherName,
+                        'photo' => $teacherUser->avatar_url ?? null,
+                        'role' => 'Guru Mapel',
+                        'teacher_type' => 'guru_mapel',
+                        'subject' => $subjectName,
+                        'class_name' => $student->kelas?->nama_kelas ?? ($kelas->nama_kelas ?? '-'),
+                        'unit_name' => $resolvedUnitName,
+                        'student_id' => $student->id,
+                        'student_name' => $student->full_name,
+                        'last_message' => null,
+                        'last_message_at' => null,
+                        'unread_count' => 0,
+                    ];
+                }
+
+                // 2. Sertakan guru yang berinteraksi / mencatat buku penghubung untuk santri ini
+                $notesTeachers = StudentNote::query()
+                    ->with(['teacher.user.roles'])
+                    ->where('student_id', $student->id)
+                    ->get();
+
+                foreach ($notesTeachers as $note) {
+                    $teacherUser = $note->teacher?->user;
+                    if (! $teacherUser || isset($contactsMap[$teacherUser->id]) || $teacherUser->id === $user->id) {
+                        continue;
+                    }
+
+                    $roles = $teacherUser->roles->pluck('name')->all();
+                    $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
+                    $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
+
+                    if ($hasDisallowed || ! $hasAllowed) {
+                        continue;
+                    }
+
+                    $teacherName = $note->teacher?->full_name ?? $teacherUser->name;
+                    $roleLabel = match ($note->category) {
+                        'Tahfizh' => 'Guru Tahfizh',
+                        'Konseling' => 'Guru BK',
+                        'Ibadah' => 'Musyrif / Pembina',
+                        default => 'Guru Pengampu',
+                    };
+                    $teacherType = match ($note->category) {
+                        'Tahfizh' => 'guru_tahfizh',
+                        'Konseling' => 'guru_bk',
+                        default => 'guru_mapel',
+                    };
+
+                    $contactsMap[$teacherUser->id] = [
+                        'user_id' => $teacherUser->id,
+                        'name' => $teacherName,
+                        'photo' => $teacherUser->avatar_url ?? null,
+                        'role' => $roleLabel,
+                        'teacher_type' => $teacherType,
+                        'subject' => $note->category ? 'Buku Penghubung (' . $note->category . ')' : 'Guru Pembimbing',
+                        'class_name' => $student->kelas?->nama_kelas ?? ($kelas->nama_kelas ?? '-'),
+                        'unit_name' => $resolvedUnitName,
+                        'student_id' => $student->id,
+                        'student_name' => $student->full_name,
+                        'last_message' => null,
+                        'last_message_at' => null,
+                        'unread_count' => 0,
+                    ];
+                }
+
+                // 3. Fallback jika masih kosong: guru aktif di unit pendidikan santri tersebut
+                if (empty($contactsMap) && $student->unit_id) {
+                    $unitEmployees = Employee::query()
+                        ->with('user.roles')
+                        ->where('unit_id', $student->unit_id)
+                        ->whereNotNull('user_id')
+                        ->get();
+
+                    foreach ($unitEmployees as $emp) {
+                        $tUser = $emp->user;
+                        if (! $tUser || isset($contactsMap[$tUser->id]) || $tUser->id === $user->id) {
+                            continue;
+                        }
+                        $roles = $tUser->roles->pluck('name')->all();
+                        $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
+                        $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
+                        if ($hasDisallowed || ! $hasAllowed) {
+                            continue;
+                        }
+
+                        $contactsMap[$tUser->id] = [
+                            'user_id' => $tUser->id,
+                            'name' => $emp->nama_lengkap ?? $tUser->name,
+                            'photo' => $tUser->avatar_url ?? null,
+                            'role' => in_array('Wali Kelas', $roles) ? 'Wali Kelas' : 'Guru Unit',
+                            'teacher_type' => in_array('Wali Kelas', $roles) ? 'wali_kelas' : 'guru_mapel',
+                            'subject' => 'Guru ' . ($resolvedUnitName !== '-' ? $resolvedUnitName : 'Unit'),
+                            'class_name' => $student->kelas?->nama_kelas ?? ($kelas->nama_kelas ?? '-'),
+                            'unit_name' => $resolvedUnitName,
                             'student_id' => $student->id,
                             'student_name' => $student->full_name,
                             'last_message' => null,
                             'last_message_at' => null,
                             'unread_count' => 0,
                         ];
+                    }
                 }
             }
         }
 
-        if (empty($contactsMap)) {
-            $teachers = User::query()
-                ->whereHas('roles', fn ($q) => $q->whereIn('name', ['Guru', 'Wali Kelas', 'Guru Mata Pelajaran', 'Teacher']))
-                ->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', [
-                    'Yayasan', 'Ketua Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Pengurus Yayasan',
-                    'Kepala Sekolah', 'Wakil Kepala Sekolah', 'Tata Usaha', 'TU', 'Admin', 'Super Admin'
-                ]))
-                ->where('id', '!=', $user->id)
-                ->take(3)
-                ->get();
-
-            foreach ($teachers as $idx => $t) {
-                $contactsMap[$t->id] = [
-                    'user_id' => $t->id,
-                    'name' => $t->name ?? ($idx === 0 ? 'Wali Kelas' : 'Guru Mata Pelajaran'),
-                    'photo' => $t->avatar_url ?? null,
-                    'role' => $idx === 0 ? 'Wali Kelas' : 'Guru Mapel',
-                    'teacher_type' => $idx === 0 ? 'wali_kelas' : 'guru_mapel',
-                    'subject' => $idx === 0 ? 'Wali Kelas' : 'Mata Pelajaran',
-                    'class_name' => $student?->kelas?->nama_kelas ?? 'Kelas SIT',
-                    'unit_name' => $student?->educationUnit?->name ?? 'Sekolah Terpadu',
-                    'student_id' => $student?->id ?? 'default-child',
-                    'student_name' => $student?->full_name ?? 'Siswa',
-                    'last_message' => null,
-                    'last_message_at' => null,
-                    'unread_count' => 0,
-                ];
-            }
-        }
+        // WM-04 PATCH: removed global teacher fallback to prevent cross-parent contact disclosure.
+        // If no student context or no schedule-based contacts found, return empty contacts list.
+        // This prevents a parent from accessing teachers unrelated to their own child's class.
 
         $teacherUserIds = array_keys($contactsMap);
         $teacherUserIdsStr = array_map('strval', $teacherUserIds);
@@ -2802,7 +3095,7 @@ class StudentParentPortalController extends Controller
         if ($request->hasFile('attachment')) {
             $file = $request->file('attachment');
             $path = $file->store('chat/attachments', 'public');
-            \AppModels\PortalMessageAttachment::create([
+            \App\Models\PortalMessageAttachment::create([
                 'message_id' => $message->id,
                 'disk' => 'public',
                 'path' => $path,
@@ -2943,7 +3236,10 @@ class StudentParentPortalController extends Controller
             'password' => 'required|string|min:6|confirmed',
         ]);
 
-        $student = Student::where('id', $childId)->first();
+        // WM-01 PATCH: verify parent-child ownership before allowing password mutation.
+        // Mirrors the authorization guard already present in updateChildPhoto().
+        $user = $request->user();
+        $student = Str::isUuid($childId) ? Student::where('id', $childId)->first() : null;
         if (! $student) {
             return response()->json([
                 'success' => false,
@@ -2951,10 +3247,28 @@ class StudentParentPortalController extends Controller
             ], 404);
         }
 
+        $parent = ParentModel::where('user_id', $user->id)->first();
+        if ($parent) {
+            $isLinkedChild = $this->parentStudentsQuery($parent)->whereKey($student->id)->exists();
+            if (! $isLinkedChild) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak memiliki hak akses untuk mengubah password siswa ini.',
+                ], 403);
+            }
+        } elseif (! $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan'])) {
+            if ($student->user_id !== $user->id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak memiliki hak akses untuk mengubah password siswa ini.',
+                ], 403);
+            }
+        }
+
         if ($student->user_id) {
-            $user = \App\Models\User::find($student->user_id);
-            if ($user) {
-                $user->update(['password' => \Illuminate\Support\Facades\Hash::make($request->password)]);
+            $studentUser = \App\Models\User::find($student->user_id);
+            if ($studentUser) {
+                $studentUser->update(['password' => \Illuminate\Support\Facades\Hash::make($request->password)]);
             }
         }
 
@@ -2984,9 +3298,25 @@ class StudentParentPortalController extends Controller
             'notes_parent' => 'nullable|string|max:500',
         ]);
 
-        $student = Student::where('id', $validated['student_id'])->first();
-        if (! $student) {
+        // WM-03 PATCH: verify parent-child ownership before writing murajaah records.
+        // A parent must not be able to submit murajaah for a student they do not own.
+        $user = $request->user();
+        $studentId = $validated['student_id'];
+        if (! Str::isUuid($studentId)) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+        }
+        $student = null;
+        $parentForMurajaah = ParentModel::where('user_id', $user->id)->first();
+        if ($parentForMurajaah) {
+            $student = $this->parentStudentsQuery($parentForMurajaah)->where('id', $studentId)->where('is_active', true)->first();
+        } elseif ($user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan'])) {
+            $student = Student::where('id', $studentId)->first();
+        } else {
+            // Siswa hanya bisa submit murajaah untuk diri sendiri
+            $student = Student::where('id', $studentId)->where('user_id', $user->id)->first();
+        }
+        if (! $student) {
+            return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan atau Anda tidak memiliki akses.'], 404);
         }
 
         $surah = \App\Models\QuranSurah::where('nomor', $validated['surah_number'])->first();
@@ -3083,8 +3413,19 @@ class StudentParentPortalController extends Controller
      */
     public function pendingMurajaahReviewList(Request $request): JsonResponse
     {
+        $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated.');
+        }
+
+        $accessScope = app(\App\Services\AccessScopeService::class);
         $query = TahfizhDailyLog::with(['student', 'teacher'])
             ->where('status', 'pending_approval');
+
+        if (! $accessScope->hasGlobalScope($user)) {
+            $accessibleStudentIds = $accessScope->accessibleStudents($user)->select('students.id');
+            $query->whereIn('student_id', $accessibleStudentIds);
+        }
 
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->query('class_id'));
@@ -3121,9 +3462,23 @@ class StudentParentPortalController extends Controller
      */
     public function approveMurajaahReview(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated.');
+        }
+
+        $userRoleNames = $user->roles->pluck('name')->map(fn ($r) => strtolower($r))->toArray();
+        $isStudentOrAlumniOrParent = collect($userRoleNames)->contains(fn ($r) => in_array($r, ['siswa', 'student', 'alumni', 'orang tua', 'orang_tua', 'ortu', 'parent', 'wali murid']));
+        abort_if($isStudentOrAlumniOrParent, 403, 'Hanya Ustadz / Guru Pembimbing yang berhak memverifikasi murajaah rumah.');
+
         $log = TahfizhDailyLog::where('id', $id)->first();
         if (! $log) {
             return response()->json(['success' => false, 'status' => 'error', 'message' => 'Data log tidak ditemukan.'], 404);
+        }
+
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        if (! $accessScope->hasGlobalScope($user)) {
+            abort_unless($accessScope->accessibleStudents($user)->where('students.id', $log->student_id)->exists(), 403, 'Akses verifikasi murajaah ditolak: siswa berada di luar wewenang akun.');
         }
 
         $validated = $request->validate([
@@ -3131,7 +3486,6 @@ class StudentParentPortalController extends Controller
             'nilai' => 'nullable|string|in:Mumtaz,Lancar,Mutqin,Jayyid Jiddan,Jayyid,Perlu Latihan',
         ]);
 
-        $user = $request->user();
         $teacherName = $user ? ($user->name ?? $user->full_name ?? 'Ustadz / Guru Tahfizh') : 'Ustadz / Guru Tahfizh';
         $nilai = $validated['nilai'] ?? 'Mutqin';
 
@@ -3175,16 +3529,29 @@ class StudentParentPortalController extends Controller
      */
     public function rejectMurajaahReview(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated.');
+        }
+
+        $userRoleNames = $user->roles->pluck('name')->map(fn ($r) => strtolower($r))->toArray();
+        $isStudentOrAlumniOrParent = collect($userRoleNames)->contains(fn ($r) => in_array($r, ['siswa', 'student', 'alumni', 'orang tua', 'orang_tua', 'ortu', 'parent', 'wali murid']));
+        abort_if($isStudentOrAlumniOrParent, 403, 'Hanya Ustadz / Guru Pembimbing yang berhak memverifikasi murajaah rumah.');
+
         $log = TahfizhDailyLog::where('id', $id)->first();
         if (! $log) {
             return response()->json(['success' => false, 'status' => 'error', 'message' => 'Data log tidak ditemukan.'], 404);
+        }
+
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        if (! $accessScope->hasGlobalScope($user)) {
+            abort_unless($accessScope->accessibleStudents($user)->where('students.id', $log->student_id)->exists(), 403, 'Akses verifikasi murajaah ditolak: siswa berada di luar wewenang akun.');
         }
 
         $validated = $request->validate([
             'notes_teacher' => 'required|string|max:500',
         ]);
 
-        $user = $request->user();
         $teacherName = $user ? ($user->name ?? $user->full_name ?? 'Ustadz / Guru Tahfizh') : 'Ustadz / Guru Tahfizh';
 
         $meta = is_array($log->metadata) ? $log->metadata : [];
@@ -3828,7 +4195,7 @@ class StudentParentPortalController extends Controller
                     'name' => $student->full_name ?? $student->nama_lengkap ?? 'Siswa',
                     'nis' => $student->nis ?? '-',
                     'class_name' => $student->kelas?->nama_kelas ?? $student->kelas?->name ?? 'Kelas',
-                    'unit_name' => $student->educationUnit?->name ?? 'Unit Pendidikan',
+                    'unit_name' => $student->educationUnit?->name ?? $student->kelas?->unitPendidikan?->name ?? $student->kelas?->unit_pendidikan?->name ?? $student->unit_name ?? 'Unit Pendidikan',
                 ],
                 'date' => $today,
                 'server_date' => $serverDate,

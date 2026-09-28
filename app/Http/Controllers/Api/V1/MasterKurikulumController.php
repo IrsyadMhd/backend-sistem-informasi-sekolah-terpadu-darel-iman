@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\MasterArrayExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\SimpanMasterKurikulumRequest;
 use App\Http\Requests\V1\UbahMasterKurikulumRequest;
@@ -10,6 +11,7 @@ use App\Services\MasterKurikulumService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Maatwebsite\Excel\Facades\Excel;
 
 class MasterKurikulumController extends Controller
 {
@@ -207,7 +209,7 @@ class MasterKurikulumController extends Controller
     /**
      * Ekspor data master kurikulum.
      */
-    public function export(Request $request): JsonResponse
+    public function export(Request $request)
     {
         $filters = [
             'search' => $request->query('search'),
@@ -219,6 +221,33 @@ class MasterKurikulumController extends Controller
         ];
 
         $data = $this->service->eksporData($filters);
+
+        $format = strtolower($request->query('format', 'json'));
+        if (in_array($format, ['xlsx', 'xls', 'csv'])) {
+            $excelFormat = match ($format) {
+                'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
+                'xls' => \Maatwebsite\Excel\Excel::XLS,
+                'csv' => \Maatwebsite\Excel\Excel::CSV,
+            };
+            $headings = [
+                'No',
+                'Kode Kurikulum',
+                'Nama Kurikulum',
+                'Jenis Kurikulum',
+                'Jenjang',
+                'Unit Pendidikan',
+                'Tahun Ajaran',
+                'Semester',
+                'Tanggal Mulai',
+                'Tanggal Selesai',
+                'Status',
+                'Deskripsi',
+                'Tanggal Dibuat',
+            ];
+            $rows = collect($data)->map(fn ($r) => array_values($r));
+            $filename = 'data_master_kurikulum_' . date('Ymd_His') . '.' . $format;
+            return Excel::download(new MasterArrayExport($rows, $headings), $filename, $excelFormat);
+        }
 
         return response()->json([
             'status' => 'success',

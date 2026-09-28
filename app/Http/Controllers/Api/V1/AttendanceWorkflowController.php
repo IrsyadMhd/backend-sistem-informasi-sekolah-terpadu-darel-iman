@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Exports\AttendanceReportExport;
 use App\Models\ClassSchedule;
 use App\Models\HomeroomAttendanceFollowUp;
 use App\Models\LessonAttendanceCorrection;
@@ -16,6 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Maatwebsite\Excel\Facades\Excel;
 
 class AttendanceWorkflowController extends Controller
 {
@@ -51,7 +53,7 @@ class AttendanceWorkflowController extends Controller
 
     public function showPermission(Request $request, StudentAttendancePermission $permission): JsonResponse
     {
-        $studentId = $this->access->student($request->user())?->id;
+        $studentId = $this->access->student($request->user(), $permission->student_id)?->id;
         $allowed = $request->user()->hasRole('Super Admin')
             || ($studentId && $permission->student_id === $studentId)
             || $this->access->homeroomStudentIds($request->user())->contains($permission->student_id);
@@ -173,7 +175,7 @@ class AttendanceWorkflowController extends Controller
             ->first();
         $recommendations = StudentAttendancePermission::query()
             ->whereIn('student_id', $students->pluck('id'))
-            ->where('status', 'approved')
+            ->whereIn('status', ['approved', 'submitted', 'pending'])
             ->whereDate('start_date', '<=', $date)
             ->whereDate('end_date', '>=', $date)
             ->get()->keyBy('student_id');
@@ -184,7 +186,12 @@ class AttendanceWorkflowController extends Controller
             return [
                 ...$student->only(['id', 'nis', 'nisn', 'full_name', 'class_id', 'kelas_id']),
                 'recommended_status' => $permission?->type,
-                'recommendation_verified' => (bool) $permission,
+                'recommendation_verified' => $permission?->status === 'approved',
+                'permission_id' => $permission?->id,
+                'permission_status' => $permission?->status,
+                'permission_reason' => $permission?->reason,
+                'permission_start_date' => $permission?->start_date ? \Carbon\Carbon::parse($permission->start_date)->toDateString() : null,
+                'permission_end_date' => $permission?->end_date ? \Carbon\Carbon::parse($permission->end_date)->toDateString() : null,
             ];
         }), 'session' => $session]);
     }
@@ -447,13 +454,18 @@ class AttendanceWorkflowController extends Controller
 
     public function permissions(Request $request): JsonResponse
     {
+        $childId = $request->header('X-Child-Id')
+            ?? $request->query('child_id')
+            ?? $request->input('child_id')
+            ?? $request->input('student_id');
+
         if ($request->isMethod('get')) {
-            $this->permit($request, ['student_attendance.view_own'], ['Siswa']);
+            $this->permit($request, ['student_attendance.view_own'], ['Siswa', 'Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']);
         } else {
-            $this->permit($request, ['student_attendance.permission.create', 'student_attendance.permission.update']);
+            $this->permit($request, ['student_attendance.permission.create', 'student_attendance.permission.update'], ['Siswa', 'Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']);
         }
-        $student = $this->access->student($request->user());
-        abort_unless($student, 403);
+        $student = $this->access->student($request->user(), $childId);
+        abort_unless($student, 403, 'Data siswa atau anak tidak ditemukan dalam kewenangan akun Anda.');
         if ($request->isMethod('get')) {
             return response()->json(['success' => true, 'data' => StudentAttendancePermission::where('student_id', $student->id)->latest()->paginate(15)]);
         }
@@ -481,8 +493,9 @@ class AttendanceWorkflowController extends Controller
 
     public function cancelPermission(Request $request, StudentAttendancePermission $permission): JsonResponse
     {
-        $this->permit($request, ['student_attendance.permission.cancel']);
-        abort_unless($permission->student_id === $this->access->student($request->user())?->id, 403);
+        $this->permit($request, ['student_attendance.permission.cancel'], ['Siswa', 'Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']);
+        $student = $this->access->student($request->user(), $permission->student_id);
+        abort_unless($student && $permission->student_id === $student->id, 403);
         abort_unless(in_array($permission->status, ['draft', 'submitted', 'waiting_verification']), 422, 'Pengajuan tidak dapat dibatalkan.');
         $old = $permission->toArray();
         $permission->update(['status' => 'cancelled', 'updated_by' => $request->user()->id]);
@@ -493,8 +506,9 @@ class AttendanceWorkflowController extends Controller
 
     public function updatePermission(Request $request, StudentAttendancePermission $permission): JsonResponse
     {
-        $this->permit($request, ['student_attendance.permission.update']);
-        abort_unless($permission->student_id === $this->access->student($request->user())?->id, 403);
+        $this->permit($request, ['student_attendance.permission.update'], ['Siswa', 'Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']);
+        $student = $this->access->student($request->user(), $permission->student_id);
+        abort_unless($student && $permission->student_id === $student->id, 403);
         abort_unless(in_array($permission->status, ['draft', 'needs_revision', 'revision_required']), 422, 'Hanya draft atau pengajuan revisi yang dapat diubah.');
         $data = $request->validate([
             'start_date' => ['sometimes', 'date'],
@@ -517,8 +531,9 @@ class AttendanceWorkflowController extends Controller
 
     public function submitPermission(Request $request, StudentAttendancePermission $permission): JsonResponse
     {
-        $this->permit($request, ['student_attendance.permission.update']);
-        abort_unless($permission->student_id === $this->access->student($request->user())?->id, 403);
+        $this->permit($request, ['student_attendance.permission.update'], ['Siswa', 'Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']);
+        $student = $this->access->student($request->user(), $permission->student_id);
+        abort_unless($student && $permission->student_id === $student->id, 403);
         abort_unless(in_array($permission->status, ['draft', 'needs_revision', 'revision_required']), 422, 'Pengajuan tidak dapat dikirim.');
         $old = $permission->toArray();
         $permission->update(['status' => 'submitted', 'submitted_at' => now(), 'updated_by' => $request->user()->id]);
@@ -529,24 +544,93 @@ class AttendanceWorkflowController extends Controller
 
     public function homeroomPermissions(Request $request): JsonResponse
     {
-        $this->permit($request, ['homeroom_attendance.view', 'homeroom_attendance.verify_permission'], ['Wali Kelas']);
-        $studentIds = $this->access->homeroomStudentIds($request->user());
+        $this->permit($request, ['homeroom_attendance.view', 'homeroom_attendance.verify_permission'], ['Wali Kelas', 'Super Admin', 'super_admin', 'Tata Usaha', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah']);
+        $isGlobal = $request->user()->hasAnyRole(['Super Admin', 'super_admin', 'Tata Usaha', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah']);
+        $studentIds = $isGlobal ? null : $this->access->homeroomStudentIds($request->user());
 
         return response()->json(['success' => true, 'data' => StudentAttendancePermission::with('student')
-            ->whereIn('student_id', $studentIds)
+            ->when(! $isGlobal, fn ($q) => $q->whereIn('student_id', $studentIds))
             ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->latest()->paginate($request->integer('per_page', 15))]);
     }
 
-    public function reviewPermission(Request $request, StudentAttendancePermission $permission): JsonResponse
+    /**
+     * Daftar izin siswa dalam scope guru — digunakan di presensi KBM.
+     * GET /teacher/permissions?class_id=&status=submitted&date=
+     */
+    public function teacherPermissions(Request $request): JsonResponse
     {
-        $this->permit($request, ['homeroom_attendance.verify_permission'], ['Wali Kelas']);
-        abort_unless($this->access->homeroomStudentIds($request->user())->contains($permission->student_id), 403);
-        $data = $request->validate(['status' => ['required', Rule::in(['needs_revision', 'approved', 'rejected'])], 'review_notes' => ['nullable', 'string']]);
+        $this->permit(
+            $request,
+            ['homeroom_attendance.verify_permission', 'teacher.attendance.create', 'teacher.attendance.view'],
+            ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas', 'Super Admin', 'super_admin', 'Admin', 'Tata Usaha']
+        );
+
+        $user = $request->user();
+        $isGlobal = $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Tata Usaha', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah']);
+
+        // Kumpulkan semua student_id yang dalam scope guru
+        $accessibleIds = collect();
+        if (!$isGlobal) {
+            $accessibleIds = $this->access->homeroomStudentIds($user);
+            if ($user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran'])) {
+                $accessibleIds = $accessibleIds->merge(
+                    $this->accessScopeService->accessibleStudents($user)->pluck('id')
+                );
+            }
+            $accessibleIds = $accessibleIds->unique();
+        }
+
+        $query = StudentAttendancePermission::with(['student.schoolClass', 'reviewer'])
+            ->when(!$isGlobal, fn($q) => $q->whereIn('student_id', $accessibleIds))
+            ->when($request->filled('class_id'), fn($q) => $q->where('class_id', $request->input('class_id')))
+            ->when($request->filled('student_id'), fn($q) => $q->where('student_id', $request->input('student_id')))
+            ->when($request->filled('status'), fn($q) => $q->where('status', $request->input('status')))
+            ->when($request->filled('type'), fn($q) => $q->where('type', $request->input('type')))
+            ->when($request->filled('date'), function ($q) use ($request) {
+                $date = $request->date('date');
+                $q->where('start_date', '<=', $date)->where('end_date', '>=', $date);
+            })
+            ->when($request->filled('start_date'), fn($q) => $q->where('start_date', '>=', $request->input('start_date')))
+            ->when($request->filled('end_date'), fn($q) => $q->where('end_date', '<=', $request->input('end_date')))
+            ->latest('start_date');
+
+        $perPage = $request->integer('per_page', 50);
+
+        return response()->json([
+            'success' => true,
+            'data'    => $perPage > 0 ? $query->paginate($perPage) : $query->get(),
+        ]);
+    }
+
+    public function reviewPermission(Request $request, StudentAttendancePermission $permission): JsonResponse
+
+    {
+        $this->permit(
+            $request,
+            ['homeroom_attendance.verify_permission', 'teacher.attendance.create', 'teacher.attendance.view', 'lesson_attendance.create'],
+            ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas', 'Super Admin', 'super_admin', 'Tata Usaha', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah']
+        );
+        $isGlobal = $request->user()->hasAnyRole(['Super Admin', 'super_admin', 'Tata Usaha', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah']);
+        $accessibleStudentIds = $this->access->homeroomStudentIds($request->user());
+        if ($request->user()->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran'])) {
+            $accessibleStudentIds = $accessibleStudentIds->merge($this->accessScopeService->accessibleStudents($request->user())->pluck('id'));
+        }
+        abort_unless($isGlobal || $accessibleStudentIds->contains($permission->student_id), 403, 'Siswa berada di luar scope mengajar guru.');
+        if ($request->has('action') && !$request->has('status')) {
+            $act = strtolower($request->input('action'));
+            if ($act === 'approve') $request->merge(['status' => 'approved']);
+            elseif ($act === 'reject') $request->merge(['status' => 'rejected']);
+            elseif ($act === 'needs_revision') $request->merge(['status' => 'needs_revision']);
+        }
+        $data = $request->validate([
+            'status' => ['required', Rule::in(['needs_revision', 'approved', 'rejected'])],
+            'review_notes' => ['nullable', 'string'],
+        ]);
         $permission->update($data + ['reviewed_by' => $request->user()->id, 'reviewed_at' => now()]);
         $this->audit->record($request, 'review_permission', $permission, null, $permission->toArray(), $data['review_notes'] ?? null);
 
-        return response()->json(['success' => true, 'data' => $permission]);
+        return response()->json(['success' => true, 'message' => 'Status perizinan berhasil diperbarui.', 'data' => $permission]);
     }
 
     public function correction(Request $request): JsonResponse
@@ -669,16 +753,20 @@ class AttendanceWorkflowController extends Controller
             });
         }
 
+        $presentCount = (clone $base)->whereIn('status_hadir', ['hadir', 'terlambat'])->count();
+        $attendanceCount = (clone $base)->count();
+
         return response()->json(['success' => true, 'data' => [
             'total_students' => $studentIds->count(),
             'total_classes' => $classIds->count(),
-            'present' => (clone $base)->whereIn('status_hadir', ['hadir', 'terlambat'])->count(),
+            'present' => $presentCount,
             'late' => (clone $base)->where('status_hadir', 'terlambat')->count(),
             'permission' => (clone $base)->where('status_hadir', 'izin')->count(),
             'sick' => (clone $base)->where('status_hadir', 'sakit')->count(),
             'absent' => (clone $base)->where('status_hadir', 'alpa')->count(),
             'unverified' => (clone $base)->where('verification_status', '!=', 'verified')->count(),
             'open_follow_ups' => HomeroomAttendanceFollowUp::whereIn('class_id', $classIds)->whereNotIn('status', ['completed', 'closed'])->count(),
+            'attendance_rate' => $attendanceCount > 0 ? round(($presentCount / $attendanceCount) * 100) : null,
             'classes' => $classesData,
         ]]);
     }
@@ -754,12 +842,8 @@ class AttendanceWorkflowController extends Controller
         return $this->updateFollowUp($request, $followUp);
     }
 
-    public function report(Request $request): JsonResponse
+    private function buildReportQuery(Request $request)
     {
-        $this->permit($request, ['lesson_attendance.export', 'homeroom_attendance.export', 'student_attendance.view_own'], [
-            'Guru', 'Wali Kelas', 'Siswa', 'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
-            'Yayasan', 'Pengurus Yayasan', 'Ketua Yayasan', 'Divisi Pendidikan', 'Tata Usaha', 'Admin',
-        ]);
         $query = LmsPresensi::query()->with([
             'siswa:id,nis,nisn,full_name,gender,photo,photo_thumb,kelas_id,unit_id,is_active',
             'siswa.kelas:id,nama_kelas,kode_kelas,unit_pendidikan_id',
@@ -788,24 +872,23 @@ class AttendanceWorkflowController extends Controller
                     $unitIds = collect([$requestedUnit]);
                 }
                 if ($unitIds->isNotEmpty()) {
-                    $query->where(function ($q) use ($unitIds) {
-                        $q->whereHas('siswa', function ($sq) use ($unitIds) {
-                            $sq->where(function ($sq2) use ($unitIds) {
-                                $sq2->whereIn('unit_id', $unitIds)
-                                    ->orWhere(function ($sq3) use ($unitIds) {
-                                        $sq3->whereNull('unit_id')
-                                            ->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds));
-                                    });
-                            });
-                        })->orWhereHas('jadwalPelajaran.kelas', function ($jq) use ($unitIds) {
-                            $jq->whereIn('unit_pendidikan_id', $unitIds);
-                        });
-                    })
-                    ->whereDoesntHave('siswa', function ($sq) use ($unitIds) {
-                        $sq->whereNotNull('unit_id')->whereNotIn('unit_id', $unitIds);
-                    })
-                    ->whereDoesntHave('jadwalPelajaran.kelas', function ($jq) use ($unitIds) {
-                        $jq->whereNotNull('unit_pendidikan_id')->whereNotIn('unit_pendidikan_id', $unitIds);
+                    $studentIds = Student::query()
+                        ->where(function ($sq) use ($unitIds) {
+                            $sq->whereIn('unit_id', $unitIds)
+                               ->orWhere(function ($sq2) use ($unitIds) {
+                                   $sq2->whereNull('unit_id')
+                                       ->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds));
+                               });
+                        })
+                        ->pluck('id');
+
+                    $scheduleClassIds = ClassSchedule::query()
+                        ->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds))
+                        ->pluck('id');
+
+                    $query->where(function ($q) use ($studentIds, $scheduleClassIds) {
+                        $q->whereIn('siswa_id', $studentIds)
+                          ->orWhereIn('jadwal_pelajaran_id', $scheduleClassIds);
                     });
                 }
             } elseif ($user->hasRole('Wali Kelas')) {
@@ -818,33 +901,29 @@ class AttendanceWorkflowController extends Controller
         if ($isFoundationAdmin && $request->filled('unit_id')) {
             $requestedUnit = $request->string('unit_id')->toString();
             $unitIds = collect([$requestedUnit]);
-            $query->where(function ($q) use ($unitIds) {
-                $q->whereHas('siswa', function ($sq) use ($unitIds) {
-                    $sq->where(function ($sq2) use ($unitIds) {
-                        $sq2->whereIn('unit_id', $unitIds)
-                            ->orWhere(function ($sq3) use ($unitIds) {
-                                $sq3->whereNull('unit_id')
-                                    ->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds));
-                            });
-                    });
-                })->orWhereHas('jadwalPelajaran.kelas', function ($jq) use ($unitIds) {
-                    $jq->whereIn('unit_pendidikan_id', $unitIds);
-                });
-            })
-            ->whereDoesntHave('siswa', function ($sq) use ($unitIds) {
-                $sq->whereNotNull('unit_id')->whereNotIn('unit_id', $unitIds);
-            })
-            ->whereDoesntHave('jadwalPelajaran.kelas', function ($jq) use ($unitIds) {
-                $jq->whereNotNull('unit_pendidikan_id')->whereNotIn('unit_pendidikan_id', $unitIds);
+            $studentIds = Student::query()
+                ->where(function ($sq) use ($unitIds) {
+                    $sq->whereIn('unit_id', $unitIds)
+                       ->orWhere(function ($sq2) use ($unitIds) {
+                           $sq2->whereNull('unit_id')
+                               ->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds));
+                       });
+                })
+                ->pluck('id');
+
+            $scheduleClassIds = ClassSchedule::query()
+                ->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds))
+                ->pluck('id');
+
+            $query->where(function ($q) use ($studentIds, $scheduleClassIds) {
+                $q->whereIn('siswa_id', $studentIds)
+                  ->orWhereIn('jadwal_pelajaran_id', $scheduleClassIds);
             });
         }
 
         // Only include active students (is_active = true)
         $query->whereHas('siswa', function ($sq) {
             $sq->where('is_active', true);
-            if (\Illuminate\Support\Facades\Schema::hasColumn('students', 'status')) {
-                $sq->whereNotIn('status', ['Berhenti', 'Lulus', 'Nonaktif', 'berhenti', 'lulus', 'nonaktif']);
-            }
         });
 
         $query->when($request->filled('class_id'), function ($q) use ($request) {
@@ -870,18 +949,67 @@ class AttendanceWorkflowController extends Controller
             ->when($request->filled('status'), fn ($q) => $q->where('status_hadir', $request->string('status')->toString()))
             ->when($request->filled('subject_id'), fn ($q) => $q->whereHas('jadwalPelajaran', fn ($sq) => $sq->where('subject_id', $request->string('subject_id')->toString())));
 
-        $rows = $query->get();
+        return $query;
+    }
+
+    public function report(Request $request): JsonResponse
+    {
+        $this->permit($request, ['lesson_attendance.export', 'homeroom_attendance.export', 'student_attendance.view_own'], [
+            'Guru', 'Wali Kelas', 'Siswa', 'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Yayasan', 'Pengurus Yayasan', 'Ketua Yayasan', 'Divisi Pendidikan', 'Tata Usaha', 'Admin',
+        ]);
+
+        $query = $this->buildReportQuery($request);
+
+        $stats = (clone $query)
+            ->reorder()
+            ->selectRaw('status_hadir, count(*) as cnt')
+            ->groupBy('status_hadir')
+            ->pluck('cnt', 'status_hadir');
+
+        $totalRecords = (int) $stats->sum();
+
+        $limit = min((int) $request->input('per_page', 250), 1000);
+        $rows = $query->orderBy('tanggal', 'desc')->limit($limit)->get();
 
         return response()->json(['success' => true, 'data' => [
             'summary' => [
-                'total' => $rows->count(),
-                'present' => $rows->where('status_hadir', 'hadir')->count(),
-                'late' => $rows->where('status_hadir', 'terlambat')->count(),
-                'permission' => $rows->where('status_hadir', 'izin')->count(),
-                'sick' => $rows->where('status_hadir', 'sakit')->count(),
-                'absent' => $rows->where('status_hadir', 'alpa')->count(),
+                'total' => $totalRecords,
+                'present' => (int) ($stats['hadir'] ?? 0),
+                'late' => (int) ($stats['terlambat'] ?? 0),
+                'permission' => (int) ($stats['izin'] ?? 0),
+                'sick' => (int) ($stats['sakit'] ?? 0),
+                'absent' => (int) ($stats['alpa'] ?? 0),
             ],
             'rows' => $rows,
         ]]);
+    }
+
+    public function export(Request $request)
+    {
+        $this->permit($request, ['lesson_attendance.export', 'homeroom_attendance.export', 'student_attendance.view_own'], [
+            'Guru', 'Wali Kelas', 'Siswa', 'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Yayasan', 'Pengurus Yayasan', 'Ketua Yayasan', 'Divisi Pendidikan', 'Tata Usaha', 'Admin',
+        ]);
+
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
+
+        $query = $this->buildReportQuery($request)->orderBy('tanggal', 'desc');
+
+        if (! $request->filled('month') && ! $request->filled('date_from') && ! $request->filled('class_id') && ! $request->filled('student_id')) {
+            $query->limit((int) $request->input('limit', 5000));
+        } elseif ($request->filled('limit')) {
+            $query->limit((int) $request->input('limit'));
+        }
+
+        $format = strtolower((string) $request->query('format', 'xlsx'));
+        $timestamp = date('Ymd_His');
+
+        return match ($format) {
+            'csv' => Excel::download(new AttendanceReportExport($query), "laporan_absensi_{$timestamp}.csv", \Maatwebsite\Excel\Excel::CSV),
+            'xls' => Excel::download(new AttendanceReportExport($query), "laporan_absensi_{$timestamp}.xls", \Maatwebsite\Excel\Excel::XLS),
+            default => Excel::download(new AttendanceReportExport($query), "laporan_absensi_{$timestamp}.xlsx", \Maatwebsite\Excel\Excel::XLSX),
+        };
     }
 }

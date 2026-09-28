@@ -45,7 +45,13 @@ class LmsRaporRepository implements LmsRaporRepositoryInterface
             });
         }
 
-        if (! empty($filters['kelas_id'])) {
+        if (isset($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
+            if (empty($filters['kelas_ids'])) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereIn('kelas_id', $filters['kelas_ids']);
+            }
+        } elseif (! empty($filters['kelas_id'])) {
             $query->where('kelas_id', $filters['kelas_id']);
         }
 
@@ -256,7 +262,13 @@ class LmsRaporRepository implements LmsRaporRepositoryInterface
     {
         $query = LmsRapor::query();
 
-        if (! empty($filters['kelas_id'])) {
+        if (isset($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
+            if (empty($filters['kelas_ids'])) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereIn('kelas_id', $filters['kelas_ids']);
+            }
+        } elseif (! empty($filters['kelas_id'])) {
             $query->where('kelas_id', $filters['kelas_id']);
         }
         if (! empty($filters['semester_id'])) {
@@ -298,7 +310,16 @@ class LmsRaporRepository implements LmsRaporRepositoryInterface
                     'is_active' => $semester->is_active,
                 ])
                 ->values(),
-            'tahun_ajarans' => AcademicYear::select('id', 'year', 'is_active')->get(),
+            'tahun_ajarans' => AcademicYear::select('id', 'name', 'is_active')
+                ->get()
+                ->map(fn (AcademicYear $year) => [
+                    'id' => $year->id,
+                    'name' => $year->name,
+                    'nama' => $year->name,
+                    'year' => $year->name,
+                    'is_active' => $year->is_active,
+                ])
+                ->values(),
             'employees' => Employee::select('id', 'nama_lengkap', 'niy', 'nik')->orderBy('nama_lengkap')->get(),
         ];
     }

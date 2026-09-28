@@ -64,6 +64,11 @@ class MutabaahDailyController extends Controller
         return $this->ok('Finalisasi massal berhasil.', ['finalized' => $this->service->finalize($request->user(), $request->validated())]);
     }
 
+    public function verifyHome(MutabaahDailyRequest $request): JsonResponse
+    {
+        return $this->ok('Amalan rumah berhasil diverifikasi.', ['verified_count' => $this->service->verifyHomeItems($request->user(), $request->validated())]);
+    }
+
     public function reopen(MutabaahDailyRequest $request): JsonResponse
     {
         return $this->ok('Data berhasil dibuka kembali.', $this->service->reopen($request->user(), $request->validated(), $request));

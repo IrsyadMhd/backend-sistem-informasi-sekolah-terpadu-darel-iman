@@ -136,12 +136,11 @@ class SimulasiSiswaSemuaKelasSeeder extends Seeder
                 ->whereNull('deleted_at')
                 ->count();
 
-            // Target kapasitas minimal per kelas: 25 siswa
-            // Jika kelas masih 0 atau kurang dari 20, kita genapkan hingga 25-28 siswa
-            $targetClassSize = in_array(strtoupper($kelas->tingkat ?? ''), ['BOARDING', 'MAHAD', 'ASRAMA']) ? 35 : 25;
+            // Target kapasitas per kelas: tepat 30 siswa (atau 50 untuk asrama/boarding)
+            $targetClassSize = in_array(strtoupper($kelas->tingkat ?? ''), ['BOARDING', 'MAHAD', 'ASRAMA']) ? 50 : 30;
 
-            if ($currentCount >= 20) {
-                continue; // Sudah terisi cukup siswa
+            if ($currentCount >= $targetClassSize) {
+                continue; // Sudah terisi penuh
             }
 
             $needed = $targetClassSize - $currentCount;

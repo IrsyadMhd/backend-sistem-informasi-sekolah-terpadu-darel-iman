@@ -12,6 +12,7 @@ class MutabaahDailyRequest extends FormRequest
         $user = $this->user();
         $permission = match ($this->route()?->getActionMethod()) {
             'finalizeStudent', 'finalizeBulk' => 'mutabaah.daily.finalize',
+            'verifyHome' => 'mutabaah.daily.input',
             'reopen' => 'mutabaah.daily.reopen',
             'saveCell', 'bulkSave', 'copyPreviousDay' => 'mutabaah.daily.input',
             default => 'mutabaah.daily.view',
@@ -40,6 +41,9 @@ class MutabaahDailyRequest extends FormRequest
                 'template_item_id' => ['required', 'uuid', 'exists:mutabaah_template_items,id'],
                 'value' => ['required', 'array'], 'value.status_value' => ['nullable', Rule::in(['good', 'less', 'not_done', 'na'])],
                 'value.numeric_value' => ['nullable', 'numeric'], 'value.text_value' => ['nullable', 'string', 'max:4000'],
+            ],
+            'verifyHome' => [
+                'student_ids' => ['nullable', 'array'], 'student_ids.*' => ['uuid', 'distinct'],
             ],
             'copyPreviousDay', 'finalizeBulk' => ['student_ids' => ['required', 'array', 'min:1'], 'student_ids.*' => ['uuid', 'distinct']],
             'finalizeStudent' => ['student_id' => ['required', 'uuid', 'exists:students,id']],

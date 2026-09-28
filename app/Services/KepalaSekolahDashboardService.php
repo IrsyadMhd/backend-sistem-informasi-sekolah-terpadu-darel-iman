@@ -11,6 +11,7 @@ use App\Models\RekapPrestasiSiswa;
 use App\Models\Semester;
 use App\Models\Student;
 use App\Models\Teacher;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -33,9 +34,9 @@ class KepalaSekolahDashboardService
             : ($emp?->unit_id ?? data_get($user->metadata, 'education_unit_id') ?? data_get($user->metadata, 'unit_id'));
 
         if ($userUnitId) {
-            $unit = EducationUnit::find($userUnitId);
+            $unit = $this->accessScope->accessibleEducationUnits($user)->whereKey($userUnitId)->first();
         } else {
-            $unit = $unitQuery->first() ?? EducationUnit::first();
+            $unit = $unitQuery->first();
         }
         $targetUnitId = $unit ? $unit->id : null;
 
@@ -182,13 +183,6 @@ class KepalaSekolahDashboardService
 
         $totalPrestasi = 0;
         if (Schema::hasTable('rekap_prestasi_siswas')) {
-            if (RekapPrestasiSiswa::count() === 0) {
-                try {
-                    (new \Database\Seeders\RekapPrestasiSiswaSeeder())->run();
-                } catch (\Throwable $e) {
-                    // Ignore error if seeder fails silently
-                }
-            }
             $totalPrestasiQuery = RekapPrestasiSiswa::query();
             if ($targetUnitId) {
                 $totalPrestasiQuery->whereHas('siswa', fn ($sq) => $sq->where('unit_id', $targetUnitId));
@@ -350,14 +344,6 @@ class KepalaSekolahDashboardService
         // 4. Rekapitulasi Prestasi Siswa (Data Riil dari Database)
         $rekapPrestasi = [];
         if (Schema::hasTable('rekap_prestasi_siswas')) {
-            if (RekapPrestasiSiswa::count() === 0) {
-                try {
-                    (new \Database\Seeders\RekapPrestasiSiswaSeeder())->run();
-                } catch (\Throwable $e) {
-                    // Ignore error if seeder fails silently
-                }
-            }
-
             $prestasiQuery = RekapPrestasiSiswa::query()
                 ->with(['siswa.kelas', 'siswa.educationUnit']);
 
@@ -368,15 +354,8 @@ class KepalaSekolahDashboardService
             }
 
             $items = $prestasiQuery->latest('tanggal_prestasi')->limit(30)->get();
-            if ($items->isEmpty()) {
-                $items = RekapPrestasiSiswa::query()
-                    ->with(['siswa.kelas', 'siswa.educationUnit'])
-                    ->latest('tanggal_prestasi')
-                    ->limit(30)
-                    ->get();
-            }
 
-            $unitFallback = $unit ? ($unit->name ?? $unit->nama) : 'SDIT 1 Dar el-Iman - 50 Kota';
+            $unitFallback = $unit ? ($unit->name ?? $unit->nama) : '-';
 
             $rekapPrestasi = $items->map(fn ($p) => [
                 'id' => $p->id,
@@ -397,13 +376,14 @@ class KepalaSekolahDashboardService
             ]);
         }
 
-        $unitNama = $unit ? ($unit->name ?? $unit->nama) : 'SDIT 1 Dar el-Iman - 50 Kota';
-        $unitKode = $unit ? ($unit->code ?? $unit->kode ?? 'SDIT-01') : 'SDIT-01';
-        $unitNpsn = $unit?->metadata['npsn'] ?? $unit?->npsn ?? '10293847';
-        $unitAkreditasi = $unit?->metadata['akreditasi'] ?? $unit?->akreditasi ?? 'A (Unggul)';
-        $unitAlamat = $unit?->metadata['alamat'] ?? $unit?->alamat ?? $unit?->description ?? 'Jl. Raya Lima Puluh Kota No. 12, Sumatera Barat';
-        $unitKepalaSekolah = $unit?->metadata['kepala_sekolah'] ?? $user?->name ?? 'Ust. Abdullah, S.Pd.I';
-        $unitKontak = $unit?->metadata['kontak'] ?? '0752-123456';
+        $siteSetting = \App\Models\SiteSetting::current();
+        $unitNama = $unit ? ($unit->name ?? $unit->nama) : ($siteSetting->school_name ?? '-');
+        $unitKode = $unit ? ($unit->code ?? $unit->kode ?? null) : null;
+        $unitNpsn = $unit?->metadata['npsn'] ?? $unit?->npsn ?? '-';
+        $unitAkreditasi = $unit?->metadata['akreditasi'] ?? $unit?->akreditasi ?? '-';
+        $unitAlamat = $unit?->metadata['alamat'] ?? $unit?->alamat ?? $unit?->description ?? ($siteSetting->footer_text ?? '-');
+        $unitKepalaSekolah = $unit?->metadata['kepala_sekolah'] ?? $user?->name ?? '-';
+        $unitKontak = $unit?->metadata['kontak'] ?? '-';
         
         // 5. Civitas Online & Log Keaktifan (Data Riil Database Unit)
         $onlineUsers = [];
@@ -428,10 +408,6 @@ class KepalaSekolahDashboardService
             }
 
             $empList = $empQuery->with(['user', 'position', 'educationUnit'])->get();
-
-            if ($empList->isEmpty() && empty($targetUnitId)) {
-                $empList = Employee::query()->with(['user', 'position', 'educationUnit'])->limit(50)->get();
-            }
 
             if ($empList->isNotEmpty()) {
                 $userIds = $empList->pluck('user_id')->filter()->unique();
@@ -740,15 +716,12 @@ class KepalaSekolahDashboardService
         }
 
         // 7. Data Profil Pengurus Yayasan (Ketua, Sekretaris, Bendahara)
-        $defaultPengurus = [
+        $officeDefinitions = [
             [
                 'id' => 'pengurus-1',
                 'jabatan' => 'Ketua Yayasan',
                 'code' => 'JBT-001',
-                'nama_default' => 'Ust. Dr. Muhammad Elvi Syam, Lc., M.A.',
-                'nip_default' => 'NIY-201101001',
-                'email_default' => 'elvisyam@dareliman.sch.id',
-                'phone_default' => '0811-6601-001',
+                'roles' => ['Ketua Yayasan', 'ketua_yayasan', 'Yayasan'],
                 'periode' => '2021 - 2026',
                 'gender' => 'male',
                 'badge_variant' => 'emerald',
@@ -758,10 +731,7 @@ class KepalaSekolahDashboardService
                 'id' => 'pengurus-2',
                 'jabatan' => 'Sekretaris Yayasan',
                 'code' => 'JBT-002',
-                'nama_default' => 'Ust. Abu Umar Indra, S.S.',
-                'nip_default' => 'NIY-201101002',
-                'email_default' => 'sekretaris@dareliman.sch.id',
-                'phone_default' => '0812-6789-002',
+                'roles' => ['Sekretaris Yayasan', 'sekretaris_yayasan'],
                 'periode' => '2021 - 2026',
                 'gender' => 'male',
                 'badge_variant' => 'blue',
@@ -771,10 +741,7 @@ class KepalaSekolahDashboardService
                 'id' => 'pengurus-3',
                 'jabatan' => 'Bendahara Yayasan',
                 'code' => 'JBT-015',
-                'nama_default' => 'H. Faisal Ramli, S.E., Ak.',
-                'nip_default' => 'NIY-201101003',
-                'email_default' => 'bendahara@dareliman.sch.id',
-                'phone_default' => '0813-7890-003',
+                'roles' => ['Bendahara Yayasan', 'bendahara_yayasan'],
                 'periode' => '2021 - 2026',
                 'gender' => 'male',
                 'badge_variant' => 'purple',
@@ -786,7 +753,7 @@ class KepalaSekolahDashboardService
         $onlineThreshold = $now->copy()->subMinutes(15);
 
         $pengurusYayasan = [];
-        foreach ($defaultPengurus as $item) {
+        foreach ($officeDefinitions as $item) {
             $emp = null;
             if (Schema::hasTable('employees')) {
                 $emp = Employee::query()
@@ -797,7 +764,23 @@ class KepalaSekolahDashboardService
                     ->first();
             }
 
-            $uid = $emp?->user_id;
+            $userObj = null;
+            if (! $emp && Schema::hasTable('users')) {
+                $userObj = User::query()
+                    ->whereHas('roles', function ($q) use ($item) {
+                        $q->whereIn('name', $item['roles']);
+                    })
+                    ->where('name', 'not like', '%Super Admin%')
+                    ->where('name', 'not like', '%Test%')
+                    ->first()
+                    ?? User::query()
+                        ->whereHas('roles', function ($q) use ($item) {
+                            $q->whereIn('name', $item['roles']);
+                        })
+                        ->first();
+            }
+
+            $uid = $emp?->user_id ?? $userObj?->id;
             $lastLoginTime = null;
 
             if ($uid) {
@@ -840,22 +823,25 @@ class KepalaSekolahDashboardService
                 $lastSeen = 'Offline';
             }
 
-            $nipDisplay = $emp?->niy ? 'NIY. ' . $emp->niy : ($emp?->nik ? 'NIK. ' . $emp->nik : $item['nip_default']);
+            $nipDisplay = $emp?->niy ? 'NIY. ' . $emp->niy : ($emp?->nik ? 'NIK. ' . $emp->nik : '-');
+            $namaPengurus = $emp?->nama_lengkap ?? $userObj?->name ?? $item['jabatan'];
+            $emailPengurus = $emp?->email ?? $userObj?->email ?? '-';
+            $phonePengurus = $emp?->no_hp ?? $userObj?->phone ?? '-';
 
             $pengurusYayasan[] = [
                 'id' => $item['id'],
                 'jabatan' => $item['jabatan'],
-                'nama' => $emp?->nama_lengkap ?? $item['nama_default'],
+                'nama' => $namaPengurus,
                 'nip' => $nipDisplay,
-                'email' => $emp?->email ?? $item['email_default'],
-                'phone' => $emp?->no_hp ?? $item['phone_default'],
+                'email' => $emailPengurus,
+                'phone' => $phonePengurus,
                 'periode' => $item['periode'],
                 'status' => $emp?->status ?? 'Aktif',
                 'is_online' => $isOnline,
                 'last_seen' => $lastSeen,
                 'last_login_at' => $lastLoginTime ? $lastLoginTime->toIso8601String() : null,
                 'gender' => $item['gender'],
-                'avatar_url' => $emp?->foto ?? $emp?->avatar_url ?? null,
+                'avatar_url' => $emp?->foto ?? $emp?->avatar_url ?? $userObj?->avatar_url ?? null,
                 'badge_variant' => $item['badge_variant'],
                 'role_code' => $item['role_code'],
             ];

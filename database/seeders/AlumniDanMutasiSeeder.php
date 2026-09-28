@@ -94,10 +94,15 @@ class AlumniDanMutasiSeeder extends Seeder
                 continue;
             }
 
+            $targetUnitId = $info['unit']?->id ?? $student->unit_id;
+            $matchedClassId = $targetUnitId ? Kelas::where('unit_pendidikan_id', $targetUnitId)->value('id') : null;
+
             $student->update([
                 'full_name' => $info['name'],
                 'gender' => $info['gender'],
-                'unit_id' => $info['unit']?->id ?? $student->unit_id,
+                'unit_id' => $targetUnitId,
+                'kelas_id' => $matchedClassId,
+                'class_id' => $matchedClassId,
             ]);
 
             // Jika belum punya user_id, buatkan akun user

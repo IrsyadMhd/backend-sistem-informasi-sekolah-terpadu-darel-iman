@@ -18,6 +18,28 @@ use Illuminate\Support\Str;
 class TahfizhController extends Controller
 {
     /**
+     * Pastikan user memiliki wewenang untuk mengakses data tahfizh siswa target.
+     */
+    protected function assertStudentAccess(Request $request, string $studentId): void
+    {
+        $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated.');
+        }
+
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        if ($accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        $isAccessible = $accessScope->accessibleStudents($user)
+            ->where('students.id', $studentId)
+            ->exists();
+
+        abort_unless($isAccessible, 403, 'Akses data tahfizh siswa ditolak: berada di luar wewenang akun.');
+    }
+
+    /**
      * Ambil data lembar formulir 7 hari (Senin - Ahad) untuk siswa tertentu.
      */
     public function getWeeklySheet(Request $request): JsonResponse
@@ -27,7 +49,8 @@ class TahfizhController extends Controller
             'start_date' => 'nullable|date',
         ]);
 
-        $studentId = $request->query('student_id');
+        $studentId = (string) $request->query('student_id');
+        $this->assertStudentAccess($request, $studentId);
         $startDate = $request->query('start_date') 
             ? Carbon::parse($request->query('start_date'))->startOfWeek(Carbon::MONDAY) 
             : Carbon::now()->startOfWeek(Carbon::MONDAY);
@@ -86,6 +109,16 @@ class TahfizhController extends Controller
      */
     public function saveDailyLog(Request $request): JsonResponse
     {
+        $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated.');
+        }
+
+        // Siswa dan Alumni dilarang mencatat setoran sekolah secara langsung
+        $userRoleNames = $user->roles->pluck('name')->map(fn ($r) => strtolower($r))->toArray();
+        $isStudentOrAlumni = collect($userRoleNames)->contains(fn ($r) => in_array($r, ['siswa', 'student', 'alumni']));
+        abort_if($isStudentOrAlumni, 403, 'Siswa / Alumni tidak memiliki wewenang untuk memverifikasi setoran tahfizh.');
+
         $validated = $request->validate([
             'student_id' => 'required',
             'record_date' => 'required|date',
@@ -124,6 +157,15 @@ class TahfizhController extends Controller
             'signature_teacher' => 'nullable|string',
             'signature_parent' => 'nullable|string',
         ]);
+
+        $this->assertStudentAccess($request, (string) $validated['student_id']);
+
+        // Resolve teacher_id secara aman dari user context
+        $teacher = \App\Models\Teacher::where('user_id', $user->id)->first();
+        $employee = \App\Models\Employee::where('user_id', $user->id)->first();
+        $assignedTeacherId = $teacher?->id ?? $employee?->id ?? $validated['teacher_id'] ?? null;
+        $validated['teacher_id'] = $assignedTeacherId;
+        $validated['signature_teacher'] = $validated['signature_teacher'] ?? ($teacher?->full_name ?? $employee?->nama_lengkap ?? $user->name);
 
         if (!empty($validated['hafalan_ayah_start']) && !empty($validated['hafalan_ayah_end'])) {
             if ((int)$validated['hafalan_ayah_start'] > (int)$validated['hafalan_ayah_end']) {
@@ -290,6 +332,8 @@ class TahfizhController extends Controller
      */
     public function getStudentProgress(Request $request, $studentId): JsonResponse
     {
+        $this->assertStudentAccess($request, (string) $studentId);
+
         $totalQuranAyats = 6236; // Total ayat dalam 30 Juz Al-Qur'an
         $totalQuranSurahs = 114;
 
@@ -538,6 +582,8 @@ class TahfizhController extends Controller
      */
     public function getLastHafalan(Request $request, string $studentId): JsonResponse
     {
+        $this->assertStudentAccess($request, $studentId);
+
         // 1. Cek apakah siswa memiliki tugas Murajaah di Rumah yang masih pending/belum diverifikasi
         $pendingMurajaah = TahfizhDailyLog::where('student_id', $studentId)
             ->where('murajaah_required', true)

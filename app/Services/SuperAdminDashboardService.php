@@ -12,6 +12,7 @@ use App\Models\Semester;
 use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -19,32 +20,103 @@ class SuperAdminDashboardService
 {
     public function getDashboardOverview(array $filters = []): array
     {
-        // 1. Context Information
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $unitFilter = !empty($filters['unit_id']) && $filters['unit_id'] !== 'semua' ? $filters['unit_id'] : null;
+        $statusFilter = !empty($filters['status']) && $filters['status'] !== 'semua' ? $filters['status'] : null;
+        $periodFilter = !empty($filters['period']) && $filters['period'] !== 'semua' ? $filters['period'] : 'minggu';
+        $academicYearId = !empty($filters['academic_year_id']) && $filters['academic_year_id'] !== 'semua' ? $filters['academic_year_id'] : null;
+        $semesterId = !empty($filters['semester_id']) && $filters['semester_id'] !== 'semua' ? $filters['semester_id'] : null;
 
-        // 2. KPI Metrics (Strict DB aggregates)
-        $totalUnits = EducationUnit::count();
-        $activeUnits = EducationUnit::where('is_active', true)->count();
-        $totalEmployees = Employee::count();
-        $totalTeachers = Teacher::count();
-        $totalStudents = Student::count();
-        $totalParents = ParentModel::count();
-        $totalClasses = Kelas::count();
-        
-        $totalRombel = Schema::hasTable('rombels') 
-            ? DB::table('rombels')->count() 
-            : $totalClasses;
+        // 1. Context Information (Dynamic from DB)
+        $activeAcademicYear = $academicYearId
+            ? AcademicYear::find($academicYearId)
+            : (AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first());
 
-        // Alumni = siswa non-aktif / ditandai alumni (tidak ada kolom `status`).
-        $totalAlumni = Student::where(fn ($q) => $q
-            ->where('is_active', false)
-            ->orWhere('metadata->is_alumni', true)
-            ->orWhere('metadata->status_siswa', 'alumni'))->count();
+        $activeSemester = $semesterId
+            ? Semester::find($semesterId)
+            : (Semester::where('is_active', true)->first() ?? Semester::latest()->first());
+
+        $availableUnits = EducationUnit::select('id', 'name', 'code', 'is_active')
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($u) => [
+                'id' => $u->id,
+                'name' => $u->name ?? $u->nama,
+                'code' => $u->code ?? $u->kode ?? '-',
+                'is_active' => (bool) $u->is_active,
+            ]);
+
+        $availableAcademicYears = AcademicYear::select('id', 'name', 'is_active')
+            ->orderByDesc('start_date')
+            ->get()
+            ->map(fn ($y) => [
+                'id' => $y->id,
+                'name' => $y->name ?? $y->nama,
+                'is_active' => (bool) $y->is_active,
+            ]);
+
+        $availableSemesters = Semester::select('id', 'name', 'academic_year_id', 'is_active')
+            ->orderBy('name')
+            ->get()
+            ->map(fn ($s) => [
+                'id' => $s->id,
+                'name' => $s->name ?? $s->nama,
+                'academic_year_id' => $s->academic_year_id,
+                'is_active' => (bool) $s->is_active,
+            ]);
+
+        // 2. KPI Metrics (Strict DB aggregates, scoped to unit if selected)
+        if ($unitFilter) {
+            $unitModel = EducationUnit::find($unitFilter);
+            $totalUnits = $unitModel ? 1 : 0;
+            $activeUnits = ($unitModel && $unitModel->is_active) ? 1 : 0;
+            $totalEmployees = $unitModel ? $unitModel->employees()->count() : 0;
+            $totalTeachers = $unitModel ? $unitModel->teachers()->count() : 0;
+            $totalStudents = $unitModel ? $unitModel->students()->count() : 0;
+
+            // Total parents of students in this unit
+            $totalParents = ParentModel::whereHas('students', function ($q) use ($unitFilter) {
+                $q->where('unit_id', $unitFilter);
+            })->count();
+
+            $totalClasses = $unitModel ? $unitModel->classes()->count() : 0;
+
+            $totalRombel = (Schema::hasTable('rombels') && Schema::hasColumn('rombels', 'unit_id'))
+                ? DB::table('rombels')->where('unit_id', $unitFilter)->count()
+                : (Schema::hasTable('rombels') && Schema::hasColumn('rombels', 'unit_pendidikan_id')
+                    ? DB::table('rombels')->where('unit_pendidikan_id', $unitFilter)->count()
+                    : $totalClasses);
+
+            $totalAlumni = $unitModel ? $unitModel->students()
+                ->where(fn ($q) => $q
+                    ->where('is_active', false)
+                    ->orWhere('metadata->is_alumni', true)
+                    ->orWhere('metadata->status_siswa', 'alumni'))->count() : 0;
+        } else {
+            $totalUnits = EducationUnit::count();
+            $activeUnits = EducationUnit::where('is_active', true)->count();
+            $totalEmployees = Employee::count();
+            $totalTeachers = Employee::where(function ($q) {
+                $q->where('status_pegawai', 'like', '%Guru%')
+                  ->orWhereHas('position', function ($p) {
+                      $p->where('name', 'like', '%Guru%');
+                  });
+            })->count();
+            $totalStudents = Student::count();
+            $totalParents = ParentModel::count();
+            $totalClasses = Kelas::count();
+
+            $totalRombel = Schema::hasTable('rombels')
+                ? DB::table('rombels')->count()
+                : $totalClasses;
+
+            $totalAlumni = Student::where(fn ($q) => $q
+                ->where('is_active', false)
+                ->orWhere('metadata->is_alumni', true)
+                ->orWhere('metadata->status_siswa', 'alumni'))->count();
+        }
+
         $activeUsers = User::where('is_active', true)->count();
         $activeRoles = Role::count();
-
-        // Users without roles
         $usersWithoutRole = User::doesntHave('roles')->count();
 
         $kpis = [
@@ -64,7 +136,12 @@ class SuperAdminDashboardService
 
         // 3. Charts Data
         // Student distribution per unit
-        $studentDistribution = EducationUnit::withCount('students')
+        $studentDistQuery = EducationUnit::withCount('students');
+        if ($unitFilter) {
+            $studentDistQuery->where('id', $unitFilter);
+        }
+        $studentDistribution = $studentDistQuery
+            ->orderBy('name')
             ->get()
             ->map(function ($unit) {
                 return [
@@ -74,7 +151,12 @@ class SuperAdminDashboardService
             });
 
         // Teacher and Employee distribution per unit
-        $staffDistribution = EducationUnit::withCount(['employees', 'teachers'])
+        $staffDistQuery = EducationUnit::withCount(['employees', 'teachers']);
+        if ($unitFilter) {
+            $staffDistQuery->where('id', $unitFilter);
+        }
+        $staffDistribution = $staffDistQuery
+            ->orderBy('name')
             ->get()
             ->map(function ($unit) {
                 return [
@@ -84,15 +166,28 @@ class SuperAdminDashboardService
                 ];
             });
 
-        // Overall student attendance summary (7 days)
+        // Overall student attendance summary based on Period
         $today = now()->toDateString();
-        $sub7Days = now()->subDays(6)->toDateString();
-        $attendanceTrend = [];
+        $startDate = match ($periodFilter) {
+            'hari' => $today,
+            'minggu' => now()->subDays(6)->toDateString(),
+            'bulan' => now()->startOfMonth()->toDateString(),
+            'semester' => now()->subMonths(6)->toDateString(),
+            'tahun' => now()->startOfYear()->toDateString(),
+            default => now()->subDays(6)->toDateString(),
+        };
 
+        $attendanceTrend = [];
         if (Schema::hasTable('attendances')) {
-            $attendanceTrend = DB::table('attendances')
+            $attQuery = DB::table('attendances')
                 ->selectRaw('attendance_date as date, count(*) as total, sum(case when status = \'present\' or status = \'hadir\' then 1 else 0 end) as hadir')
-                ->whereBetween('attendance_date', [$sub7Days, $today])
+                ->whereBetween('attendance_date', [$startDate, $today]);
+
+            if ($unitFilter && Schema::hasColumn('attendances', 'unit_id')) {
+                $attQuery->where('unit_id', $unitFilter);
+            }
+
+            $attendanceTrend = $attQuery
                 ->groupBy('attendance_date')
                 ->orderBy('attendance_date')
                 ->get();
@@ -104,10 +199,19 @@ class SuperAdminDashboardService
             'attendance_trend' => $attendanceTrend,
         ];
 
-        // 4. Tables Data
-        // Units summary
-        $unitSummaries = EducationUnit::withCount(['students', 'employees', 'teachers', 'classes'])
-            ->limit(10)
+        // 4. Tables Data - Units summary (dynamic, no hardcoded limit 10)
+        $unitQuery = EducationUnit::withCount(['students', 'employees', 'teachers', 'classes']);
+        if ($unitFilter) {
+            $unitQuery->where('id', $unitFilter);
+        }
+        if ($statusFilter === 'aktif') {
+            $unitQuery->where('is_active', true);
+        } elseif ($statusFilter === 'nonaktif') {
+            $unitQuery->where('is_active', false);
+        }
+
+        $unitSummaries = $unitQuery
+            ->orderBy('name')
             ->get()
             ->map(function ($unit) {
                 return [
@@ -122,33 +226,65 @@ class SuperAdminDashboardService
                 ];
             });
 
-        // Recent user logins
+        // 5. Recent user logins (eager load real user roles from DB)
         $recentLogins = [];
         if (Schema::hasTable('login_events')) {
-            $recentLogins = DB::table('login_events')
+            $events = DB::table('login_events')
                 ->join('users', 'users.id', '=', 'login_events.user_id')
-                ->select('users.name', 'users.email', 'login_events.created_at', 'login_events.ip_address')
+                ->select('users.id', 'users.name', 'users.email', 'login_events.created_at', 'login_events.ip_address')
                 ->orderByDesc('login_events.created_at')
-                ->limit(5)
+                ->limit(8)
                 ->get();
-        } else {
-            $recentLogins = User::latest()->limit(5)->get(['id', 'name', 'email', 'created_at']);
+
+            if ($events->isNotEmpty()) {
+                $userIds = $events->pluck('id')->unique();
+                $usersWithRoles = User::with('roles:id,name')->whereIn('id', $userIds)->get()->keyBy('id');
+
+                $recentLogins = $events->map(function ($ev) use ($usersWithRoles) {
+                    $u = $usersWithRoles->get($ev->id);
+                    $primaryRole = $u?->roles->first()?->name ?? 'Pengguna';
+                    return [
+                        'id' => $ev->id,
+                        'name' => $ev->name,
+                        'email' => $ev->email,
+                        'role' => $primaryRole,
+                        'ip_address' => $ev->ip_address,
+                        'created_at' => Carbon::parse($ev->created_at)->diffForHumans(),
+                    ];
+                })->all();
+            }
         }
 
-        // System activity / Audit log
+        if (empty($recentLogins)) {
+            $recentUsers = User::with('roles:id,name')->latest()->limit(8)->get();
+            $recentLogins = $recentUsers->map(function ($u) {
+                return [
+                    'id' => $u->id,
+                    'name' => $u->name,
+                    'email' => $u->email,
+                    'role' => $u->roles->first()?->name ?? 'Pengguna',
+                    'created_at' => $u->created_at ? $u->created_at->diffForHumans() : 'Terbaru',
+                ];
+            })->all();
+        }
+
+        // 6. System activity / Audit log
         $recentActivities = [];
         if (Schema::hasTable('audit_logs')) {
             $recentActivities = DB::table('audit_logs')
                 ->orderByDesc('created_at')
-                ->limit(5)
+                ->limit(6)
                 ->get();
         }
 
         return [
             'context' => [
-                'role' => 'Super Admin',
+                'role' => 'Admin Sistem',
                 'tahun_ajaran' => $activeAcademicYear ? ['id' => $activeAcademicYear->id, 'nama' => $activeAcademicYear->name ?? $activeAcademicYear->year_name ?? $activeAcademicYear->nama] : null,
                 'semester' => $activeSemester ? ['id' => $activeSemester->id, 'nama' => $activeSemester->name ?? $activeSemester->nama] : null,
+                'available_units' => $availableUnits,
+                'available_academic_years' => $availableAcademicYears,
+                'available_semesters' => $availableSemesters,
             ],
             'kpis' => $kpis,
             'charts' => $charts,

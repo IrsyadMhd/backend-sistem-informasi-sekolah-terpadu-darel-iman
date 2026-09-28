@@ -20,17 +20,21 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Roles/permissions and system defaults are safe bootstrap data.
+        // Roles/permissions, core logins (SuperAdmin & Admin), navigation & system defaults are safe bootstrap data.
         $this->call([
             RolePermissionSeeder::class,
             AttendancePermissionSeeder::class,
             SiteSettingsSeeder::class,
             StudentCardSettingsSeeder::class,
+            CoreAdminUserSeeder::class,
+            AppNavigationSeeder::class,
+            TransportationModeSeeder::class,
         ]);
 
-        // All records below are development/acceptance fixtures. Never seed
-        // them through the production DatabaseSeeder.
-        if (! app()->environment(['local', 'development', 'testing', 'staging'])) {
+        // All records below are development/simulation fixtures.
+        // Disabled by default to keep database clean without dummy data.
+        // To seed dummy fixtures, set SEED_DUMMY_DATA=true in .env
+        if (! env('SEED_DUMMY_DATA', false)) {
             return;
         }
 
@@ -71,6 +75,7 @@ class DatabaseSeeder extends Seeder
             AttendanceSeeder::class,
             WorshipAttendanceSeeder::class,
             MutabaahEnterpriseSeeder::class,
+            MutabaahProgramAndRuleSeeder::class,
             QuranSurahSeeder::class,
             DoaSeeder::class,
             PrayerScheduleSeeder::class,
@@ -79,6 +84,8 @@ class DatabaseSeeder extends Seeder
 
         if (app()->environment(['local', 'development', 'testing', 'staging'])) {
             $this->call(RekapPrestasiSiswaSeeder::class);
+            $this->call(JadwalPonpesIkhwan2026Seeder::class);
+            $this->call(JadwalSditFullDay2026Seeder::class);
             $this->call(SimulasiTerpadu2026Seeder::class);
             $this->call(SimulasiSiswaSemuaKelasSeeder::class);
             $this->call(MateriBelajarTahunanSeeder::class);
@@ -88,9 +95,9 @@ class DatabaseSeeder extends Seeder
             $this->call(WorkspaceGuruSimulasiSeeder::class);
             $this->call(SimulasiTahunanRamadhanSeeder::class);
             $this->call(PresensiAwalJuli2026Seeder::class);
-            $this->call(JadwalPonpesIkhwan2026Seeder::class);
-            $this->call(JadwalSditFullDay2026Seeder::class);
             $this->call(AlumniDanMutasiSeeder::class);
+            $this->call(StudentNoteDemoSeeder::class);
+            $this->call(GuruTestWorkspaceSeeder::class);
         }
     }
 }

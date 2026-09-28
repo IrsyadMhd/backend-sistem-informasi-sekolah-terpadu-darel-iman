@@ -303,6 +303,22 @@ class EQuranController extends Controller
         return response()->json($res, $res['success'] ? 200 : 500);
     }
 
+    /** Preview EQuran's catalogue. This endpoint never writes local data. */
+    public function remoteDoas(): JsonResponse
+    {
+        $res = $this->syncService->getRemoteDoaList();
+
+        return response()->json($res, $res['success'] ? 200 : 502);
+    }
+
+    /** Import one explicitly selected EQuran record into local master data. */
+    public function importRemoteDoa($id): JsonResponse
+    {
+        $res = $this->syncService->importRemoteDoa((int) $id);
+
+        return response()->json($res, $res['success'] ? 201 : 422);
+    }
+
     /**
      * POST /api/doa
      * Create manual Doa entry
@@ -389,5 +405,16 @@ class EQuranController extends Controller
             'message' => 'Doa berhasil dihapus dari database',
         ]);
     }
-}
 
+    /** Remove all local doa/dzikir records. EQuran remains available only as a preview source. */
+    public function destroyAllDoas(): JsonResponse
+    {
+        $count = Doa::query()->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => "{$count} data doa & dzikir berhasil dihapus.",
+            'deleted_count' => $count,
+        ]);
+    }
+}

@@ -14,8 +14,8 @@ class PortalResolver
 {
     /** @var list<array{key:string,label:string,route:string,roles:list<string>}> */
     private const WORKSPACES = [
-        ['key' => 'admin', 'label' => 'Admin', 'route' => '/dashboard/pemantauan', 'roles' => ['Admin']],
         ['key' => 'super_admin', 'label' => 'Super Admin', 'route' => '/dashboard', 'roles' => ['Super Admin', 'Superadmin', 'super_admin']],
+        ['key' => 'admin', 'label' => 'Admin', 'route' => '/dashboard/pemantauan', 'roles' => ['Admin']],
         ['key' => 'foundation', 'label' => 'Yayasan', 'route' => '/dashboard/yayasan', 'roles' => ['Yayasan', 'Ketua Yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'ketua_yayasan', 'pengurus_yayasan', 'sekretaris_yayasan', 'bendahara_yayasan']],
         ['key' => 'education', 'label' => 'Divisi Pendidikan', 'route' => '/dashboard/divisi-pendidikan', 'roles' => ['Kepala Bidang Pendidikan', 'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus', 'divisi_pendidikan']],
         ['key' => 'principal', 'label' => 'Kepala Sekolah', 'route' => '/dashboard/kepala-sekolah', 'roles' => ['Kepala Sekolah', 'kepala_sekolah', 'kepsek']],
@@ -29,8 +29,8 @@ class PortalResolver
         ['key' => 'guru_bk', 'label' => 'Guru BK', 'route' => '/dashboard/guru-bk', 'roles' => ['Guru BK', 'guru_bk']],
         ['key' => 'teacher', 'label' => 'Guru', 'route' => '/portal-guru', 'roles' => ['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran', 'Guru PAI', 'Pembimbing']],
         ['key' => 'parent', 'label' => 'Orang Tua', 'route' => '/portal-orangtua', 'roles' => ['Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']],
-        ['key' => 'student', 'label' => 'Siswa', 'route' => '/portal-siswa', 'roles' => ['Siswa', 'siswa', 'student']],
         ['key' => 'alumni', 'label' => 'Alumni', 'route' => '/portal/alumni', 'roles' => ['Alumni', 'alumni']],
+        ['key' => 'student', 'label' => 'Siswa', 'route' => '/portal-siswa', 'roles' => ['Siswa', 'siswa', 'student']],
     ];
 
     /**

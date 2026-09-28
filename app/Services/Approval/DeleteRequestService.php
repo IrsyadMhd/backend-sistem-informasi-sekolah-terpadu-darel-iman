@@ -48,7 +48,7 @@ class DeleteRequestService
 
     public function approveDeleteRequest(User $approver, string $requestId): DeleteRequest
     {
-        if (! $approver->hasRole('Super Admin') && ! $approver->hasPermissionTo('superadmin.delete.approve')) {
+        if (! $approver->hasRole('Super Admin') && ! $approver->can('superadmin.delete.approve')) {
             throw new AccessDeniedHttpException('Hanya Superadmin yang memiliki wewenang untuk menyetujui penghapusan data.');
         }
 
@@ -86,7 +86,7 @@ class DeleteRequestService
 
     public function rejectDeleteRequest(User $reviewer, string $requestId, string $rejectionReason): DeleteRequest
     {
-        if (! $reviewer->hasRole('Super Admin') && ! $reviewer->hasPermissionTo('superadmin.delete.reject')) {
+        if (! $reviewer->hasRole('Super Admin') && ! $reviewer->can('superadmin.delete.reject')) {
             throw new AccessDeniedHttpException('Hanya Superadmin yang memiliki wewenang untuk menolak permintaan penghapusan data.');
         }
 

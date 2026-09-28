@@ -36,7 +36,7 @@ class EmployeeChatController extends Controller
     {
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         $search = $request->query('search');
@@ -174,7 +174,7 @@ class EmployeeChatController extends Controller
     {
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
         $userId = $user->id;
 
@@ -306,7 +306,7 @@ class EmployeeChatController extends Controller
     {
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
         $userId = $user->id;
 
@@ -390,7 +390,7 @@ class EmployeeChatController extends Controller
 
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         $recipientUser = User::query()->where('id', $recipientUserId)->first();
@@ -416,7 +416,7 @@ class EmployeeChatController extends Controller
         if ($request->hasFile('attachment')) {
             $file = $request->file('attachment');
             $path = $file->store('chat/attachments', 'public');
-            \AppModels\PortalMessageAttachment::create([
+            \App\Models\PortalMessageAttachment::create([
                 'message_id' => $message->id,
                 'disk' => 'public',
                 'path' => $path,
@@ -475,7 +475,7 @@ class EmployeeChatController extends Controller
 
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         $conv = Conversation::create([
@@ -524,7 +524,7 @@ class EmployeeChatController extends Controller
 
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         DB::table('portal_message_reactions')->updateOrInsert([
@@ -549,7 +549,7 @@ class EmployeeChatController extends Controller
     {
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         DB::table('portal_message_reactions')
@@ -575,7 +575,7 @@ class EmployeeChatController extends Controller
 
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         UserPresence::updateOrCreate([
@@ -599,7 +599,7 @@ class EmployeeChatController extends Controller
     {
         $user = $request->user();
         if (! $user) {
-            $user = User::whereHas('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'super_admin', 'Admin']))->first() ?? User::first();
+            abort(401, 'Unauthenticated.');
         }
 
         $scope = $this->chatAccess->resolveChatScope($user);

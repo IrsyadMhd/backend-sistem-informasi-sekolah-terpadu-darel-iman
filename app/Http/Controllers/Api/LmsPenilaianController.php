@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Lms\CalculateLmsPenilaianRequest;
 use App\Http\Requests\Lms\StoreLmsPenilaianRequest;
 use App\Http\Resources\LmsPenilaianResource;
+use App\Services\AccessScopeService;
 use App\Services\LmsPenilaianService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,11 +15,13 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 class LmsPenilaianController extends Controller
 {
     public function __construct(
-        protected LmsPenilaianService $penilaianService
+        protected LmsPenilaianService $penilaianService,
+        protected AccessScopeService $accessScope
     ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
+        $user = $request->user();
         $filters = $request->only([
             'search',
             'kelas_id',
@@ -27,6 +30,22 @@ class LmsPenilaianController extends Controller
             'is_passed',
             'with_trashed',
         ]);
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            if (! empty($filters['kelas_id'])) {
+                abort_unless(in_array($filters['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar penugasan mengajar Anda.');
+            } else {
+                $filters['kelas_ids'] = $accessibleRombelIds;
+            }
+
+            if (! empty($filters['subject_id'])) {
+                $allowedMapelIds = $this->accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique()->all();
+                if (! empty($allowedMapelIds)) {
+                    abort_unless(in_array($filters['subject_id'], $allowedMapelIds, true), 403, 'Akses ditolak: Mata pelajaran di luar penugasan mengajar Anda.');
+                }
+            }
+        }
 
         $perPage = (int) $request->get('per_page', 15);
         $orderBy = $request->get('order_by', 'created_at');
@@ -39,7 +58,22 @@ class LmsPenilaianController extends Controller
 
     public function store(StoreLmsPenilaianRequest $request): JsonResponse
     {
+        $user = $request->user();
         $validated = $request->validated();
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            if (! empty($validated['kelas_id'])) {
+                abort_unless(in_array($validated['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar penugasan mengajar Anda.');
+            }
+            if (! empty($validated['subject_id'])) {
+                $allowedMapelIds = $this->accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique()->all();
+                if (! empty($allowedMapelIds)) {
+                    abort_unless(in_array($validated['subject_id'], $allowedMapelIds, true), 403, 'Akses ditolak: Mata pelajaran di luar penugasan mengajar Anda.');
+                }
+            }
+        }
+
         $grade = $this->penilaianService->simpan($validated);
 
         return response()->json([
@@ -51,6 +85,7 @@ class LmsPenilaianController extends Controller
 
     public function show(string $id): JsonResponse
     {
+        $user = request()->user();
         $grade = $this->penilaianService->cariBerdasarkanId($id, true);
 
         if (! $grade) {
@@ -58,6 +93,11 @@ class LmsPenilaianController extends Controller
                 'success' => false,
                 'message' => 'Rekap Penilaian Siswa tidak ditemukan.',
             ], 404);
+        }
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            abort_unless(in_array($grade->kelas_id, $accessibleRombelIds, true), 403, 'Akses ditolak: Penilaian di luar penugasan mengajar Anda.');
         }
 
         return response()->json([
@@ -68,8 +108,8 @@ class LmsPenilaianController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
-        $validated = $request->all();
-        $grade = $this->penilaianService->ubah($id, $validated);
+        $user = $request->user();
+        $grade = $this->penilaianService->cariBerdasarkanId($id, true);
 
         if (! $grade) {
             return response()->json([
@@ -78,15 +118,38 @@ class LmsPenilaianController extends Controller
             ], 404);
         }
 
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            abort_unless(in_array($grade->kelas_id, $accessibleRombelIds, true), 403, 'Akses ditolak: Penilaian di luar penugasan mengajar Anda.');
+        }
+
+        $validated = $request->all();
+        $updatedGrade = $this->penilaianService->ubah($id, $validated);
+
         return response()->json([
             'success' => true,
             'message' => 'Rekap Penilaian Siswa berhasil diperbarui.',
-            'data' => new LmsPenilaianResource($grade),
+            'data' => new LmsPenilaianResource($updatedGrade),
         ]);
     }
 
     public function destroy(string $id): JsonResponse
     {
+        $user = request()->user();
+        $grade = $this->penilaianService->cariBerdasarkanId($id, true);
+
+        if (! $grade) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Rekap Penilaian Siswa tidak ditemukan atau gagal dihapus.',
+            ], 404);
+        }
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            abort_unless(in_array($grade->kelas_id, $accessibleRombelIds, true), 403, 'Akses ditolak: Penilaian di luar penugasan mengajar Anda.');
+        }
+
         $success = $this->penilaianService->hapus($id);
 
         if (! $success) {
@@ -104,6 +167,21 @@ class LmsPenilaianController extends Controller
 
     public function restore(string $id): JsonResponse
     {
+        $user = request()->user();
+        $grade = $this->penilaianService->cariBerdasarkanId($id, true);
+
+        if (! $grade) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Rekap Penilaian Siswa tidak ditemukan atau tidak dalam status terhapus.',
+            ], 404);
+        }
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            abort_unless(in_array($grade->kelas_id, $accessibleRombelIds, true), 403, 'Akses ditolak: Penilaian di luar penugasan mengajar Anda.');
+        }
+
         $success = $this->penilaianService->pulihkan($id);
 
         if (! $success) {
@@ -121,7 +199,19 @@ class LmsPenilaianController extends Controller
 
     public function calculateAuto(CalculateLmsPenilaianRequest $request): JsonResponse
     {
+        $user = $request->user();
         $validated = $request->validated();
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            abort_unless(in_array($validated['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar penugasan mengajar Anda.');
+
+            $allowedMapelIds = $this->accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique()->all();
+            if (! empty($allowedMapelIds)) {
+                abort_unless(in_array($validated['subject_id'], $allowedMapelIds, true), 403, 'Akses ditolak: Mata pelajaran di luar penugasan mengajar Anda.');
+            }
+        }
+
         $weights = [
             'bobot_tugas' => (float) ($validated['bobot_tugas'] ?? 20.0),
             'bobot_uh' => (float) ($validated['bobot_uh'] ?? 25.0),
@@ -146,7 +236,25 @@ class LmsPenilaianController extends Controller
 
     public function stats(Request $request): JsonResponse
     {
+        $user = $request->user();
         $filters = $request->only(['kelas_id', 'subject_id', 'semester_id']);
+
+        if (! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            if (! empty($filters['kelas_id'])) {
+                abort_unless(in_array($filters['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar penugasan mengajar Anda.');
+            } else {
+                $filters['kelas_ids'] = $accessibleRombelIds;
+            }
+
+            if (! empty($filters['subject_id'])) {
+                $allowedMapelIds = $this->accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique()->all();
+                if (! empty($allowedMapelIds)) {
+                    abort_unless(in_array($filters['subject_id'], $allowedMapelIds, true), 403, 'Akses ditolak: Mata pelajaran di luar penugasan mengajar Anda.');
+                }
+            }
+        }
+
         $stats = $this->penilaianService->statistik($filters);
 
         return response()->json([
@@ -155,9 +263,9 @@ class LmsPenilaianController extends Controller
         ]);
     }
 
-    public function options(): JsonResponse
+    public function options(Request $request): JsonResponse
     {
-        $options = $this->penilaianService->opsi();
+        $options = $this->penilaianService->opsi($request->user());
 
         return response()->json([
             'success' => true,

@@ -50,6 +50,14 @@ class TahunAjaranRepository implements TahunAjaranRepositoryInterface
             AcademicYear::where('is_active', true)->update(['is_active' => false]);
         }
 
+        // Cek apakah ada data dengan nama yang sama yang sebelumnya terhapus (soft-deleted)
+        $trashed = AcademicYear::onlyTrashed()->where('name', $data['name'])->first();
+        if ($trashed) {
+            $trashed->restore();
+            $trashed->update($data);
+            return $trashed->fresh();
+        }
+
         return AcademicYear::create($data);
     }
 
@@ -110,11 +118,13 @@ class TahunAjaranRepository implements TahunAjaranRepositoryInterface
         $total = AcademicYear::count();
         $aktif = AcademicYear::where('is_active', true)->count();
         $tidakAktif = AcademicYear::where('is_active', false)->count();
+        $terhapus = AcademicYear::onlyTrashed()->count();
 
         return [
             'total' => $total,
             'aktif' => $aktif,
             'tidak_aktif' => $tidakAktif,
+            'terhapus' => $terhapus,
         ];
     }
 

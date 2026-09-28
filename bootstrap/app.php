@@ -16,10 +16,20 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+            'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
             'foundation.readonly' => \App\Http\Middleware\EnsureFoundationReadOnly::class,
         ]);
         $middleware->appendToGroup('api', \App\Http\Middleware\EnsureFoundationReadOnly::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        $exceptions->render(function (\Illuminate\Database\QueryException $e, \Illuminate\Http\Request $request) {
+            if ($e->getCode() === '22P02' || str_contains($e->getMessage(), 'invalid input syntax for type uuid')) {
+                if ($request->is('api/*') || $request->wantsJson()) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Data tidak ditemukan atau format ID tidak valid.',
+                    ], 404);
+                }
+            }
+        });
     })->create();

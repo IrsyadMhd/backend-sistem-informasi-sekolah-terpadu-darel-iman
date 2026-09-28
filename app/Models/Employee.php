@@ -67,7 +67,10 @@ class Employee extends Model
 
     public function position()
     {
-        return $this->belongsTo(Position::class, 'jabatan_id');
+        // Historical employee records may reference a retired position. Keep the
+        // relation readable so removing it from the active master does not make
+        // existing employee profiles, access checks, or reports lose context.
+        return $this->belongsTo(Position::class, 'jabatan_id')->withTrashed();
     }
 
     public function user()

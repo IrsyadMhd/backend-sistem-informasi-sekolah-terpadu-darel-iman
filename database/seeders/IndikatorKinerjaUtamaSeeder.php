@@ -23,7 +23,7 @@ class IndikatorKinerjaUtamaSeeder extends Seeder
 
         // 1. Dapatkan user penginput secara dinamis (Superadmin / First User) untuk Foreign Key id_penginput
         $penginput = User::query()->where('is_superadmin', true)->first()
-            ?? User::query()->where('email', 'superadmin@simsit.sch.id')->first()
+            ?? User::query()->where('email', 'superadmin@dareliman.sch.id')->first()
             ?? User::query()->first();
 
         if (! $penginput) {

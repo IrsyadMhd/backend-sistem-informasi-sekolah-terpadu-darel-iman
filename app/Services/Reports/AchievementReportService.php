@@ -16,22 +16,6 @@ class AchievementReportService
     public function getReport(array $filters): array
     {
         $tableName = (new RekapPrestasiSiswa())->getTable();
-
-        // Auto-seed sample achievements if table exists and is empty
-        try {
-            if (Schema::hasTable($tableName)) {
-                if (RekapPrestasiSiswa::count() === 0 && class_exists(\Database\Seeders\RekapPrestasiSiswaSeeder::class)) {
-                    try {
-                        (new \Database\Seeders\RekapPrestasiSiswaSeeder())->run();
-                    } catch (\Throwable $e) {
-                        Log::warning("Seeding RekapPrestasiSiswa failed: " . $e->getMessage());
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            Log::warning("RekapPrestasiSiswa table check failed: " . $e->getMessage());
-        }
-
         $period = $this->resolvePeriod($filters);
 
         $allMatching = collect();
@@ -88,105 +72,6 @@ class AchievementReportService
             }
         } catch (\Throwable $e) {
             Log::warning("RekapPrestasiSiswa query exception: " . $e->getMessage());
-        }
-
-        // Fallback Sample Data Generator if DB records or table are missing/empty
-        if ($allMatching->isEmpty()) {
-            $students = collect();
-            try {
-                $students = Student::with(['educationUnit', 'kelas'])->take(6)->get();
-            } catch (\Throwable $e) {
-                // ignore
-            }
-
-            $units = collect();
-            try {
-                $units = EducationUnit::all();
-            } catch (\Throwable $e) {
-                // ignore
-            }
-
-            $sampleData = [
-                [
-                    'jenis_prestasi' => 'tahfizh',
-                    'nama_prestasi' => 'Juara 1 Musabaqah Hifzhil Qur’an (MHQ) 5 Juz',
-                    'tingkat_prestasi' => 'Nasional',
-                    'nilai_prestasi' => 98.5,
-                    'keterangan' => 'Berhasil menyelesaikan hafalan 5 Juz Mutqin dengan tajwid sempurna.',
-                ],
-                [
-                    'jenis_prestasi' => 'tahfizh',
-                    'nama_prestasi' => 'Wisuda Tahfizh Al-Qur’an Kategori 10 Juz',
-                    'tingkat_prestasi' => 'Provinsi',
-                    'nilai_prestasi' => 95.0,
-                    'keterangan' => 'Lulus ujian tasmi’ sekali duduk 10 Juz Al-Qur’an predikat Mumtaz.',
-                ],
-                [
-                    'jenis_prestasi' => 'santri',
-                    'nama_prestasi' => 'Santri Teladan & Mutabaah Adab Terbaik Asrama',
-                    'tingkat_prestasi' => 'Internal Sekolah',
-                    'nilai_prestasi' => 99.0,
-                    'keterangan' => 'Teladan dalam kedisiplinan ibadah yaumiyah dan shalat jamaah.',
-                ],
-                [
-                    'jenis_prestasi' => 'olahraga',
-                    'nama_prestasi' => 'Juara 1 Turnamen Sepakbola Antar Pesantren & Sekolah',
-                    'tingkat_prestasi' => 'Nasional',
-                    'nilai_prestasi' => 100.0,
-                    'keterangan' => 'Tim Sepakbola Sekolah memenangkan babak final dengan skor 3-1.',
-                ],
-                [
-                    'jenis_prestasi' => 'lomba',
-                    'nama_prestasi' => 'Juara 1 Olimpiade Matematika Terpadu & Sains Sekolah',
-                    'tingkat_prestasi' => 'Nasional',
-                    'nilai_prestasi' => 98.0,
-                    'keterangan' => 'Meraih Medali Emas Olimpiade Sains Nasional bidang Matematika.',
-                ],
-                [
-                    'jenis_prestasi' => 'akademik',
-                    'nama_prestasi' => 'Peringkat 1 Lulusan Terbaik & Rapor Akademik Paralel',
-                    'tingkat_prestasi' => 'Internal Sekolah',
-                    'nilai_prestasi' => 99.5,
-                    'keterangan' => 'Nilai rata-rata rapor tertinggi paralel seluruh mata pelajaran.',
-                ],
-            ];
-
-            $mockCollection = collect();
-            foreach ($sampleData as $idx => $s) {
-                $st = $students->get($idx % max(1, $students->count()));
-                $un = $units->get($idx % max(1, $units->count()));
-
-                $mockItem = new RekapPrestasiSiswa();
-                $mockItem->id = (string) Str::uuid();
-                $mockItem->id_siswa = $st?->id ?? (string) Str::uuid();
-                $mockItem->jenis_prestasi = $s['jenis_prestasi'];
-                $mockItem->nama_prestasi = $s['nama_prestasi'];
-                $mockItem->tingkat_prestasi = $s['tingkat_prestasi'];
-                $mockItem->nilai_prestasi = $s['nilai_prestasi'];
-                $mockItem->tanggal_prestasi = now()->subDays($idx * 5);
-                $mockItem->keterangan = $s['keterangan'];
-
-                if ($st) {
-                    $mockItem->setRelation('siswa', $st);
-                } else {
-                    // Fake Student Relation Object
-                    $fakeStudent = new Student();
-                    $fakeStudent->id = $mockItem->id_siswa;
-                    $fakeStudent->full_name = 'Siswa Berprestasi Utama ' . ($idx + 1);
-                    $fakeStudent->nis = '20260100' . ($idx + 1);
-                    $fakeStudent->nisn = '005123450' . ($idx + 1);
-                    $fakeStudent->gender = $idx % 2 === 0 ? 'L' : 'P';
-                    $fakeStudent->unit_id = $un?->id ?? (string) Str::uuid();
-                    if ($un) {
-                        $fakeStudent->setRelation('educationUnit', $un);
-                    }
-                    $mockItem->setRelation('siswa', $fakeStudent);
-                }
-
-                $mockCollection->push($mockItem);
-            }
-
-            $allMatching = $mockCollection;
         }
 
         // Summary Calculations

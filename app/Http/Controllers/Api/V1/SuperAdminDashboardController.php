@@ -30,6 +30,9 @@ class SuperAdminDashboardController extends Controller
         $filters = [
             'academic_year_id' => $request->query('academic_year_id'),
             'semester_id' => $request->query('semester_id'),
+            'unit_id' => $request->query('unit_id'),
+            'status' => $request->query('status'),
+            'period' => $request->query('period'),
         ];
 
         $data = $this->service->getDashboardOverview($filters);

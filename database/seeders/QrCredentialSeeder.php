@@ -16,7 +16,7 @@ class QrCredentialSeeder extends Seeder
     public function run(): void
     {
         // 1. Employee QR Login Demo Credential
-        $guruUser = User::where('email', 'guru@school-erp.local')->first();
+        $guruUser = User::where('email', 'guru@dareliman.sch.id')->first();
         $employee = Employee::where('niy', 'TEST-NIY-17')->first()
             ?? ($guruUser ? Employee::where('user_id', $guruUser->id)->first() : null);
 

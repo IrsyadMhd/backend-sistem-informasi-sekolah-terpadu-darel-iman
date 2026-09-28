@@ -4,7 +4,9 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\DormitoryPermit;
+use App\Models\ParentModel;
 use App\Models\Student;
+use App\Services\AccessScopeService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +14,28 @@ use Illuminate\Support\Str;
 
 class DormitoryPermitController extends Controller
 {
+    public function __construct(
+        protected AccessScopeService $accessScope,
+    ) {}
+
+    /**
+     * Assert that the authenticated user has access to this permit's unit.
+     */
+    protected function assertPermitAccess(DormitoryPermit $permit): void
+    {
+        $user = request()->user();
+        if (! $user || $this->accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+        abort_unless(
+            $accessibleUnitIds->contains($permit->unit_pendidikan_id),
+            403,
+            'Akses ditolak: Izin santri berada di luar unit pendidikan Anda.'
+        );
+    }
+
     /**
      * List all dormitory permits (Musyrif / Staff View)
      */
@@ -24,20 +48,19 @@ class DormitoryPermitController extends Controller
             'musyrif:id,nama_lengkap',
         ]);
 
-        if ($request->filled('status')) {
-            $query->where('status', $request->query('status'));
-        }
-
-        if ($request->filled('return_status')) {
-            $query->where('return_status', $request->query('return_status'));
-        }
-
-        if ($request->filled('permit_type')) {
-            $query->where('permit_type', $request->query('permit_type'));
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $query->whereIn('unit_pendidikan_id', $accessibleUnitIds);
         }
 
         if ($request->filled('unit_id')) {
-            $query->where('unit_pendidikan_id', $request->query('unit_id'));
+            $requestedUnitId = $request->query('unit_id');
+            if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+                $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+                abort_unless($accessibleUnitIds->contains($requestedUnitId), 403, 'Akses unit ditolak.');
+            }
+            $query->where('unit_pendidikan_id', $requestedUnitId);
         }
 
         if ($request->filled('date')) {
@@ -61,6 +84,10 @@ class DormitoryPermitController extends Controller
         $permits = $query->orderByDesc('created_at')->paginate($perPage);
 
         $base = DormitoryPermit::query();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            $base->whereIn('unit_pendidikan_id', $accessibleUnitIds);
+        }
         if ($request->filled('unit_id')) {
             $base->where('unit_pendidikan_id', $request->query('unit_id'));
         }
@@ -104,12 +131,24 @@ class DormitoryPermitController extends Controller
         ]);
 
         $student = Student::findOrFail($validated['student_id']);
+        $studentUnitId = $student->unit_id ?: $student->kelas?->unit_pendidikan_id;
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            abort_unless(
+                $accessibleUnitIds->contains($studentUnitId),
+                403,
+                'Akses ditolak: Santri berada di luar unit pendidikan Anda.'
+            );
+        }
+
         $permitNumber = 'BP-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -4));
 
         $permit = DormitoryPermit::create([
             'id' => (string) Str::uuid(),
             'student_id' => $student->id,
-            'unit_pendidikan_id' => $student->unit_id ?: $student->kelas?->unit_pendidikan_id,
+            'unit_pendidikan_id' => $studentUnitId,
             'permit_number' => $permitNumber,
             'permit_type' => $validated['permit_type'],
             'destination' => $validated['destination'] ?? 'Rumah Orang Tua',
@@ -136,6 +175,8 @@ class DormitoryPermitController extends Controller
      */
     public function checkout(Request $request, DormitoryPermit $permit): JsonResponse
     {
+        $this->assertPermitAccess($permit);
+
         if ($permit->status === 'keluar') {
             return response()->json([
                 'status' => 'error',
@@ -162,6 +203,8 @@ class DormitoryPermitController extends Controller
      */
     public function returnCheckin(Request $request, DormitoryPermit $permit): JsonResponse
     {
+        $this->assertPermitAccess($permit);
+
         if ($permit->status === 'kembali') {
             return response()->json([
                 'status' => 'error',
@@ -206,7 +249,16 @@ class DormitoryPermitController extends Controller
             'educationUnit:id,name',
         ]);
 
-        if ($childId) {
+        $parent = ParentModel::where('user_id', $user->id)->first();
+        if ($parent) {
+            $childIds = $parent->students->concat($parent->studentsPivot)->pluck('id');
+            if ($childId) {
+                abort_unless($childIds->contains($childId), 403, 'Akses ditolak: Santri bukan anak Anda.');
+                $query->where('student_id', $childId);
+            } else {
+                $query->whereIn('student_id', $childIds);
+            }
+        } elseif ($childId) {
             $query->where('student_id', $childId);
         } else {
             $student = Student::where('user_id', $user->id)->first();

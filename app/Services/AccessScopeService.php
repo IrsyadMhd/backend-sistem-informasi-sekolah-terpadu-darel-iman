@@ -10,6 +10,7 @@ use App\Models\ParentModel;
 use App\Models\Position;
 use App\Models\Role;
 use App\Models\Student;
+use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -123,6 +124,14 @@ class AccessScopeService
     public function assertRoleAssignmentAllowed(User $user, string $roleName, array $permissions = []): void
     {
         $this->assertAccessManagement($user);
+
+        if ($this->hasAnyRoleName($roleName, ['Super Admin', 'Superadmin', 'super_admin', 'super-admin'])) {
+            abort_unless(
+                $this->hasAnyRole($user, ['Super Admin', 'Superadmin', 'super_admin', 'super-admin']),
+                403,
+                'Hanya Super Admin yang dapat menetapkan role Super Admin.'
+            );
+        }
 
         if ($this->canManageGlobalAccess($user)) {
             return;
@@ -290,20 +299,28 @@ class AccessScopeService
                 ->pluck('id');
             $unitIds = $unitIds->merge($metadataManagedUnits);
 
-            // Unit dari rombel yang diajar lewat jadwal atau di-walikelasi
-            $assignedClassUnitIds = Kelas::query()
-                ->where(function ($q) use ($employee, $user) {
-                    $q->where('wali_kelas_id', $employee->id)
-                      ->orWhereIn('id', ClassSchedule::query()
-                            ->where('employee_id', $employee->id)
-                            ->orWhere('teacher_id', $user->id)
-                            ->select('kelas_id')
-                            ->whereNotNull('kelas_id')
-                      );
-                })
-                ->pluck('unit_pendidikan_id')
-                ->filter();
-            $unitIds = $unitIds->merge($assignedClassUnitIds);
+            // Unit dari rombel yang diajar lewat jadwal atau di-walikelasi (hanya untuk guru murni, bukan pimpinan/staf administrasi unit)
+            if (! $this->hasAnyRole($user, [
+                'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+                'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Waka Kurikulum', 'waka_kurikulum',
+                'Wakil Kesiswaan', 'Waka Kesiswaan', 'waka_kesiswaan',
+                'Tata Usaha', 'TU', 'tu', 'tata_usaha',
+                'Operator', 'operator',
+            ])) {
+                $assignedClassUnitIds = Kelas::query()
+                    ->where(function ($q) use ($employee, $user) {
+                        $q->where('wali_kelas_id', $employee->id)
+                          ->orWhereIn('id', ClassSchedule::query()
+                                ->where('employee_id', $employee->id)
+                                ->orWhere('teacher_id', $user->id)
+                                ->select('kelas_id')
+                                ->whereNotNull('kelas_id')
+                          );
+                    })
+                    ->pluck('unit_pendidikan_id')
+                    ->filter();
+                $unitIds = $unitIds->merge($assignedClassUnitIds);
+            }
         }
 
         $userUnitId = data_get($user->metadata, 'education_unit_id')
@@ -344,12 +361,13 @@ class AccessScopeService
     public function accessibleRombels(User $user): Builder
     {
         if ($this->hasAnyRole($user, [
-            'Super Admin', 'super_admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+            'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
             'pengurus_yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan',
             'Bendahara Yayasan', 'bendahara_yayasan', 'Kepala Bidang Pendidikan',
             'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
             'Divisi Program Khusus', 'divisi_pendidikan', 'Kepala Sekolah', 'kepala_sekolah',
-            'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan',
+            'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Waka Kurikulum', 'waka_kurikulum',
+            'Wakil Kesiswaan', 'Waka Kesiswaan', 'waka_kesiswaan',
             'Tata Usaha', 'TU', 'tata_usaha', 'Guru BK', 'guru_bk',
             'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah',
         ])) {
@@ -358,13 +376,40 @@ class AccessScopeService
         }
 
         $employee = Employee::query()->where('user_id', $user->id)->first();
-        if ($employee) {
+        $teacher = Teacher::query()
+            ->where('user_id', $user->id)
+            ->when($employee, fn ($q) => $q->orWhere('employee_id', $employee->id))
+            ->first();
+
+        if ($employee || $teacher) {
             // Rombel yang diajar atau di-walikelasi
             $teachingRombelIds = ClassSchedule::query()
-                ->where(fn ($q) => $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id))
-                ->pluck('kelas_id')
-                ->filter();
-            $homeroomRombelIds = Kelas::query()->where('wali_kelas_id', $employee->id)->pluck('id');
+                ->where(function ($q) use ($employee, $teacher) {
+                    if ($employee && $teacher) {
+                        $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
+                    } elseif ($teacher) {
+                        $q->where('teacher_id', $teacher->id);
+                    } elseif ($employee) {
+                        $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id);
+                    }
+                })
+                ->get()
+                ->toBase()
+                ->map(fn ($s) => $s->kelas_id ?? $s->class_id)
+                ->filter()
+                ->unique();
+
+            $homeroomRombelIds = Kelas::query()
+                ->where(function ($q) use ($employee, $teacher) {
+                    if ($employee) {
+                        $q->where('wali_kelas_id', $employee->id);
+                    }
+                    if ($teacher) {
+                        $q->orWhere('wali_kelas_id', $teacher->id);
+                    }
+                })
+                ->pluck('id');
+
             $allIds = $teachingRombelIds->merge($homeroomRombelIds)->unique();
 
             if ($allIds->isNotEmpty()) {
@@ -372,7 +417,7 @@ class AccessScopeService
             }
 
             // Fallback ke rombel di unit pegawai jika tidak ada pengajaran/walikelas spesifik
-            if ($employee->unit_id) {
+            if ($employee?->unit_id) {
                 return Kelas::query()->where('unit_pendidikan_id', $employee->unit_id);
             }
         }
@@ -404,12 +449,13 @@ class AccessScopeService
     public function accessibleStudents(User $user): Builder
     {
         if ($this->hasAnyRole($user, [
-            'Super Admin', 'super_admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+            'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
             'pengurus_yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan',
             'Bendahara Yayasan', 'bendahara_yayasan', 'Kepala Bidang Pendidikan',
             'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
             'Divisi Program Khusus', 'divisi_pendidikan', 'Kepala Sekolah', 'kepala_sekolah',
-            'Waka Kesiswaan', 'waka_kesiswaan', 'Tata Usaha', 'TU', 'tata_usaha',
+            'Wakil Kepala Sekolah', 'Wakil Kesiswaan', 'Waka Kesiswaan', 'waka_kesiswaan',
+            'Tata Usaha', 'TU', 'tata_usaha',
             'Guru BK', 'guru_bk',
         ])) {
             $unitIds = $this->accessibleEducationUnits($user)->pluck('id');
@@ -429,7 +475,9 @@ class AccessScopeService
         $employee = Employee::query()->where('user_id', $user->id)->first();
         if ($employee) {
             $rombelIds = $this->accessibleRombels($user)->pluck('id');
-            return Student::query()->whereIn('kelas_id', $rombelIds);
+            return Student::query()->where(function ($query) use ($rombelIds) {
+                $query->whereIn('kelas_id', $rombelIds)->orWhereIn('class_id', $rombelIds);
+            });
         }
 
         $parent = ParentModel::query()->where('user_id', $user->id)->first();
@@ -475,7 +523,7 @@ class AccessScopeService
     public function accessibleSchedules(User $user): Builder
     {
         if ($this->hasAnyRole($user, [
-            'Super Admin', 'super_admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+            'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
             'pengurus_yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan',
             'Bendahara Yayasan', 'bendahara_yayasan', 'Kepala Bidang Pendidikan',
             'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
@@ -488,8 +536,21 @@ class AccessScopeService
         }
 
         $employee = Employee::query()->where('user_id', $user->id)->first();
-        if ($employee) {
-            return ClassSchedule::query()->where(fn ($q) => $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id));
+        $teacher = Teacher::query()
+            ->where('user_id', $user->id)
+            ->when($employee, fn ($q) => $q->orWhere('employee_id', $employee->id))
+            ->first();
+
+        if ($employee || $teacher) {
+            return ClassSchedule::query()->where(function ($q) use ($employee, $teacher) {
+                if ($employee && $teacher) {
+                    $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
+                } elseif ($teacher) {
+                    $q->where('teacher_id', $teacher->id);
+                } elseif ($employee) {
+                    $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id);
+                }
+            });
         }
 
         $rombelIds = $this->accessibleRombels($user)->pluck('id');

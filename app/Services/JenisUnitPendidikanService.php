@@ -124,9 +124,62 @@ class JenisUnitPendidikanService
 
         foreach ($rows as $index => $row) {
             $rowNum = $index + 1;
-            $kode = trim($row['kode_jenis'] ?? '');
-            $nama = trim($row['nama_jenis'] ?? '');
-            $jenjang = trim($row['jenjang'] ?? 'SD');
+
+            $normalized = [];
+            foreach ($row as $k => $v) {
+                $cleanKey = strtolower(trim(str_replace([' ', '-', '/'], '_', (string) $k)));
+                $normalized[$cleanKey] = $v;
+            }
+
+            $kode = trim(
+                $normalized['kode_jenis']
+                ?? $normalized['kode']
+                ?? $row['kode_jenis']
+                ?? $row['KODE JENIS']
+                ?? ''
+            );
+            $nama = trim(
+                $normalized['nama_jenis']
+                ?? $normalized['nama_jenis_unit']
+                ?? $normalized['nama']
+                ?? $row['nama_jenis']
+                ?? $row['NAMA JENIS UNIT']
+                ?? ''
+            );
+            $singkatan = trim(
+                $normalized['singkatan']
+                ?? $row['singkatan']
+                ?? $row['SINGKATAN']
+                ?? $kode
+            );
+            $jenjang = trim(
+                $normalized['jenjang']
+                ?? $row['jenjang']
+                ?? $row['JENJANG']
+                ?? 'SD'
+            );
+            $warnaBadge = trim(
+                $normalized['warna_badge']
+                ?? $row['warna_badge']
+                ?? $row['WARNA BADGE']
+                ?? '#10B981'
+            );
+            $icon = trim(
+                $normalized['icon']
+                ?? $row['icon']
+                ?? $row['ICON']
+                ?? 'School'
+            );
+            $urutan = (int) (
+                $normalized['urutan']
+                ?? $row['urutan']
+                ?? $row['URUTAN']
+                ?? $rowNum
+            );
+            $keterangan = $normalized['keterangan'] ?? $row['keterangan'] ?? $row['KETERANGAN'] ?? null;
+            if ($keterangan === '-') {
+                $keterangan = null;
+            }
 
             if (empty($kode) || empty($nama)) {
                 $gagal++;
@@ -136,21 +189,22 @@ class JenisUnitPendidikanService
             }
 
             try {
-                $status = isset($row['status'])
-                    ? (is_bool($row['status']) ? $row['status'] : in_array(strtolower((string) $row['status']), ['1', 'true', 'aktif', 'active']))
-                    : true;
+                $rawStatus = $normalized['status'] ?? $row['status'] ?? $row['STATUS'] ?? true;
+                $status = is_bool($rawStatus)
+                    ? $rawStatus
+                    : in_array(strtolower(trim((string) $rawStatus)), ['1', 'true', 'aktif', 'active']);
 
                 JenisUnitPendidikan::updateOrCreate(
                     ['kode_jenis' => $kode],
                     [
                         'uuid' => (string) Str::uuid(),
                         'nama_jenis' => $nama,
-                        'singkatan' => $row['singkatan'] ?? $kode,
+                        'singkatan' => $singkatan ?: $kode,
                         'jenjang' => $jenjang,
-                        'warna_badge' => $row['warna_badge'] ?? '#10B981',
-                        'icon' => $row['icon'] ?? 'School',
-                        'urutan' => (int) ($row['urutan'] ?? ($rowNum)),
-                        'keterangan' => $row['keterangan'] ?? null,
+                        'warna_badge' => $warnaBadge ?: '#10B981',
+                        'icon' => $icon ?: 'School',
+                        'urutan' => $urutan,
+                        'keterangan' => $keterangan,
                         'status' => $status,
                         'updated_by' => $userId,
                         'created_by' => $userId,

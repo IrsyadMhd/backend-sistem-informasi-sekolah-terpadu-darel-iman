@@ -3,6 +3,7 @@
 namespace App\Http\Requests\V1;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class SimpanTahunAjaranRequest extends FormRequest
 {
@@ -23,7 +24,12 @@ class SimpanTahunAjaranRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => ['required', 'string', 'max:32', 'unique:academic_years,name'],
+            'name' => [
+                'required',
+                'string',
+                'max:32',
+                Rule::unique('academic_years', 'name')->whereNull('deleted_at'),
+            ],
             'start_date' => ['required', 'date'],
             'end_date' => ['required', 'date', 'after:start_date'],
             'is_active' => ['nullable', 'boolean'],

@@ -119,14 +119,6 @@ class DivisiPendidikanDashboardService
         // Rekapitulasi Prestasi Siswa Lintas Unit (Data Riil Database)
         $rekapPrestasi = [];
         if (Schema::hasTable('rekap_prestasi_siswas')) {
-            if (RekapPrestasiSiswa::count() === 0) {
-                try {
-                    (new \Database\Seeders\RekapPrestasiSiswaSeeder())->run();
-                } catch (\Throwable $e) {
-                    // Ignore error if seeder fails silently
-                }
-            }
-
             $prestasiQuery = RekapPrestasiSiswa::query()
                 ->with(['siswa.kelas', 'siswa.educationUnit']);
 
@@ -134,17 +126,11 @@ class DivisiPendidikanDashboardService
                 $prestasiQuery->whereHas('siswa', function ($q) use ($unitIds) {
                     $q->whereIn('unit_id', $unitIds);
                 });
+            } else {
+                $prestasiQuery->whereRaw('1 = 0');
             }
 
             $items = $prestasiQuery->latest('tanggal_prestasi')->limit(50)->get();
-
-            if ($items->isEmpty()) {
-                $items = RekapPrestasiSiswa::query()
-                    ->with(['siswa.kelas', 'siswa.educationUnit'])
-                    ->latest('tanggal_prestasi')
-                    ->limit(50)
-                    ->get();
-            }
 
             $rekapPrestasi = $items->map(fn ($p) => [
                 'id' => $p->id,
@@ -503,6 +489,8 @@ class DivisiPendidikanDashboardService
             $query->whereHas('siswa', function ($q) use ($unitIds) {
                 $q->whereIn('unit_id', $unitIds);
             });
+        } else {
+            $query->whereRaw('1 = 0');
         }
 
         if ($search !== '') {

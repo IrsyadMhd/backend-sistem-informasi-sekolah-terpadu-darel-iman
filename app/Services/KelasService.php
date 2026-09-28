@@ -154,7 +154,6 @@ class KelasService
                 ->pluck('id')
                 ->toArray();
             $legacyIds = \App\Models\SchoolClass::where('name', $kelas->nama_kelas)
-                ->orWhere('code', $kelas->nama_kelas)
                 ->pluck('id')
                 ->toArray();
             $matchingKelasIds = array_values(array_unique(array_filter(array_merge($matchingKelasIds, $tblIds, $legacyIds))));
@@ -220,8 +219,8 @@ class KelasService
         $gagal = 0;
         $errors = [];
 
-        $tahunDefault = AcademicYear::where('is_active', true)->first() ?? AcademicYear::first();
-        $semesterDefault = Semester::where('is_active', true)->first() ?? Semester::first();
+        $tahunDefault = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
+        $semesterDefault = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
 
         foreach ($rows as $index => $row) {
             try {

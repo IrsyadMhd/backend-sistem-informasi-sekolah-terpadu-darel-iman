@@ -27,7 +27,7 @@ class PemantauanDivisiSeeder extends Seeder
         }
 
         // 1. Tarik user penginput secara dinamis dari database (Superadmin/Pimpinan/User pertama)
-        $penginput = User::where('email', 'superadmin@simsit.sch.id')->first()
+        $penginput = User::where('email', 'superadmin@dareliman.sch.id')->first()
             ?? User::where('is_active', true)->first()
             ?? User::first();
 
