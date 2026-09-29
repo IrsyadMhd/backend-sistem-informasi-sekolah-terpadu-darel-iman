@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\AcademicYear;
+use App\Models\CapaianPembelajaran;
 use App\Models\ClassSchedule;
 use App\Models\Employee;
 use App\Models\Kelas;
@@ -11,8 +12,10 @@ use App\Models\LmsMateri;
 use App\Models\LmsModulAjar;
 use App\Models\LmsPenugasan;
 use App\Models\LmsPresensi;
+use App\Models\MasterKurikulum;
 use App\Models\MutabaahDailyDetail;
 use App\Models\MutabaahDailyHeader;
+use App\Models\TujuanPembelajaran;
 use App\Models\MutabaahSupervisorAssignment;
 use App\Models\MutabaahTemplate;
 use App\Models\MutabaahTemplateItem;
@@ -233,6 +236,9 @@ class GuruTestWorkspaceSeeder extends Seeder
                 $employee, $academicYear, $semester, $unitId, $schedules
             );
 
+            // 3. Modul Ajar (RPP Digital) untuk Guru Test
+            $this->seedModulAjar($user, $employee, $academicYear, $semester, $schedules);
+
             // 4. Materi Belajar
             $this->seedMateriBelajar($teacher, $employee, $academicYear, $semester, $subjects, $kelasList);
 
@@ -438,6 +444,247 @@ class GuruTestWorkspaceSeeder extends Seeder
         $this->command?->info("  ✓ [3] Presensi Siswa   : {$totalPres} record (lms_presensi)");
     }
 
+    private function determineFase(?string $tingkat, ?string $jenjang): string
+    {
+        $tingkatClean = strtoupper(trim((string) $tingkat));
+        $jenjangClean = strtoupper(trim((string) $jenjang));
+
+        if (str_contains($tingkatClean, 'TK') || str_contains($tingkatClean, 'PAUD') || str_contains($jenjangClean, 'TK')) {
+            return 'Fase Fondasi';
+        }
+        if (in_array($tingkatClean, ['1', '2', 'I', 'II']) || str_contains($tingkatClean, 'KELAS 1') || str_contains($tingkatClean, 'KELAS 2')) {
+            return 'Fase A';
+        }
+        if (in_array($tingkatClean, ['3', '4', 'III', 'IV']) || str_contains($tingkatClean, 'KELAS 3') || str_contains($tingkatClean, 'KELAS 4')) {
+            return 'Fase B';
+        }
+        if (in_array($tingkatClean, ['5', '6', 'V', 'VI']) || str_contains($tingkatClean, 'KELAS 5') || str_contains($tingkatClean, 'KELAS 6')) {
+            return 'Fase C';
+        }
+        if (in_array($tingkatClean, ['7', '8', '9', 'VII', 'VIII', 'IX']) || str_contains($jenjangClean, 'SMP')) {
+            return 'Fase D';
+        }
+        if ($tingkatClean === '10' || $tingkatClean === 'X') {
+            return 'Fase E';
+        }
+        if (in_array($tingkatClean, ['11', '12', 'XI', 'XII']) || str_contains($jenjangClean, 'SMA')) {
+            return 'Fase F';
+        }
+        return 'Fase Terpadu';
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 3. MODUL AJAR (RPP DIGITAL) — Modul ajar kurikulum terpadu untuk Guru Test
+    // ════════════════════════════════════════════════════════════════════════
+    private function seedModulAjar(
+        User $user,
+        Employee $employee,
+        AcademicYear $academicYear,
+        Semester $semester,
+        $schedules
+    ): \Illuminate\Support\Collection {
+        $count = 0;
+        $createdModuls = collect();
+
+        // Kelompokkan jadwal mengajar Guru Test berdasarkan mapel dan kelas
+        $uniquePairs = $schedules->groupBy(function ($item) {
+            return $item->subject_id . '_' . $item->kelas_id;
+        });
+
+        // Ambil semua semester yang ada di tahun ajaran aktif (Ganjil & Genap)
+        $allSemesters = Semester::query()
+            ->where('academic_year_id', $academicYear->id)
+            ->orderBy('sequence')
+            ->get();
+
+        if ($allSemesters->isEmpty()) {
+            $allSemesters = collect([$semester]);
+        }
+
+        foreach ($uniquePairs as $pairKey => $scheduleGroup) {
+            $firstSchedule = $scheduleGroup->first();
+            $subject = $firstSchedule->subject;
+            $kelas = $firstSchedule->kelas;
+
+            if (! $subject || ! $kelas) {
+                continue;
+            }
+
+            $unitId = $kelas->unit_pendidikan_id ?? $employee->unit_id;
+
+            // Cari kurikulum yang sesuai secara dinamis tanpa hardcode
+            $kurikulum = MasterKurikulum::query()
+                ->where('unit_pendidikan_id', $unitId)
+                ->where('status', true)
+                ->first()
+                ?? MasterKurikulum::query()
+                    ->where('unit_pendidikan_id', $unitId)
+                    ->first()
+                ?? MasterKurikulum::query()
+                    ->where('status', true)
+                    ->first()
+                ?? MasterKurikulum::query()->first();
+
+            if (! $kurikulum) {
+                continue;
+            }
+
+            $fase = $this->determineFase($kelas->tingkat, $kelas->jenjang);
+            $mapelName = $subject->nama_mapel ?? $subject->name ?? 'Mata Pelajaran';
+            $kelasName = $kelas->nama_kelas ?? $kelas->name ?? 'Kelas';
+
+            // Ambil Capaian Pembelajaran & Tujuan Pembelajaran jika tersedia
+            $cp = CapaianPembelajaran::query()
+                ->where('mata_pelajaran_id', $subject->id)
+                ->where('kurikulum_id', $kurikulum->id)
+                ->first()
+                ?? CapaianPembelajaran::query()
+                    ->where('mata_pelajaran_id', $subject->id)
+                    ->first();
+
+            $tp = $cp ? TujuanPembelajaran::query()->where('cp_id', $cp->id)->first() : null;
+
+            // Buat Modul Ajar untuk setiap semester
+            foreach ($allSemesters as $sem) {
+                $semName = $sem->name ?? $sem->semester ?? 'Ganjil';
+
+                $modulParts = [
+                    [
+                        'suffix' => 'M1',
+                        'sub_judul' => 'Bagian I: Konsep Dasar & Pemahaman Inti',
+                        'alokasi' => 16,
+                    ],
+                    [
+                        'suffix' => 'M2',
+                        'sub_judul' => 'Bagian II: Pendalaman, Aplikasi & Proyek Terpadu',
+                        'alokasi' => 16,
+                    ],
+                ];
+
+                foreach ($modulParts as $partInfo) {
+                    $cleanKelas = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $kelas->kode_kelas ?? $kelasName), 0, 8));
+                    $cleanMapel = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $subject->kode_mapel ?? $mapelName), 0, 10));
+                    $cleanSem = strtoupper(substr($semName, 0, 3));
+                    $cleanTeacher = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', (string) $employee->id), -4));
+                    $kodeModul = "MOD-{$cleanKelas}-{$cleanMapel}-{$cleanSem}-{$partInfo['suffix']}-{$cleanTeacher}";
+
+                    $judulModul = "Modul Ajar {$mapelName} {$kelasName} ({$semName}) — {$partInfo['sub_judul']}";
+
+                    $modulAjar = LmsModulAjar::query()
+                        ->where('guru_id', $employee->id)
+                        ->where('mata_pelajaran_id', $subject->id)
+                        ->where('kelas_id', $kelas->id)
+                        ->where('semester_id', $sem->id)
+                        ->where('kode_modul', $kodeModul)
+                        ->first();
+
+                    if (! $modulAjar) {
+                        $modulAjar = LmsModulAjar::query()->create([
+                            'unit_pendidikan_id'       => $unitId,
+                            'tahun_ajaran_id'          => $academicYear->id,
+                            'semester_id'              => $sem->id,
+                            'kurikulum_id'             => $kurikulum->id,
+                            'mata_pelajaran_id'        => $subject->id,
+                            'guru_id'                  => $employee->id,
+                            'kelas_id'                 => $kelas->id,
+                            'rombel_id'                => $kelas->id,
+                            'cp_id'                    => $cp?->id,
+                            'tp_id'                    => $tp?->id,
+                            'kode_modul'               => $kodeModul,
+                            'judul_modul'              => $judulModul,
+                            'fase'                     => $fase,
+                            'semester'                 => $semName,
+                            'alokasi_waktu_jp'         => $partInfo['alokasi'],
+                            'tujuan_pembelajaran'      => "Peserta didik memahami, menganalisis, dan mempraktikkan materi {$mapelName} pada tingkat {$kelasName} dengan capaian kompetensi unggul dan berakhlak mulia.",
+                            'profil_pelajar_pancasila' => 'Beriman, Bertakwa kepada Tuhan YME, Berakhlak Mulia, Mandiri, Bernalar Kritis, Gotong Royong',
+                            'target_peserta_didik'     => 'Peserta Didik Reguler / Tipikal',
+                            'model_pembelajaran'       => 'Problem Based Learning (PBL) & Project Based Learning (PjBL)',
+                            'metode_pembelajaran'      => 'Talaqqi Terbimbing, Diskusi Interaktif, Praktik Lapangan/Laboratorium, Refleksi Diri',
+                            'media_pembelajaran'       => 'Slide Pembelajaran Interaktif, Video Animasi Edukasi, Lembar Kerja Siswa (LKS), Smart Screen',
+                            'sumber_belajar'           => 'Buku Paket Resmi Darel Iman, Modul Digital Kurikulum Terpadu, Sumber Rujukan Tepercaya',
+                            'kegiatan_pendahuluan'     => "1. Pembukaan majelis belajar dengan salam, doa bersama, dan tadarus tilawah singkat.\n2. Guru mengecek kesiapan fisik dan psikologis siswa serta presensi kehadiran.\n3. Apersepsi bermakna mengaitkan materi terdahulu dengan fenomena harian.\n4. Penyampaian tujuan capaian kompetensi dan alur kegiatan pembelajaran.",
+                            'kegiatan_inti'            => "1. Stimulasi & Orientasi: Siswa menyimak tayangan permasalahan kontekstual terkait {$mapelName}.\n2. Organisasi Belajar: Siswa dibagi dalam kelompok kerja terarah untuk mendiskusikan lembar eksplorasi.\n3. Penyelidikan Mandiri & Kelompok: Guru membimbing proses pencarian informasi, analisis kritis, dan penyusunan solusi alternatif.\n4. Presentasi & Verifikasi: Setiap kelompok memaparkan hasil telaah dan saling memberikan umpan balik konstruktif.",
+                            'kegiatan_penutup'         => "1. Guru bersama peserta didik menyimpulkan poin esensial pembelajaran hari ini.\n2. Refleksi pembelajaran dan apresiasi terhadap keaktifan siswa.\n3. Pemberian penugasan mandiri / pengayaan dan arahan materi untuk pertemuan berikutnya.\n4. Doa kafaratul majelis dan penutup.",
+                            'asesmen_awal'             => 'Tes diagnostik kognitif awal dan kuis apersepsi pemantik minat',
+                            'asesmen_proses'           => 'Observasi keaktifan diskusi, penilaian rubrik unjuk kerja, dan lembar ceklis sikap',
+                            'asesmen_akhir'            => 'Tes formatif tertulis, laporan proyek mandiri/kelompok, dan penilaian portofolio tugas',
+                            'rencana_penilaian'        => 'Asesmen Formatif Keaktifan (30%), Uji Capaian Bab (35%), Portofolio Proyek (35%)',
+                            'refleksi_guru'            => 'Alhamdulillah pembelajaran berjalan kondusif. Pemahaman konsep dasar telah tercapai oleh sebagian besar santri, perhatian khusus diberikan kepada siswa yang memerlukan pendampingan diferensiasi.',
+                            'status'                   => 'published',
+                            'versi'                    => '1.0',
+                            'deskripsi'                => "Modul ajar digital terpadu {$mapelName} {$kelasName} berbasis nilai-nilai keislaman dan kurikulum SIT terakreditasi.",
+                            'created_by'               => $user->id,
+                        ]);
+                        $count++;
+                    }
+
+                    $createdModuls->push($modulAjar);
+                }
+            }
+        }
+
+        // Sinkronisasi materi Guru Test yang sudah ada agar terhubung ke Modul Ajar Guru Test
+        $allTeacherMateri = LmsMateri::query()->where('guru_id', $employee->id)->get();
+        foreach ($allTeacherMateri as $mat) {
+            $matchedModul = LmsModulAjar::query()
+                ->where('guru_id', $employee->id)
+                ->where('mata_pelajaran_id', $mat->mata_pelajaran_id)
+                ->first();
+
+            if (! $matchedModul) {
+                $mSubj = Subject::find($mat->mata_pelajaran_id);
+                if ($mSubj) {
+                    $mName = $mSubj->nama_mapel ?? $mSubj->name ?? '';
+                    $matchedModul = LmsModulAjar::query()
+                        ->where('guru_id', $employee->id)
+                        ->whereHas('subject', function ($sq) use ($mName) {
+                            $sq->where('nama_mapel', 'ILIKE', "%{$mName}%")
+                               ->orWhere('name', 'ILIKE', "%{$mName}%");
+                        })
+                        ->first();
+                }
+            }
+
+            if (! $matchedModul) {
+                $matchedModul = LmsModulAjar::query()
+                    ->where('guru_id', $employee->id)
+                    ->first();
+            }
+
+            if ($matchedModul && $mat->modul_ajar_id !== $matchedModul->id) {
+                $mat->update([
+                    'modul_ajar_id'     => $matchedModul->id,
+                    'mata_pelajaran_id' => $matchedModul->mata_pelajaran_id,
+                ]);
+            }
+        }
+
+        // Sinkronisasi penugasan Guru Test yang sudah ada agar terhubung ke Modul Ajar Guru Test
+        $allTeacherTugas = LmsPenugasan::query()->where('guru_id', $employee->id)->get();
+        foreach ($allTeacherTugas as $tug) {
+            $matchedModul = LmsModulAjar::query()
+                ->where('guru_id', $employee->id)
+                ->where('mata_pelajaran_id', $tug->mata_pelajaran_id)
+                ->where('kelas_id', $tug->kelas_id)
+                ->first()
+                ?? LmsModulAjar::query()
+                    ->where('guru_id', $employee->id)
+                    ->where('mata_pelajaran_id', $tug->mata_pelajaran_id)
+                    ->first()
+                ?? LmsModulAjar::query()
+                    ->where('guru_id', $employee->id)
+                    ->first();
+
+            if ($matchedModul && $tug->modul_ajar_id !== $matchedModul->id) {
+                $tug->update(['modul_ajar_id' => $matchedModul->id]);
+            }
+        }
+
+        $this->command?->info("  ✓ [3] Modul Ajar       : {$count} modul dibuat (lms_modul_ajar)");
+
+        return $createdModuls;
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     // 4. MATERI BELAJAR — 20 materi, 2/minggu sejak Agustus 2026
     // ════════════════════════════════════════════════════════════════════════
@@ -482,24 +729,27 @@ class GuruTestWorkspaceSeeder extends Seeder
                 continue;
             }
 
-            // Temukan atau buat Modul Ajar untuk mapel dan guru ini
+            // Temukan Modul Ajar milik Guru Test untuk mapel dan kelas ini
             $modulAjar = LmsModulAjar::query()
-                ->where('mata_pelajaran_id', $subject->id)
                 ->where('guru_id', $employee->id)
-                ->first();
-
-            if (! $modulAjar) {
-                $modulAjar = LmsModulAjar::query()
+                ->where('mata_pelajaran_id', $subject->id)
+                ->where('kelas_id', $kelas->id)
+                ->first()
+                ?? LmsModulAjar::query()
+                    ->where('guru_id', $employee->id)
                     ->where('mata_pelajaran_id', $subject->id)
                     ->first();
-            }
 
             if (! $modulAjar) {
-                $kurikulumId = DB::table('kurikulums')->where('is_active', true)->value('id')
-                    ?? DB::table('kurikulums')->value('id');
+                $unitId = $kelas->unit_pendidikan_id ?? $employee->unit_id;
+                $kurikulumId = MasterKurikulum::query()
+                    ->where('unit_pendidikan_id', $unitId)
+                    ->where('status', true)
+                    ->value('id')
+                    ?? MasterKurikulum::query()->value('id');
 
                 $modulAjar = LmsModulAjar::query()->create([
-                    'unit_pendidikan_id'    => $kelas->unit_pendidikan_id ?? $employee->unit_id,
+                    'unit_pendidikan_id'    => $unitId,
                     'tahun_ajaran_id'       => $ay->id,
                     'semester_id'           => $semester->id,
                     'kurikulum_id'          => $kurikulumId,
@@ -508,9 +758,9 @@ class GuruTestWorkspaceSeeder extends Seeder
                     'kelas_id'              => $kelas->id,
                     'rombel_id'             => $kelas->id,
                     'kode_modul'            => 'MOD-' . strtoupper(substr(md5($subject->id . $kelas->id . $i), 0, 8)),
-                    'judul_modul'           => "Modul Ajar {$mapelName} TP 2026/2027",
-                    'fase'                  => 'Fase D',
-                    'semester'              => 'Ganjil',
+                    'judul_modul'           => "Modul Ajar {$mapelName} {$kelas->nama_kelas} TP 2026/2027",
+                    'fase'                  => $this->determineFase($kelas->tingkat, $kelas->jenjang),
+                    'semester'              => $semester->name ?? 'Ganjil',
                     'alokasi_waktu_jp'      => 16,
                     'tujuan_pembelajaran'   => "Peserta didik memahami konsep materi {$mapelName}.",
                     'status'                => 'published',
@@ -599,8 +849,14 @@ class GuruTestWorkspaceSeeder extends Seeder
             }
 
             $modulAjar = LmsModulAjar::query()
+                ->where('guru_id', $employee->id)
                 ->where('mata_pelajaran_id', $subject->id)
-                ->first();
+                ->where('kelas_id', $kelas->id)
+                ->first()
+                ?? LmsModulAjar::query()
+                    ->where('guru_id', $employee->id)
+                    ->where('mata_pelajaran_id', $subject->id)
+                    ->first();
 
             LmsPenugasan::query()->create([
                 'mata_pelajaran_id'     => $subject->id,
