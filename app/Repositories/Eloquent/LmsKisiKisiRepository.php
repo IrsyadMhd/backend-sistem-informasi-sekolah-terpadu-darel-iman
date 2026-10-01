@@ -33,13 +33,18 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
             $employee?->id,
             $teacher?->id,
         ])));
+        $unitId = $employee?->unit_id;
 
-        return $query->where(function ($q) use ($teacherIds, $user) {
+        return $query->where(function ($q) use ($teacherIds, $user, $unitId) {
+            $q->where('created_by', $user->id)
+              ->orWhereNull('created_by');
+
             if (! empty($teacherIds)) {
-                $q->whereIn('guru_id', $teacherIds)
-                  ->orWhere('created_by', $user->id);
-            } else {
-                $q->where('created_by', $user->id);
+                $q->orWhereIn('guru_id', $teacherIds);
+            }
+            if ($unitId) {
+                $q->orWhereHas('kelas', fn ($qk) => $qk->where('unit_pendidikan_id', $unitId))
+                  ->orWhereHas('subject', fn ($qs) => $qs->where('unit_pendidikan_id', $unitId));
             }
         });
     }
@@ -122,6 +127,8 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
             'ujian',
         ]);
 
+        $this->applyTeacherScope($query);
+
         if ($withTrashed) {
             $query->withTrashed();
         }
@@ -136,7 +143,7 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
 
     public function update(string $id, array $data): ?LmsKisiKisi
     {
-        $kisi = LmsKisiKisi::find($id);
+        $kisi = $this->findById($id);
         if (! $kisi) {
             return null;
         }
@@ -157,7 +164,7 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
 
     public function delete(string $id): bool
     {
-        $kisi = LmsKisiKisi::find($id);
+        $kisi = $this->findById($id);
         if (! $kisi) {
             return false;
         }
@@ -167,7 +174,9 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
 
     public function restore(string $id): bool
     {
-        $kisi = LmsKisiKisi::withTrashed()->find($id);
+        $query = LmsKisiKisi::withTrashed();
+        $this->applyTeacherScope($query);
+        $kisi = $query->find($id);
         if (! $kisi || ! $kisi->trashed()) {
             return false;
         }
@@ -177,14 +186,23 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
 
     public function duplicate(string $id): ?LmsKisiKisi
     {
-        $original = LmsKisiKisi::find($id);
+        $original = $this->findById($id);
         if (! $original) {
             return null;
         }
 
+        $user = Auth::user();
+        $employee = $user ? Employee::where('user_id', $user->id)->first() : null;
+
         $new = $original->replicate();
         $new->id = (string) Str::uuid();
         $new->judul_kisi = $original->judul_kisi.' (Salinan)';
+        if ($employee) {
+            $new->guru_id = $employee->id;
+        }
+        if ($user) {
+            $new->created_by = $user->id;
+        }
         $new->created_at = now();
         $new->updated_at = now();
         $new->save();

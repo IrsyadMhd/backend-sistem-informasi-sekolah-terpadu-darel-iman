@@ -45,6 +45,10 @@ class LmsModulAjarRepository implements LmsModulAjarRepositoryInterface
             $query->where('unit_pendidikan_id', $filters['unit_pendidikan_id']);
         }
 
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $query->whereIn('unit_pendidikan_id', $filters['unit_ids']);
+        }
+
         if (! empty($filters['tahun_ajaran_id'])) {
             $query->where('tahun_ajaran_id', $filters['tahun_ajaran_id']);
         }
@@ -192,14 +196,52 @@ class LmsModulAjarRepository implements LmsModulAjarRepositoryInterface
         ]);
     }
 
-    public function getStats(): array
+    public function getStats(array $filters = []): array
     {
-        $totalModul = LmsModulAjar::count();
-        $totalDraft = LmsModulAjar::where('status', 'Draft')->orWhere('status', 'draft')->count();
-        $totalReview = LmsModulAjar::where('status', 'Review')->orWhere('status', 'review')->count();
-        $totalPublished = LmsModulAjar::where('status', 'Publish')->orWhere('status', 'published')->count();
-        $totalArchived = LmsModulAjar::where('status', 'Arsip')->orWhere('status', 'archived')->count();
-        $totalTpTercover = LmsModulAjar::whereNotNull('tp_id')->distinct('tp_id')->count('tp_id');
+        $baseQuery = function () use ($filters) {
+            $query = LmsModulAjar::query();
+
+            if (! empty($filters['guru_id'])) {
+                $query->where('guru_id', $filters['guru_id']);
+            }
+
+            if (! empty($filters['unit_pendidikan_id'])) {
+                $query->where('unit_pendidikan_id', $filters['unit_pendidikan_id']);
+            }
+
+            if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+                $query->whereIn('unit_pendidikan_id', $filters['unit_ids']);
+            }
+
+            if (! empty($filters['tahun_ajaran_id'])) {
+                $query->where('tahun_ajaran_id', $filters['tahun_ajaran_id']);
+            }
+
+            if (! empty($filters['semester_id'])) {
+                $query->where('semester_id', $filters['semester_id']);
+            }
+
+            if (! empty($filters['mata_pelajaran_id'])) {
+                $query->where('mata_pelajaran_id', $filters['mata_pelajaran_id']);
+            }
+
+            if (! empty($filters['kelas_id'])) {
+                $query->where('kelas_id', $filters['kelas_id']);
+            }
+
+            if (! empty($filters['fase'])) {
+                $query->where('fase', $filters['fase']);
+            }
+
+            return $query;
+        };
+
+        $totalModul = $baseQuery()->count();
+        $totalDraft = $baseQuery()->whereIn('status', ['Draft', 'draft'])->count();
+        $totalReview = $baseQuery()->whereIn('status', ['Review', 'review'])->count();
+        $totalPublished = $baseQuery()->whereIn('status', ['Publish', 'published'])->count();
+        $totalArchived = $baseQuery()->whereIn('status', ['Arsip', 'archived'])->count();
+        $totalTpTercover = $baseQuery()->whereNotNull('tp_id')->distinct('tp_id')->count('tp_id');
 
         return [
             'total_modul' => $totalModul,

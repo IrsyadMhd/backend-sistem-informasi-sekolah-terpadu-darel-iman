@@ -21,5 +21,6 @@ interface LmsModulAjarRepositoryInterface
 
     public function createRevision(LmsModulAjar $modul, string $catatanRevisi, ?string $userId = null): void;
 
-    public function getStats(): array;
+    public function getStats(array $filters = []): array;
 }
+

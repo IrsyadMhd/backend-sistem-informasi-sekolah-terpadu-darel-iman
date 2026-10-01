@@ -20,7 +20,7 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
             return $query;
         }
 
-        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan'];
+        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan', 'wakakurikulum', 'kurikulum'];
         $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
 
         if ($userRoles->intersect($adminRoles)->isNotEmpty()) {
@@ -34,11 +34,29 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
             $employee?->id,
             $teacher?->id,
         ])));
+        $unitId = $employee?->unit_id;
 
-        return $query->where(function ($q) use ($teacherIds, $user) {
-            $q->where('created_by', $user->id);
+        return $query->where(function ($q) use ($teacherIds, $user, $unitId) {
+            // 1. Soal yang dibuat langsung oleh user atau soal bawaan sistem (seeder)
+            $q->where('created_by', $user->id)
+              ->orWhereNull('created_by');
+
+            // 2. Soal dari kisi-kisi guru bersangkutan atau unit pendidikannya
             if (! empty($teacherIds)) {
-                $q->orWhereHas('kisiKisi', fn ($qk) => $qk->whereIn('guru_id', $teacherIds)->orWhere('created_by', $user->id));
+                $q->orWhereHas('kisiKisi', function ($qk) use ($teacherIds, $user, $unitId) {
+                    $qk->whereIn('guru_id', $teacherIds)
+                       ->orWhere('created_by', $user->id)
+                       ->orWhereNull('created_by');
+                    if ($unitId) {
+                        $qk->orWhereHas('kelas', fn ($qkk) => $qkk->where('unit_pendidikan_id', $unitId))
+                           ->orWhereHas('subject', fn ($qks) => $qks->where('unit_pendidikan_id', $unitId));
+                    }
+                })
+                // 3. Soal dari kisi-kisi yang dipakai di paket ujian guru
+                ->orWhereHas('kisiKisi.ujian', fn ($qu) => $qu->whereIn('guru_id', $teacherIds)->orWhere('created_by', $user->id));
+            } elseif ($unitId) {
+                $q->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->where('unit_pendidikan_id', $unitId))
+                  ->orWhereHas('kisiKisi.subject', fn ($qks) => $qks->where('unit_pendidikan_id', $unitId));
             }
         });
     }
@@ -77,6 +95,12 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
 
         if (! empty($filters['mata_pelajaran_id'])) {
             $query->where('mata_pelajaran_id', $filters['mata_pelajaran_id']);
+        }
+
+        if (! empty($filters['kelas_id'])) {
+            $query->whereHas('kisiKisi', function ($k) use ($filters) {
+                $k->where('kelas_id', $filters['kelas_id']);
+            });
         }
 
         if (! empty($filters['tipe_soal'])) {
@@ -183,6 +207,11 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
         }
         if (! empty($filters['mata_pelajaran_id'])) {
             $query->where('mata_pelajaran_id', $filters['mata_pelajaran_id']);
+        }
+        if (! empty($filters['kelas_id'])) {
+            $query->whereHas('kisiKisi', function ($k) use ($filters) {
+                $k->where('kelas_id', $filters['kelas_id']);
+            });
         }
 
         $totalSoal = (clone $query)->count();
