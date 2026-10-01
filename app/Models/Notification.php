@@ -80,42 +80,74 @@ class Notification extends Model
      */
     public static function deliver(string $userId, string $title, string $body, string $channel, array $metadata = []): ?self
     {
-        $resolver = function () {
-            $activeAy = AcademicYear::query()->where('is_active', true)->first();
-            $activeSem = $activeAy
-                ? Semester::query()
-                    ->where('academic_year_id', $activeAy->id)
-                    ->where('is_active', true)
-                    ->orderBy('sequence', 'desc')
-                    ->first()
-                : null;
-            return [
-                'ay_id' => $activeAy?->id,
-                'sem_id' => $activeSem?->id,
-            ];
-        };
+        $canonical = static::usesCanonicalSchema();
 
-        $context = app()->environment('testing')
-            ? $resolver()
-            : \Illuminate\Support\Facades\Cache::remember('active_academic_context', 300, $resolver);
+        if ($canonical) {
+            $resolver = function () {
+                $activeAy = AcademicYear::query()->where('is_active', true)->first();
+                $activeSem = $activeAy
+                    ? Semester::query()
+                        ->where('academic_year_id', $activeAy->id)
+                        ->where('is_active', true)
+                        ->orderBy('sequence', 'desc')
+                        ->first()
+                    : null;
+                return [
+                    'ay_id' => $activeAy?->id,
+                    'sem_id' => $activeSem?->id,
+                ];
+            };
 
-        if (! ($context['ay_id'] ?? null) || ! ($context['sem_id'] ?? null)) {
-            return null;
+            $context = app()->environment('testing')
+                ? $resolver()
+                : \Illuminate\Support\Facades\Cache::remember('active_academic_context', 300, $resolver);
+
+            $ayId = $context['ay_id'] ?? AcademicYear::query()->latest()->value('id');
+            $semId = $context['sem_id'] ?? Semester::query()->latest()->value('id');
+
+            if ($ayId && $semId) {
+                try {
+                    $notif = static::create([
+                        'id' => (string) \Illuminate\Support\Str::uuid(),
+                        'academic_year_id' => $ayId,
+                        'semester_id' => $semId,
+                        'month' => (int) now()->month,
+                        'notifiable_id' => $userId,
+                        'notifiable_type' => User::class,
+                        'title' => $title,
+                        'body' => $body,
+                        'channel' => $channel,
+                        'metadata' => $metadata,
+                        'read_at' => null,
+                    ]);
+
+                    \Illuminate\Support\Facades\Cache::forget("notif_unread:{$userId}");
+                    return $notif;
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning("Canonical notification deliver failed: " . $e->getMessage());
+                }
+            }
         }
 
-        return static::create([
-            'id' => (string) \Illuminate\Support\Str::uuid(),
-            'academic_year_id' => $context['ay_id'],
-            'semester_id' => $context['sem_id'],
-            'month' => now()->month,
-            'notifiable_id' => $userId,
-            'notifiable_type' => User::class,
-            'title' => $title,
-            'body' => $body,
-            'channel' => $channel,
-            'metadata' => $metadata,
-            'read_at' => null,
-        ]);
+        // Legacy schema fallback: has user_id, message, type, is_read
+        try {
+            $notif = static::create([
+                'id' => (string) \Illuminate\Support\Str::uuid(),
+                'user_id' => $userId,
+                'title' => $title,
+                'message' => $body,
+                'type' => $channel,
+                'metadata' => $metadata,
+                'is_read' => false,
+                'read_at' => null,
+            ]);
+
+            \Illuminate\Support\Facades\Cache::forget("notif_unread:{$userId}");
+            return $notif;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Legacy notification deliver failed: " . $e->getMessage());
+            return null;
+        }
     }
 
     /**
