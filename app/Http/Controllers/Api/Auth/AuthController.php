@@ -241,6 +241,10 @@ class AuthController extends Controller
         $target = User::query()
             ->where('is_active', true)
             ->role($targetRoles)
+            // Exclude pengguna Super Admin yang kebetulan juga memiliki role target
+            // (misalnya akun superadmin@dareliman.sch.id yang di-assign semua role).
+            // Hal ini mencegah impersonation mengembalikan token SA alih-alih user target.
+            ->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'Superadmin', 'super_admin']))
             ->orderBy('name')
             ->first();
 

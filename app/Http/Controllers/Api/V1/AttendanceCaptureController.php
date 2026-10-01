@@ -24,7 +24,12 @@ class AttendanceCaptureController extends Controller
 
     private function teacher(Request $request, LessonAttendanceSession $session, string $permission): void
     {
-        abort_unless($request->user()?->hasAnyRole(['Guru', 'Super Admin']) || $request->user()?->hasPermissionTo($permission), 403);
+        abort_unless(
+            $request->user()?->hasAnyRole(['Guru', 'Super Admin', 'Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah'])
+                || $request->user()?->hasPermissionTo($permission)
+                || $request->user()?->hasPermissionTo('kehadiran.siswa.absensi_digital'),
+            403,
+        );
         $this->access->assertTeacherOwnsSchedule($request->user(), $session->schedule_id);
     }
 
@@ -88,8 +93,8 @@ class AttendanceCaptureController extends Controller
         $resolvedMethod = ['qr' => 'qr_code', 'rfid' => 'rfid'][$method] ?? null;
         abort_unless($resolvedMethod, 404);
         abort_unless(
-            $request->user()?->hasAnyRole(['Guru', 'Super Admin'])
-                || $request->user()?->hasAnyPermission(['lesson_attendance.qr_scan', 'lesson_attendance.create']),
+            $request->user()?->hasAnyRole(['Guru', 'Super Admin', 'Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah'])
+                || $request->user()?->hasAnyPermission(['lesson_attendance.qr_scan', 'lesson_attendance.create', 'kehadiran.siswa.absensi_digital']),
             403,
         );
         $data = $request->validate([

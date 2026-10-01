@@ -155,8 +155,9 @@ class LmsKisiKisiController extends Controller
     {
         $mataPelajaranId = $request->query('mata_pelajaran_id');
         $cpId = $request->query('cp_id');
+        $unitId = $request->query('unit_pendidikan_id') ?? $request->query('unit_id');
 
-        $options = $this->kisiKisiService->opsi($mataPelajaranId, $cpId);
+        $options = $this->kisiKisiService->opsi($mataPelajaranId, $cpId, $unitId);
 
         return response()->json([
             'success' => true,

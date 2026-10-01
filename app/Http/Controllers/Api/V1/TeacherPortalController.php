@@ -402,6 +402,25 @@ class TeacherPortalController extends Controller
         ]);
     }
 
+    public function announcements(Request $request): JsonResponse
+    {
+        $search = $request->query('search');
+        $query = PengumumanSekolah::query()
+            ->where('status_aktif', true)
+            ->when($search, fn ($q) => $q->where(function ($sq) use ($search) {
+                $sq->where('judul_pengumuman', 'ilike', "%{$search}%")
+                   ->orWhere('isi_pengumuman', 'ilike', "%{$search}%");
+            }))
+            ->orderBy('created_at', 'desc');
+
+        $announcements = $query->paginate((int) $request->query('per_page', 20));
+
+        return response()->json([
+            'success' => true,
+            'data' => $announcements,
+        ]);
+    }
+
     public function attendanceLogs(Request $request): JsonResponse
     {
         $employee = Employee::query()->where('user_id', $request->user()?->id)->first();
@@ -1130,6 +1149,15 @@ class TeacherPortalController extends Controller
             $moduleId = $module->id;
         }
 
+        $fileLampiran = null;
+        if ($request->hasFile('file_lampiran')) {
+            $fileLampiran = $request->file('file_lampiran')->store('assignments', 'public');
+        } elseif ($request->filled('file_lampiran') && is_string($request->file_lampiran)) {
+            $fileLampiran = $request->file_lampiran;
+        }
+
+        $isDraft = $request->input('status') === 'draft' || $request->input('is_published') === false || $request->input('is_published') === '0' || $request->input('is_published') === 'false';
+
         $assignment = LmsPenugasan::create([
             'teacher_id' => $guruId,
             'subject_id' => $subjectId,
@@ -1141,9 +1169,11 @@ class TeacherPortalController extends Controller
             'deadline' => $request->deadline,
             'bobot' => $request->bobot ?? 100,
             'bobot_persen' => $request->bobot ?? 100,
-            'tipe_tugas' => $request->tipe_tugas ?: 'individu',
+            'tipe_tugas' => $request->tipe_tugas ?: 'both',
             'jenis_tugas' => $request->jenis_tugas ?: ($request->jenis_soal ?: 'tugas'),
-            'status' => 'published',
+            'file_lampiran' => $fileLampiran,
+            'izin_kumpul_terlambat' => filter_var($request->input('izin_kumpul_terlambat', true), FILTER_VALIDATE_BOOLEAN),
+            'status' => $isDraft ? 'draft' : 'published',
             'mata_pelajaran_id' => $subjectId,
             'kelas_id' => $classId,
             'guru_id' => $guruId,
@@ -1152,7 +1182,7 @@ class TeacherPortalController extends Controller
             'modul_ajar_id' => $moduleId,
             'materi_id' => $primaryMateriId,
             'materi_ids' => ! empty($materiIds) ? $materiIds : null,
-            'is_published' => true,
+            'is_published' => ! $isDraft,
         ]);
 
         return response()->json([
@@ -1195,6 +1225,22 @@ class TeacherPortalController extends Controller
         }
         if ($request->filled('jenis_tugas')) {
             $assignment->jenis_tugas = $request->jenis_tugas;
+        }
+        if ($request->filled('tipe_tugas')) {
+            $assignment->tipe_tugas = $request->tipe_tugas;
+        }
+        if ($request->has('izin_kumpul_terlambat')) {
+            $assignment->izin_kumpul_terlambat = filter_var($request->izin_kumpul_terlambat, FILTER_VALIDATE_BOOLEAN);
+        }
+        if ($request->filled('status')) {
+            $isDraft = $request->status === 'draft';
+            $assignment->status = $isDraft ? 'draft' : 'published';
+            $assignment->is_published = ! $isDraft;
+        }
+        if ($request->hasFile('file_lampiran')) {
+            $assignment->file_lampiran = $request->file('file_lampiran')->store('assignments', 'public');
+        } elseif ($request->filled('file_lampiran') && is_string($request->file_lampiran)) {
+            $assignment->file_lampiran = $request->file_lampiran;
         }
         if ($request->has('soal_json') || $request->has('deskripsi')) {
             $assignment->deskripsi = $request->soal_json ?: $request->deskripsi;

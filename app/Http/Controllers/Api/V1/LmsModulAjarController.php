@@ -50,6 +50,15 @@ class LmsModulAjarController extends Controller
         $user = $request->user();
         if ($this->isTeacher($user)) {
             $filters['guru_id'] = $this->teacherEmployeeId($user);
+            $employee = Employee::query()->where('user_id', $user->id)->first();
+            if ($employee && $employee->unit_id && empty($filters['unit_pendidikan_id'])) {
+                $filters['unit_pendidikan_id'] = $employee->unit_id;
+            }
+        } elseif (! $this->canAccessAllUnits($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if (empty($filters['unit_pendidikan_id'])) {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
         }
 
         $perPage = (int) $request->query('per_page', 15);
@@ -57,6 +66,28 @@ class LmsModulAjarController extends Controller
         $orderDir = (string) $request->query('order_dir', 'desc');
 
         $moduls = $this->modulAjarService->dapatkanDaftar($filters, $perPage, $orderBy, $orderDir);
+
+        $statsFilters = [];
+        if ($this->isTeacher($user)) {
+            $statsFilters['guru_id'] = $this->teacherEmployeeId($user);
+            $employee = Employee::query()->where('user_id', $user->id)->first();
+            if ($employee && $employee->unit_id) {
+                $statsFilters['unit_pendidikan_id'] = $employee->unit_id;
+            }
+        } elseif (! empty($filters['unit_pendidikan_id'])) {
+            $statsFilters['unit_pendidikan_id'] = $filters['unit_pendidikan_id'];
+        } elseif (! empty($filters['unit_ids'])) {
+            $statsFilters['unit_ids'] = $filters['unit_ids'];
+        }
+        if (! empty($filters['tahun_ajaran_id'])) {
+            $statsFilters['tahun_ajaran_id'] = $filters['tahun_ajaran_id'];
+        }
+        if (! empty($filters['semester_id'])) {
+            $statsFilters['semester_id'] = $filters['semester_id'];
+        }
+        if (! empty($filters['mata_pelajaran_id'])) {
+            $statsFilters['mata_pelajaran_id'] = $filters['mata_pelajaran_id'];
+        }
 
         return response()->json([
             'status' => 'success',
@@ -70,18 +101,34 @@ class LmsModulAjarController extends Controller
                 'to' => $moduls->lastItem(),
                 'total' => $moduls->total(),
             ],
-            'statistik' => $this->modulAjarService->dapatkanStatistik(),
+            'statistik' => $this->modulAjarService->dapatkanStatistik($statsFilters),
         ]);
     }
 
-    public function stats(): JsonResponse
+    public function stats(Request $request): JsonResponse
     {
-        $this->authorizeView(request()->user());
+        $user = $request->user();
+        $this->authorizeView($user);
+
+        $filters = [];
+        if ($this->isTeacher($user)) {
+            $filters['guru_id'] = $this->teacherEmployeeId($user);
+            $employee = Employee::query()->where('user_id', $user->id)->first();
+            if ($employee && $employee->unit_id) {
+                $filters['unit_pendidikan_id'] = $employee->unit_id;
+            }
+        } elseif (! $this->canAccessAllUnits($user)) {
+            $filters['unit_ids'] = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+        }
+
+        if ($request->filled('unit_pendidikan_id')) {
+            $filters['unit_pendidikan_id'] = $request->query('unit_pendidikan_id');
+        }
 
         return response()->json([
             'status' => 'success',
             'message' => 'Statistik Modul Ajar berhasil dimuat.',
-            'data' => $this->modulAjarService->dapatkanStatistik(),
+            'data' => $this->modulAjarService->dapatkanStatistik($filters),
         ]);
     }
 
@@ -96,7 +143,9 @@ class LmsModulAjarController extends Controller
             'mata_pelajaran_id',
         ]);
 
-        $units = EducationUnit::select('id', 'name', 'code')->get();
+        $units = $this->accessScope->accessibleEducationUnits($request->user())
+            ->select('id', 'name', 'code')
+            ->get();
         $kurikulums = MasterKurikulum::query()
             ->select('id', 'nama_kurikulum', 'kode_kurikulum')
             ->where('status', true)
@@ -127,6 +176,10 @@ class LmsModulAjarController extends Controller
 
         if ($this->isTeacher($request->user())) {
             $employeeId = $this->teacherEmployeeId($request->user());
+            $employee = Employee::query()->where('id', $employeeId)->first();
+            if ($units->isEmpty() && $employee?->unit_id) {
+                $units = EducationUnit::where('id', $employee->unit_id)->select('id', 'name', 'code')->get();
+            }
             $teachers = Employee::query()
                 ->select('id', 'nama_lengkap', 'niy', 'nik')
                 ->where('id', $employeeId)
@@ -230,7 +283,13 @@ class LmsModulAjarController extends Controller
                 abort(403, 'Akses ditolak: Anda tidak dapat membuat Modul Ajar untuk guru lain.');
             }
             $data['guru_id'] = $employeeId;
-            $this->assertTeacherAssignment($user, $data['kelas_id'] ?? null, $data['mata_pelajaran_id'] ?? null);
+
+            $employee = Employee::query()->where('id', $employeeId)->first();
+            if ($employee && $employee->unit_id) {
+                $data['unit_pendidikan_id'] = $employee->unit_id;
+            }
+
+            $this->assertTeacherAssignment($user, $data['kelas_id'] ?? null, $data['mata_pelajaran_id'] ?? null, $data['unit_pendidikan_id'] ?? null);
         }
 
         $modul = $this->modulAjarService->simpan($data);
@@ -553,10 +612,17 @@ class LmsModulAjarController extends Controller
         abort(403, 'Akses ditolak: Anda tidak memiliki izin untuk mengelola Modul Ajar.');
     }
 
-    private function assertTeacherAssignment(User $user, ?string $kelasId, ?string $mataPelajaranId): void
+    private function assertTeacherAssignment(User $user, ?string $kelasId, ?string $mataPelajaranId, ?string $unitId = null): void
     {
         if ($this->canAccessAllUnits($user)) {
             return;
+        }
+
+        if ($unitId) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if (! empty($allowedUnitIds)) {
+                abort_unless(in_array($unitId, $allowedUnitIds, true), 403, 'Akses ditolak: Unit pendidikan di luar cakupan akses Anda.');
+            }
         }
 
         if ($kelasId) {

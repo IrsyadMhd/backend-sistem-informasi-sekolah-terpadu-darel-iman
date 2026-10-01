@@ -23,6 +23,7 @@ class LmsBankSoalController extends Controller
             'search',
             'kisi_kisi_id',
             'mata_pelajaran_id',
+            'kelas_id',
             'tipe_soal',
             'tingkat_kesulitan',
             'status',
@@ -140,7 +141,7 @@ class LmsBankSoalController extends Controller
 
     public function stats(Request $request): JsonResponse
     {
-        $filters = $request->only(['kisi_kisi_id', 'mata_pelajaran_id']);
+        $filters = $request->only(['kisi_kisi_id', 'mata_pelajaran_id', 'kelas_id']);
         $stats = $this->bankSoalService->statistik($filters);
 
         return response()->json([
@@ -149,9 +150,10 @@ class LmsBankSoalController extends Controller
         ]);
     }
 
-    public function options(): JsonResponse
+    public function options(Request $request): JsonResponse
     {
-        $options = $this->bankSoalService->opsi();
+        $unitId = $request->query('unit_pendidikan_id') ?? $request->query('unit_id');
+        $options = $this->bankSoalService->opsi($unitId);
 
         return response()->json([
             'success' => true,

@@ -38,15 +38,27 @@ class NotificationController extends Controller
         $userId   = $request->user()->id;
         $cacheKey = "notif_unread:{$userId}";
 
-        $count = Cache::remember($cacheKey, 30, function () use ($userId) {
-            return Notification::byUser($userId)
+        $count = Cache::remember($cacheKey, 10, function () use ($userId) {
+            $notifCount = Notification::byUser($userId)
                 ->unread()
                 ->count();
+
+            $chatCount = 0;
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasTable('portal_messages')) {
+                    $chatCount = \App\Models\PortalMessage::query()
+                        ->where('recipient_user_id', $userId)
+                        ->whereNull('read_at')
+                        ->count();
+                }
+            } catch (\Throwable $e) {}
+
+            return (int) ($notifCount + $chatCount);
         });
 
         return response()->json([
             'status'       => 'success',
-            'unread_count' => $count,
+            'unread_count' => (int) $count,
         ]);
     }
 

@@ -200,37 +200,6 @@ class LmsUjianController extends Controller
     // CBT Student Test Engine API
     public function startSession(Request $request, string $id): JsonResponse
     {
-        $user = $request->user();
-
-        if ($user && method_exists($user, 'hasRole') && $user->hasRole('Siswa')) {
-            $siswa = Student::where('user_id', $user->id)->where('is_active', true)->first();
-            if (! $siswa) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Data Siswa tidak ditemukan untuk akun ini.',
-                ], 403);
-            }
-            $siswaId = $siswa->id;
-        } else {
-            // Non-Siswa (guru/operator/admin) wajib menyebutkan siswa_id secara
-            // eksplisit. Tidak ada fallback otomatis ke siswa mana pun — ini
-            // mencegah pengguna membuat sesi ujian atas nama siswa sewenang-wenang.
-            if (! $this->isStaffUser($user)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Anda tidak berhak memulai sesi ujian.',
-                ], 403);
-            }
-
-            $siswaId = $request->input('siswa_id');
-            if (! $siswaId) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'siswa_id wajib diisi saat memulai sesi atas nama siswa.',
-                ], 422);
-            }
-        }
-
         if (! Str::isUuid($id)) {
             return response()->json([
                 'success' => false,
@@ -246,15 +215,59 @@ class LmsUjianController extends Controller
             ], 404);
         }
 
+        $user = $request->user();
+        $isSimulation = false;
+
+        if ($user && method_exists($user, 'hasRole') && $user->hasRole('Siswa')) {
+            $siswa = Student::where('user_id', $user->id)->where('is_active', true)->first();
+            if (! $siswa) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Data Siswa tidak ditemukan untuk akun ini.',
+                ], 403);
+            }
+            $siswaId = $siswa->id;
+        } else {
+            if (! $this->isStaffUser($user)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak berhak memulai sesi ujian.',
+                ], 403);
+            }
+
+            $siswaId = $request->input('siswa_id');
+            if (! $siswaId) {
+                // Mode Simulasi oleh staf (Guru / Kurikulum / Superadmin):
+                // Ambil siswa pertama dari kelas sasaran ujian atau siswa aktif di sistem sebagai aktor simulasi
+                $siswaId = Student::query()
+                    ->when($ujian->kelas_id, fn ($sq) => $sq->where('kelas_id', $ujian->kelas_id))
+                    ->where('is_active', true)
+                    ->value('id');
+
+                if (! $siswaId) {
+                    $siswaId = Student::where('is_active', true)->value('id');
+                }
+
+                if (! $siswaId) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Belum ada data siswa aktif di sistem untuk menjalankan simulasi CBT.',
+                    ], 422);
+                }
+
+                $isSimulation = true;
+            }
+        }
+
         // Sesi 'proses' yang sudah ada dilanjutkan; selain itu berlaku gate
-        // jadwal & batas percobaan agar tidak ada pengerjaan ganda/tanpa batas.
+        // jadwal & batas percobaan agar tidak ada pengerjaan ganda/tanpa batas (kecuali simulasi staf).
         $active = LmsUjianSesi::query()
             ->where('ujian_id', $id)
             ->where('siswa_id', $siswaId)
             ->where('status', 'proses')
             ->first();
 
-        if (! $active) {
+        if (! $active && ! $isSimulation) {
             if (! in_array($ujian->status, ['published', 'berlangsung'], true)) {
                 return response()->json([
                     'success' => false,

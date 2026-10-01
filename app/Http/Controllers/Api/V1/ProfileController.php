@@ -48,7 +48,14 @@ class ProfileController extends Controller
             'name' => ['nullable', 'string', 'max:255'],
             'fullName' => ['nullable', 'string', 'max:255'],
             'nama_panggilan' => ['nullable', 'string', 'max:100'],
+            'gelar_depan' => ['nullable', 'string', 'max:50'],
+            'gelar_belakang' => ['nullable', 'string', 'max:50'],
+            'tempat_lahir' => ['nullable', 'string', 'max:100'],
+            'tanggal_lahir' => ['nullable', 'date'],
+            'jenis_kelamin' => ['nullable', 'string', 'in:L,P,Laki-laki,Perempuan'],
+            'agama' => ['nullable', 'string', 'max:50'],
             'phone' => ['nullable', 'string', 'max:30'],
+            'no_hp' => ['nullable', 'string', 'max:30'],
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
             'alamat' => ['nullable', 'string', 'max:500'],
             'unit' => ['nullable', 'string', 'max:255'],
@@ -60,13 +67,16 @@ class ProfileController extends Controller
         ]);
 
         $name = $validated['name'] ?? $validated['fullName'] ?? null;
+        $phone = $validated['phone'] ?? $validated['no_hp'] ?? null;
 
-        DB::transaction(function () use ($user, $validated, $name) {
+        DB::transaction(function () use ($user, $validated, $name, $phone) {
             // 1. Update User Record
             $userPayload = [
                 'email' => strtolower($validated['email']),
-                'phone' => $validated['phone'] ?? $user->phone,
             ];
+            if ($phone !== null) {
+                $userPayload['phone'] = $phone;
+            }
             if ($name) {
                 $userPayload['name'] = $name;
             }
@@ -99,13 +109,37 @@ class ProfileController extends Controller
             $employee = $user->employee;
             if ($employee) {
                 $employeePayload = [
-                    'nama_panggilan' => $validated['nama_panggilan'] ?? $employee->nama_panggilan,
-                    'no_hp' => $validated['phone'] ?? $employee->no_hp,
                     'email' => strtolower($validated['email']),
-                    'alamat' => $validated['alamat'] ?? $employee->alamat,
                 ];
+                if ($phone !== null) {
+                    $employeePayload['no_hp'] = $phone;
+                }
                 if ($name) {
                     $employeePayload['nama_lengkap'] = $name;
+                }
+                if (array_key_exists('nama_panggilan', $validated)) {
+                    $employeePayload['nama_panggilan'] = $validated['nama_panggilan'];
+                }
+                if (array_key_exists('gelar_depan', $validated)) {
+                    $employeePayload['gelar_depan'] = $validated['gelar_depan'];
+                }
+                if (array_key_exists('gelar_belakang', $validated)) {
+                    $employeePayload['gelar_belakang'] = $validated['gelar_belakang'];
+                }
+                if (array_key_exists('tempat_lahir', $validated)) {
+                    $employeePayload['tempat_lahir'] = $validated['tempat_lahir'];
+                }
+                if (array_key_exists('tanggal_lahir', $validated)) {
+                    $employeePayload['tanggal_lahir'] = $validated['tanggal_lahir'];
+                }
+                if (array_key_exists('jenis_kelamin', $validated)) {
+                    $employeePayload['jenis_kelamin'] = $validated['jenis_kelamin'];
+                }
+                if (array_key_exists('agama', $validated)) {
+                    $employeePayload['agama'] = $validated['agama'];
+                }
+                if (array_key_exists('alamat', $validated)) {
+                    $employeePayload['alamat'] = $validated['alamat'];
                 }
                 if ($unitId) {
                     $employeePayload['unit_id'] = $unitId;
@@ -209,12 +243,12 @@ class ProfileController extends Controller
 
         $validated = $request->validate([
             'current_password' => ['required', 'string'],
-            'password' => ['required', 'confirmed', Password::min(8)],
+            'password' => ['required', 'confirmed', Password::min(6)],
         ], [
             'current_password.required' => 'Password saat ini wajib diisi.',
             'password.required' => 'Password baru wajib diisi.',
             'password.confirmed' => 'Konfirmasi password baru tidak cocok.',
-            'password.min' => 'Password baru minimal 8 karakter.',
+            'password.min' => 'Password baru minimal 6 karakter.',
         ]);
 
         if (! Hash::check($validated['current_password'], $user->password)) {
