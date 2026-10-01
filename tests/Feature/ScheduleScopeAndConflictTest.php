@@ -55,6 +55,30 @@ class ScheduleScopeAndConflictTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_check_conflict_endpoint_detects_teacher_and_class_collision(): void
+    {
+        [$manager, $scheduleA] = $this->context();
+        $payload = $scheduleA->only(['kelas_id', 'employee_id', 'academic_year_id', 'semester_id', 'day_of_week']);
+
+        // 1. Cek bentrok (jam bertabrakan 08:30 - 09:30 dengan jadwal 08:00 - 09:00)
+        $response = $this->actingAs($manager, 'sanctum')
+            ->postJson('/api/schedules/check-conflict', $payload + ['time_start' => '08:30', 'time_end' => '09:30']);
+
+        $response->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('has_conflict', true)
+            ->assertJsonCount(2, 'conflicts'); // 1 teacher conflict + 1 class conflict
+
+        // 2. Cek non-bentrok (jam di luar jadwal 10:00 - 11:00)
+        $cleanResponse = $this->actingAs($manager, 'sanctum')
+            ->postJson('/api/schedules/check-conflict', $payload + ['time_start' => '10:00', 'time_end' => '11:00']);
+
+        $cleanResponse->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('has_conflict', false)
+            ->assertJsonCount(0, 'conflicts');
+    }
+
     private function context(): array
     {
         $permissions = ['academic.schedule.view', 'academic.schedule.create', 'academic.schedule.update', 'academic.schedule.delete'];

@@ -196,6 +196,13 @@ class AttendanceWorkflowTest extends TestCase
             ->assertJsonPath('data.student.id', $ctx['student']->id)
             ->assertJsonPath('data.method', 'qr_code');
 
+        $this->postJson('/api/lesson-attendance/identify-card/qr', [
+            'schedule_id' => $ctx['schedule']->id,
+            'identifier' => "STUDENT_CARD:{$ctx['student']->nis}:{$ctx['student']->full_name}",
+        ])->assertOk()
+            ->assertJsonPath('data.student.id', $ctx['student']->id)
+            ->assertJsonPath('data.method', 'qr_code');
+
         $this->postJson('/api/lesson-attendance/identify-card/rfid', [
             'schedule_id' => $ctx['schedule']->id,
             'identifier' => 'UID-001',
