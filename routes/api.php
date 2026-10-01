@@ -1107,6 +1107,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Jadwal Pelajaran
     Route::get('/schedules-options', [ScheduleController::class, 'options'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
+    Route::post('/schedules/check-conflict', [ScheduleController::class, 'checkConflict'])
+        ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::get('/schedules/export', [ScheduleController::class, 'export'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view|report.export');
     Route::apiResource('schedules', ScheduleController::class)->only(['index', 'show'])
@@ -1290,6 +1292,8 @@ Route::middleware('auth:sanctum')->group(function () {
                 ->middleware('permission:teacher.schedule.view');
             Route::get('/academic-calendar', [TeacherPortalController::class, 'academicCalendar'])
                 ->middleware('permission:teacher.schedule.view');
+            Route::get('/announcements', [TeacherPortalController::class, 'announcements'])
+                ->middleware('permission:teacher.dashboard.view');
             Route::get('/classes', [TeacherPortalController::class, 'classes'])
                 ->middleware('permission:teacher.schedule.view|teacher.attendance.view|teacher.tahfizh.view|teacher.mutabaah.view|teacher.student_note.view');
             Route::get('/students', [TeacherPortalController::class, 'students'])
