@@ -180,9 +180,25 @@ class JadwalPelajaranSeeder extends Seeder
         ) {
             $totalTeachers = $guruList->count();
             $totalSubjects = $mapelList->count();
-            $teachersByUnit = $guruList->groupBy('unit_id');
+            // DEF-SCOPE-ROSTER: Lewati kelas yang dikelola oleh roster resmi khusus
+            $dedicatedClassIds = ClassSchedule::whereIn('metadata->source', ['RosterResmiSDIT_FullDay', 'RosterResmiDIBS_2026'])
+                ->whereNull('deleted_at')
+                ->distinct('kelas_id')
+                ->pluck('kelas_id')
+                ->toArray();
+
+            $assignedPerSlot = [];
 
             foreach ($kelasList as $kelasIndex => $kelas) {
+                // Lewati jika kelas ini sudah memiliki roster resmi khusus
+                if (in_array($kelas->id, $dedicatedClassIds, true) 
+                    || str_contains($kelas->nama_kelas, '1 Makkah')
+                    || str_contains($kelas->nama_kelas, '10A')
+                    || str_contains($kelas->nama_kelas, '11A')
+                    || str_contains($kelas->nama_kelas, '12A')) {
+                    continue;
+                }
+
                 // DEF-SCOPE-001 FIX: Hanya gunakan guru dari unit yang sama dengan kelas
                 $unitTeachers = $teachersByUnit->get($kelas->unit_pendidikan_id);
                 if (! $unitTeachers || $unitTeachers->isEmpty()) {
@@ -191,7 +207,10 @@ class JadwalPelajaranSeeder extends Seeder
                         ->get();
                 }
 
-                if (! $unitTeachers || $unitTeachers->isEmpty()) {
+                // Exclude Guru Test dari penugasan random agar tidak bentrok dengan GuruTestWorkspaceSeeder
+                $unitTeachers = $unitTeachers->filter(fn ($e) => $e->email !== 'guru@dareliman.sch.id')->values();
+
+                if ($unitTeachers->isEmpty()) {
                     continue; // Lewati kelas jika tidak ada guru di unit ini, JANGAN fallback lintas unit!
                 }
 
@@ -199,7 +218,16 @@ class JadwalPelajaranSeeder extends Seeder
                 $scheduleIndex = 0;
                 foreach ($hariBelajar as $day) {
                     foreach ($jamBelajar as $slot) {
-                        $teacher = $unitTeachers[($kelasIndex + $scheduleIndex) % $totalUnitTeachers];
+                        $slotKey = "{$day}-{$slot['mulai']}";
+                        if (! isset($assignedPerSlot[$slotKey])) {
+                            $assignedPerSlot[$slotKey] = [];
+                        }
+
+                        // Prioritaskan guru di unit yang belum terpakai pada hari dan slot jam ini
+                        $freeTeacher = $unitTeachers->first(fn ($t) => ! in_array($t->id, $assignedPerSlot[$slotKey], true));
+                        $teacher = $freeTeacher ?: $unitTeachers[($kelasIndex + $scheduleIndex) % $totalUnitTeachers];
+                        $assignedPerSlot[$slotKey][] = $teacher->id;
+
                         $subject = $mapelList[($scheduleIndex + $kelasIndex * 2) % $totalSubjects];
 
                         // Jadwal Semester Ganjil

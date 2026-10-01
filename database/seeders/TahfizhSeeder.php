@@ -12,6 +12,11 @@ class TahfizhSeeder extends Seeder
 {
     public function run(): void
     {
+        if (app()->environment('production')) {
+            $this->command?->warn('⚠️ Skipping TahfizhSeeder: Dilarang mengisi data transaksi dummy di lingkungan Production!');
+            return;
+        }
+
         // 1. Dapatkan atau buat Academic Year
         $academicYearId = DB::table('academic_years')
             ->where('is_active', true)

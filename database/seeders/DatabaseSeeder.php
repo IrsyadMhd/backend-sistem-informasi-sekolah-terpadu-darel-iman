@@ -79,10 +79,10 @@ class DatabaseSeeder extends Seeder
             QuranSurahSeeder::class,
             DoaSeeder::class,
             PrayerScheduleSeeder::class,
-            TahfizhSeeder::class,
         ]);
 
         if (app()->environment(['local', 'development', 'testing', 'staging'])) {
+            $this->call(TahfizhSeeder::class);
             $this->call(RekapPrestasiSiswaSeeder::class);
             $this->call(JadwalPonpesIkhwan2026Seeder::class);
             $this->call(JadwalSditFullDay2026Seeder::class);

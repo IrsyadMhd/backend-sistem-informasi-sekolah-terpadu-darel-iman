@@ -86,7 +86,7 @@ class JadwalSditFullDay2026Seeder extends Seeder
         $guruRoster = [
             'Walas'         => ['nama' => 'Ustzh. Khadijah Azzahra, S.Pd', 'niy' => 'GUR-SD-WALAS01'],
             'Ust. Fauzan'   => ['nama' => 'Ust. Fauzan Azhim, Lc.',        'niy' => 'GUR-SD-BARAB01'],
-            'Ustz. Aisyah'  => ['nama' => 'Ustzh. Aisyah Humaira, S.Pd',   'niy' => 'GUR-SD-THF01'],
+            'Ustz. Aisyah'  => ['nama' => 'Zulfa Nur Hamidah S.Pd.I.',      'niy' => 'Y-2017-245'],
             'Ustz. Intan'   => ['nama' => 'Ustzh. Intan Permatasari, S.Pd','niy' => 'GUR-SD-THF02'],
             'Ust. Maulana'  => ['nama' => 'Ust. Maulana Malik, M.Pd',      'niy' => 'GUR-SD-BING01'],
             'Ust. Didi'     => ['nama' => 'Ust. Didi Wahyudi, S.Pd.I',     'niy' => 'GUR-SD-PAI01'],

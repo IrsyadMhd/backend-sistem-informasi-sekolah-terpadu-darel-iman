@@ -256,6 +256,9 @@ class GuruTestWorkspaceSeeder extends Seeder
 
             // 10. Catatan Siswa
             $this->seedCatatanSiswa($teacher, $academicYear, $semester, $kelasList);
+
+            // 11. Kisi-kisi & Bank Soal
+            $this->seedKisiKisiAndBankSoal($user, $employee);
         });
 
         $this->command?->info('');
@@ -294,9 +297,9 @@ class GuruTestWorkspaceSeeder extends Seeder
                         'kelas_id'         => $kelas->id,
                         'day_of_week'      => $dayOfWeek,
                         'time_start'       => $slot['mulai'] . ':00',
-                        'employee_id'      => $employee->id,
                     ],
                     [
+                        'employee_id' => $employee->id,
                         'subject_id'  => $subject->id,
                         'time_end'    => $slot['selesai'] . ':00',
                         'week_type'   => 'all',
@@ -1075,32 +1078,38 @@ class GuruTestWorkspaceSeeder extends Seeder
 
         $totalHeaders = 0;
 
-        // Buat supervisor assignment jika belum ada
-        $kelas = $kelasList->first();
-        if (! $kelas) return;
+        // Buat supervisor assignment untuk semua kelas yang diajar
+        if ($kelasList->isEmpty()) return;
 
-        $assignment = MutabaahSupervisorAssignment::query()->updateOrCreate(
-            [
-                'employee_id'      => $employee->id,
-                'rombel_id'        => $kelas->id,
-                'academic_year_id' => $ay->id,
-                'semester_id'      => $semester->id,
-            ],
-            [
-                'supervisor_type'    => 'wali_kelas',
-                'education_unit_id'  => $kelas->unit_pendidikan_id ?? $employee->unit_id,
-                'template_id'        => $template->id,
-                'start_date'         => '2026-08-01',
-                'end_date'           => '2026-12-31',
-                'is_primary'         => true,
-                'can_input'          => true,
-                'can_edit'           => true,
-                'can_finalize'       => true,
-                'can_view_report'    => true,
-                'status'             => 'active',
-                'created_by'         => $employee->user_id,
-            ]
-        );
+        $createdAssignments = collect();
+        foreach ($kelasList as $kIndex => $kelas) {
+            $createdAssignment = MutabaahSupervisorAssignment::query()->updateOrCreate(
+                [
+                    'employee_id'      => $employee->id,
+                    'rombel_id'        => $kelas->id,
+                    'academic_year_id' => $ay->id,
+                    'semester_id'      => $semester->id,
+                ],
+                [
+                    'supervisor_type'    => 'wali_kelas',
+                    'education_unit_id'  => $kelas->unit_pendidikan_id ?? $employee->unit_id,
+                    'template_id'        => $template->id,
+                    'start_date'         => '2026-08-01',
+                    'end_date'           => '2026-12-31',
+                    'is_primary'         => $kIndex === 0,
+                    'can_input'          => true,
+                    'can_edit'           => true,
+                    'can_finalize'       => true,
+                    'can_view_report'    => true,
+                    'status'             => 'active',
+                    'created_by'         => $employee->user_id,
+                ]
+            );
+            $createdAssignments->push($createdAssignment);
+        }
+
+        $assignment = $createdAssignments->first();
+        $kelas = $kelasList->first();
 
         $students = Student::query()
             ->where('kelas_id', $kelas->id)
@@ -1259,6 +1268,32 @@ class GuruTestWorkspaceSeeder extends Seeder
         }
 
         $this->command?->info("  ✓ [10] Catatan Siswa   : {$count} catatan (student_notes)");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // 11. KISI-KISI & BANK SOAL
+    // ════════════════════════════════════════════════════════════════════════
+    private function seedKisiKisiAndBankSoal(User $user, Employee $employee): void
+    {
+        $kisis = \App\Models\LmsKisiKisi::query()->take(10)->get();
+        $kisiCount = 0;
+        $bankCount = 0;
+
+        foreach ($kisis as $k) {
+            $k->guru_id = $employee->id;
+            $k->created_by = $user->id;
+            $k->save();
+            $kisiCount++;
+
+            $bankItems = \App\Models\LmsBankSoal::query()->where('kisi_kisi_id', $k->id)->get();
+            foreach ($bankItems as $b) {
+                $b->created_by = $user->id;
+                $b->save();
+                $bankCount++;
+            }
+        }
+
+        $this->command?->info("  ✓ [11] Kisi-kisi & Bank Soal: {$kisiCount} kisi-kisi, {$bankCount} bank soal");
     }
 
     // ════════════════════════════════════════════════════════════════════════
