@@ -64,7 +64,7 @@ class MutabaahDailyService
         $template = $this->resolveTemplate($assignment, $filters['date']);
         abort_unless($template, 422, 'Template aktif tidak ditemukan untuk assignment dan tanggal ini.');
 
-        $query = $this->studentScope($assignment)->with(['educationUnit:id,name', 'kelas:id,nama_kelas', 'schoolClass:id,name,level']);
+        $query = $this->studentScope($assignment)->with(['educationUnit:id,name', 'kelas:id,nama_kelas', 'schoolClass:id,name,level', 'parent:id,full_name,phone']);
         if ($search = $filters['search'] ?? null) {
             $query->where(fn ($q) => $q->where('full_name', 'ilike', "%{$search}%")->orWhere('nis', 'ilike', "%{$search}%"));
         }
@@ -76,12 +76,29 @@ class MutabaahDailyService
             'template' => $this->templateData($template, $assignment),
             'students' => $students->map(function (Student $student) use ($headers) {
                 $header = $headers->get($student->id);
+                $meta = $student->metadata ?? [];
+                $parentName = data_get($meta, 'nama_ayah')
+                    ?: data_get($meta, 'ayah.nama')
+                    ?: data_get($meta, 'orang_tua.nama_ayah')
+                    ?: data_get($meta, 'nama_ibu')
+                    ?: data_get($meta, 'ibu.nama')
+                    ?: data_get($meta, 'orang_tua.nama_ibu')
+                    ?: data_get($meta, 'nama_wali')
+                    ?: data_get($meta, 'wali.nama')
+                    ?: (is_string(data_get($meta, 'orang_tua')) ? data_get($meta, 'orang_tua') : null)
+                    ?: data_get($meta, 'orang_tua.nama')
+                    ?: data_get($meta, 'nama_ortu')
+                    ?: data_get($meta, 'parent_name')
+                    ?: $student->parent?->full_name
+                    ?: null;
 
                 return [
                     'id' => $student->id, 'nis' => $student->nis, 'name' => $student->full_name,
                     'photo' => data_get($student->metadata, 'photo'),
                     'class_name' => $student->kelas?->nama_kelas ?? $student->schoolClass?->name,
                     'rombel_name' => $student->kelas?->nama_kelas ?? data_get($student->metadata, 'rombel_name'),
+                    'parent_name' => $parentName,
+                    'metadata' => $student->metadata,
                     'header_id' => $header?->id, 'status' => $header?->status?->value ?? 'draft',
                     'progress' => $header && $header->total_items ? round(($header->details_count / $header->total_items) * 100) : 0,
                     'score' => $header?->score, 'notes' => $header?->supervisor_notes,
@@ -93,7 +110,7 @@ class MutabaahDailyService
     public function detail(User $user, string $studentId, array $filters): array
     {
         $assignment = $this->ownedAssignment($user, $filters['supervisor_assignment_id'], $filters['date']);
-        $student = $this->studentScope($assignment)->with('schoolClass')->findOrFail($studentId);
+        $student = $this->studentScope($assignment)->with(['schoolClass', 'parent:id,full_name,phone'])->findOrFail($studentId);
         $template = $this->resolveTemplate($assignment, $filters['date']);
         abort_unless($template, 422, 'Template aktif tidak ditemukan.');
         $header = MutabaahDailyHeader::with('details')->where([
@@ -103,8 +120,30 @@ class MutabaahDailyService
             ->whereDate('activity_date', '<=', $filters['date'])->latest('activity_date')->limit(7)
             ->get(['activity_date', 'score', 'status', 'good_count', 'less_count', 'not_done_count', 'na_count']);
 
+        $meta = $student->metadata ?? [];
+        $parentName = data_get($meta, 'nama_ayah')
+            ?: data_get($meta, 'ayah.nama')
+            ?: data_get($meta, 'orang_tua.nama_ayah')
+            ?: data_get($meta, 'nama_ibu')
+            ?: data_get($meta, 'ibu.nama')
+            ?: data_get($meta, 'orang_tua.nama_ibu')
+            ?: data_get($meta, 'nama_wali')
+            ?: data_get($meta, 'wali.nama')
+            ?: (is_string(data_get($meta, 'orang_tua')) ? data_get($meta, 'orang_tua') : null)
+            ?: data_get($meta, 'orang_tua.nama')
+            ?: data_get($meta, 'nama_ortu')
+            ?: data_get($meta, 'parent_name')
+            ?: $student->parent?->full_name
+            ?: null;
+
         return [
-            'student' => ['id' => $student->id, 'name' => $student->full_name, 'nis' => $student->nis, 'photo' => data_get($student->metadata, 'photo'), 'class_name' => $student->schoolClass?->name],
+            'student' => [
+                'id' => $student->id, 'name' => $student->full_name, 'nis' => $student->nis,
+                'photo' => data_get($student->metadata, 'photo'),
+                'class_name' => $student->schoolClass?->name,
+                'parent_name' => $parentName,
+                'metadata' => $student->metadata,
+            ],
             'header' => $header,
             'values' => $header?->details->keyBy('template_item_id') ?? collect(),
             'history' => $history,

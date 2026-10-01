@@ -173,8 +173,8 @@ class LmsModulAjarService
         return $this->modulAjarRepository->create($newData);
     }
 
-    public function dapatkanStatistik(): array
+    public function dapatkanStatistik(array $filters = []): array
     {
-        return $this->modulAjarRepository->getStats();
+        return $this->modulAjarRepository->getStats($filters);
     }
 }

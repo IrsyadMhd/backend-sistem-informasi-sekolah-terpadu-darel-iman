@@ -236,7 +236,38 @@ class GateAttendanceService
             return Student::active()->find($data['student_id']);
         }
         if (! empty($data['qr_token'])) {
-            return $this->studentQr->resolve($data['qr_token']);
+            $qrToken = trim($data['qr_token']);
+            if (str_starts_with($qrToken, 'STUDENT_CARD:')) {
+                $parts = explode(':', $qrToken, 3);
+                $cardId = trim($parts[1] ?? '');
+                $cardName = trim($parts[2] ?? '');
+                if ($cardId !== '' && $cardId !== '-') {
+                    $found = Student::active()
+                        ->where(function ($query) use ($cardId) {
+                            $query->where('nis', $cardId)
+                                ->orWhere('nisn', $cardId)
+                                ->orWhere('id', $cardId)
+                                ->orWhere('metadata->card_number', $cardId)
+                                ->orWhere('metadata->qr_code', $cardId);
+                        })
+                        ->first();
+                    if ($found) {
+                        return $found;
+                    }
+                }
+                if ($cardName !== '') {
+                    $found = Student::active()
+                        ->where(function ($query) use ($cardName) {
+                            $query->where('full_name', $cardName)
+                                ->orWhere('nama_lengkap', $cardName);
+                        })
+                        ->first();
+                    if ($found) {
+                        return $found;
+                    }
+                }
+            }
+            return $this->studentQr->resolve($qrToken);
         }
         if (! empty($data['nisn'])) {
             return Student::active()->where('nisn', $data['nisn'])->first();
@@ -245,13 +276,16 @@ class GateAttendanceService
             return Student::active()->where('nis', $data['nis'])->first();
         }
         if (! empty($data['card_number'])) {
-            if ($student = $this->studentQr->resolve($data['card_number'])) {
+            $cardNum = trim($data['card_number']);
+            if ($student = $this->studentQr->resolve($cardNum)) {
                 return $student;
             }
 
-            return Student::active()->where(function ($query) use ($data) {
-                $query->where('metadata->card_number', $data['card_number'])
-                    ->orWhere('nis', $data['card_number']);
+            return Student::active()->where(function ($query) use ($cardNum) {
+                $query->where('metadata->card_number', $cardNum)
+                    ->orWhere('nis', $cardNum)
+                    ->orWhere('nisn', $cardNum)
+                    ->orWhere('id', $cardNum);
             })
                 ->first();
         }

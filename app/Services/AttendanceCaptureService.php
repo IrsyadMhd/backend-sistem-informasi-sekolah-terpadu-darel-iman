@@ -48,19 +48,57 @@ class AttendanceCaptureService
 
     public function resolveStudent(string $method, string $identifier): ?Student
     {
+        $trimmed = trim($identifier);
+
         if ($method === 'qr_code') {
-            if ($student = $this->studentQr->resolve($identifier)) {
+            if ($student = $this->studentQr->resolve($trimmed)) {
                 return $student;
             }
 
             // A newly issued credential must not fall through to a legacy
             // identifier after it has been revoked or expired.
-            if (str_starts_with(trim($identifier), 'stuqr:v1:')) {
+            if (str_starts_with($trimmed, 'stuqr:v1:')) {
                 return null;
             }
 
+            // Support formatted student card QR: "STUDENT_CARD:{NIS_or_ID}:{NAME}"
+            if (str_starts_with($trimmed, 'STUDENT_CARD:')) {
+                $parts = explode(':', $trimmed, 3);
+                $cardId = trim($parts[1] ?? '');
+                $cardName = trim($parts[2] ?? '');
+
+                if ($cardId !== '' && $cardId !== '-') {
+                    $student = Student::active()
+                        ->where(function ($query) use ($cardId) {
+                            $query->where('nis', $cardId)
+                                ->orWhere('nisn', $cardId)
+                                ->orWhere('id', $cardId)
+                                ->orWhere('metadata->qr_code', $cardId)
+                                ->orWhere('metadata->card_number', $cardId);
+                        })
+                        ->first();
+
+                    if ($student) {
+                        return $student;
+                    }
+                }
+
+                if ($cardName !== '') {
+                    $student = Student::active()
+                        ->where(function ($query) use ($cardName) {
+                            $query->where('full_name', $cardName)
+                                ->orWhere('nama_lengkap', $cardName);
+                        })
+                        ->first();
+
+                    if ($student) {
+                        return $student;
+                    }
+                }
+            }
+
             try {
-                $payload = json_decode(Crypt::decryptString($identifier), true, flags: JSON_THROW_ON_ERROR);
+                $payload = json_decode(Crypt::decryptString($trimmed), true, flags: JSON_THROW_ON_ERROR);
                 if (($payload['purpose'] ?? null) !== 'attendance-qr') {
                     throw new \RuntimeException('Invalid QR purpose.');
                 }
@@ -68,11 +106,12 @@ class AttendanceCaptureService
                 return Student::active()->find($payload['student_id'] ?? null);
             } catch (\Throwable) {
                 return Student::active()
-                    ->where(function ($query) use ($identifier) {
-                        $query->where('metadata->qr_code', $identifier)
-                            ->orWhere('metadata->card_number', $identifier)
-                            ->orWhere('nis', $identifier)
-                            ->orWhere('nisn', $identifier);
+                    ->where(function ($query) use ($trimmed) {
+                        $query->where('metadata->qr_code', $trimmed)
+                            ->orWhere('metadata->card_number', $trimmed)
+                            ->orWhere('nis', $trimmed)
+                            ->orWhere('nisn', $trimmed)
+                            ->orWhere('id', $trimmed);
                     })
                     ->first();
             }

@@ -182,9 +182,30 @@ class AttendanceAccessService
 
     public function assertTeacherOwnsSchedule(User $user, string $scheduleId): ClassSchedule
     {
-        $schedule = $user->hasRole('Super Admin')
-            ? ClassSchedule::find($scheduleId)
-            : $this->teacherSchedules($user)->find($scheduleId);
+        if ($user->hasAnyRole(['Super Admin', 'Admin TU', 'Kepala Sekolah', 'kepala_sekolah', 'KepalaSekolah'])) {
+            $schedule = ClassSchedule::find($scheduleId);
+        } else {
+            $schedule = $this->teacherSchedules($user)->find($scheduleId);
+
+            if (! $schedule && $user->hasRole('Wali Kelas')) {
+                $homeroomIds = $this->homeroomClasses($user)->pluck('id');
+                $schedule = ClassSchedule::whereIn('kelas_id', $homeroomIds)->find($scheduleId);
+            }
+
+            if (! $schedule) {
+                // Check if it's in the user's active schedules
+                $schedule = $this->activeSchedules($user)->firstWhere('id', $scheduleId);
+            }
+
+            if (! $schedule) {
+                // Check if user is employee in the same unit
+                $employee = $this->employee($user);
+                if ($employee && $employee->unit_id) {
+                    $schedule = ClassSchedule::whereHas('kelas', fn ($q) => $q->where('unit_pendidikan_id', $employee->unit_id))->find($scheduleId);
+                }
+            }
+        }
+
         if (! $schedule) {
             throw ValidationException::withMessages([
                 'schedule_id' => 'Jadwal tidak ditemukan atau bukan jadwal mengajar Anda.',
@@ -208,11 +229,12 @@ class AttendanceAccessService
         $classIds = collect([$schedule->class_id])->filter();
         $kelasIds = collect([$schedule->kelas_id])->filter();
         if ($schedule->kelas_id) {
+            $classIds->push($schedule->kelas_id);
             $kelas = Kelas::find($schedule->kelas_id);
             if ($kelas) {
                 $legacyIds = SchoolClass::query()
-                    ->where('academic_year_id', $schedule->academic_year_id)
-                    ->where('semester_id', $schedule->semester_id)
+                    ->when($schedule->academic_year_id, fn ($q) => $q->where('academic_year_id', $schedule->academic_year_id))
+                    ->when($schedule->semester_id, fn ($q) => $q->where('semester_id', $schedule->semester_id))
                     ->where(function (Builder $query) use ($kelas) {
                         $query->where('name', $kelas->nama_kelas);
                         if ($kelas->kode_kelas) {
@@ -222,17 +244,13 @@ class AttendanceAccessService
                 $classIds = $classIds->merge($legacyIds);
             }
         }
-
-        $scheduleUnitId = $schedule->kelas?->unit_pendidikan_id;
+        if ($schedule->class_id) {
+            $kelasIds->push($schedule->class_id);
+        }
 
         return Student::query()->active()->where(function (Builder $query) use ($classIds, $kelasIds) {
             $query->whereIn('class_id', $classIds->unique()->values())
                 ->orWhereIn('kelas_id', $kelasIds->unique()->values());
-        })->when($scheduleUnitId, function (Builder $query) use ($scheduleUnitId): void {
-            $query->where(function (Builder $unitQuery) use ($scheduleUnitId): void {
-                $unitQuery->where('unit_id', $scheduleUnitId)
-                    ->orWhereHas('kelas', fn (Builder $kelasQuery) => $kelasQuery->where('unit_pendidikan_id', $scheduleUnitId));
-            });
         });
     }
 

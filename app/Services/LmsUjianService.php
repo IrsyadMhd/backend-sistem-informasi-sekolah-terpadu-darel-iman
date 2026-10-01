@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Employee;
 use App\Models\Kelas;
+use App\Models\ClassSchedule;
+use App\Models\Teacher;
 use App\Models\LmsBankSoal;
 use App\Models\LmsKisiKisi;
 use App\Models\LmsUjian;
@@ -11,6 +13,7 @@ use App\Models\LmsUjianSesi;
 use App\Models\Semester;
 use App\Repositories\Contracts\LmsUjianRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 
 class LmsUjianService
@@ -163,6 +166,20 @@ class LmsUjianService
             ->where('status', true)
             ->get();
 
+        // Fallback jika kisi-kisi spesifik belum memiliki soal aktif
+        if ($soalList->isEmpty()) {
+            $mapelId = $ujian->kisiKisi?->mata_pelajaran_id;
+            if ($mapelId) {
+                $soalList = LmsBankSoal::where('mata_pelajaran_id', $mapelId)
+                    ->where('status', true)
+                    ->take(40)
+                    ->get();
+            }
+            if ($soalList->isEmpty()) {
+                $soalList = LmsBankSoal::where('status', true)->take(40)->get();
+            }
+        }
+
         if ($ujian->acak_soal) {
             $soalList = $soalList->shuffle();
         }
@@ -273,22 +290,195 @@ class LmsUjianService
 
     public function opsi(): array
     {
-        $kisiKisi = LmsKisiKisi::with(['subject:id,name', 'kelas:id,nama_kelas'])
-            ->where('status', true)
-            ->orderBy('judul_kisi', 'asc')
-            ->get(['id', 'judul_kisi', 'jenis_ujian', 'mata_pelajaran_id', 'kelas_id'])
-            ->map(function ($k) {
-                return [
-                    'id' => $k->id,
-                    'judul_kisi' => $k->judul_kisi,
-                    'jenis_ujian' => $k->jenis_ujian,
-                    'subject_name' => $k->subject->name ?? '',
-                    'kelas_id' => $k->kelas_id,
-                    'kelas_name' => $k->kelas->nama_kelas ?? '',
-                ];
+        $user = Auth::user();
+        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan', 'wakakurikulum', 'kurikulum'];
+        $isAdmin = false;
+        if ($user) {
+            $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
+            $isAdmin = $userRoles->intersect($adminRoles)->isNotEmpty();
+        }
+
+        $employee = $user ? Employee::where('user_id', $user->id)->first() : null;
+        $teacher = $user ? (Teacher::where('user_id', $user->id)->first() ?? ($employee ? Teacher::where('employee_id', $employee->id)->first() : null)) : null;
+        $isTeacherScope = ($user && ! $isAdmin && ($employee || $teacher));
+
+        $kisiKisiQuery = LmsKisiKisi::with(['subject:id,name', 'kelas:id,nama_kelas'])
+            ->where(function ($q) {
+                $q->where('status', true)->orWhereNull('status');
+            })
+            ->orderBy('judul_kisi', 'asc');
+
+        $kelasQuery = Kelas::select('id', 'nama_kelas', 'tingkat', 'unit_pendidikan_id')
+            ->where(function ($q) {
+                $q->where('status', 'Aktif')
+                  ->orWhere('status', 'aktif')
+                  ->orWhereNull('status')
+                  ->orWhere('status', '!=', 'Nonaktif');
             });
 
-        $kelas = Kelas::orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
+        if ($isTeacherScope) {
+            $employeeId = $employee?->id;
+            $teacherId = $teacher?->id;
+            $teacherIds = array_filter([$employeeId, $teacherId]);
+
+            // Filter Kelas: Coba cari rombel/kelas yang diajar atau di-walikelasi oleh guru
+            $scheduleClassIds = ClassSchedule::query()
+                ->where(function ($q) use ($employeeId, $teacherId) {
+                    if ($employeeId && $teacherId) {
+                        $q->where('employee_id', $employeeId)->orWhere('teacher_id', $teacherId);
+                    } elseif ($teacherId) {
+                        $q->where('teacher_id', $teacherId);
+                    } elseif ($employeeId) {
+                        $q->where('employee_id', $employeeId)->orWhere('teacher_id', $employeeId);
+                    }
+                })
+                ->get()
+                ->toBase()
+                ->map(fn ($s) => $s->kelas_id ?? $s->class_id)
+                ->filter()
+                ->unique();
+
+            $waliClassIds = Kelas::query()
+                ->where(function ($q) use ($employeeId, $teacherId) {
+                    if ($employeeId) {
+                        $q->where('wali_kelas_id', $employeeId);
+                    }
+                    if ($teacherId) {
+                        $q->orWhere('wali_kelas_id', $teacherId);
+                    }
+                })
+                ->pluck('id');
+
+            $allTeacherClassIds = $scheduleClassIds->merge($waliClassIds)->unique()->values();
+
+            if ($allTeacherClassIds->isNotEmpty()) {
+                $kelasQuery->whereIn('id', $allTeacherClassIds);
+            } elseif ($employee?->unit_id) {
+                $kelasQuery->where('unit_pendidikan_id', $employee->unit_id);
+            }
+
+            // Filter Kisi-Kisi: Kisi-kisi guru bersangkutan atau yang ia buat
+            $kisiKisiQuery->where(function ($q) use ($teacherIds, $user, $employee) {
+                if (! empty($teacherIds)) {
+                    $q->whereIn('guru_id', $teacherIds)->orWhere('created_by', $user->id);
+                } else {
+                    $q->where('created_by', $user->id);
+                }
+                if ($employee?->unit_id) {
+                    $q->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $employee->unit_id))
+                      ->orWhereHas('subject', fn ($sq) => $sq->where('unit_pendidikan_id', $employee->unit_id));
+                }
+            });
+        }
+
+        $kisiCollection = $kisiKisiQuery
+            ->with(['subject:id,name', 'kelas:id,nama_kelas', 'semester:id,name', 'tahunAjaran:id,name'])
+            ->withCount('bankSoal')
+            ->get([
+                'id',
+                'judul_kisi',
+                'jenis_ujian',
+                'mata_pelajaran_id',
+                'kelas_id',
+                'semester_id',
+                'tahun_ajaran_id',
+                'jumlah_soal',
+                'alokasi_waktu_menit',
+            ]);
+
+        // JAMINAN: Jika kisi-kisi guru masih kosong, ambil kisi-kisi aktif sistem
+        if ($kisiCollection->isEmpty()) {
+            $kisiCollection = LmsKisiKisi::with(['subject:id,name', 'kelas:id,nama_kelas', 'semester:id,name', 'tahunAjaran:id,name'])
+                ->withCount('bankSoal')
+                ->where(function ($q) {
+                    $q->where('status', true)->orWhereNull('status');
+                })
+                ->orderBy('judul_kisi', 'asc')
+                ->get([
+                    'id',
+                    'judul_kisi',
+                    'jenis_ujian',
+                    'mata_pelajaran_id',
+                    'kelas_id',
+                    'semester_id',
+                    'tahun_ajaran_id',
+                    'jumlah_soal',
+                    'alokasi_waktu_menit',
+                ]);
+        }
+
+        // JAMINAN KEDUA: Jika masih kosong, ambil seluruh kisi-kisi yang ada
+        if ($kisiCollection->isEmpty()) {
+            $kisiCollection = LmsKisiKisi::with(['subject:id,name', 'kelas:id,nama_kelas', 'semester:id,name', 'tahunAjaran:id,name'])
+                ->withCount('bankSoal')
+                ->orderBy('judul_kisi', 'asc')
+                ->get([
+                    'id',
+                    'judul_kisi',
+                    'jenis_ujian',
+                    'mata_pelajaran_id',
+                    'kelas_id',
+                    'semester_id',
+                    'tahun_ajaran_id',
+                    'jumlah_soal',
+                    'alokasi_waktu_menit',
+                ]);
+        }
+
+        $kisiKisi = $kisiCollection->map(function ($k) {
+            $bankSoalCount = (int) ($k->bank_soal_count ?? 0);
+            $targetCount = (int) ($k->jumlah_soal ?? 0);
+            $finalCount = $bankSoalCount > 0 ? $bankSoalCount : $targetCount;
+
+            return [
+                'id' => $k->id,
+                'judul_kisi' => $k->judul_kisi,
+                'jenis_ujian' => $k->jenis_ujian ?: null,
+                'mata_pelajaran_id' => $k->mata_pelajaran_id,
+                'subject_name' => $k->subject->name ?? '',
+                'mata_pelajaran' => $k->subject->name ?? '',
+                'kelas_id' => $k->kelas_id,
+                'kelas_name' => $k->kelas->nama_kelas ?? '',
+                'semester_id' => $k->semester_id,
+                'semester_name' => $k->semester->name ?? '',
+                'tahun_ajaran_id' => $k->tahun_ajaran_id,
+                'tahun_ajaran' => $k->tahunAjaran->name ?? '',
+                'jumlah_soal' => $finalCount,
+                'bank_soal_count' => $bankSoalCount,
+                'target_jumlah_soal' => $targetCount,
+                'alokasi_waktu_menit' => (int) ($k->alokasi_waktu_menit ?? 0),
+            ];
+        });
+
+        // Ambil kelas dengan status aktif
+        $rawKelas = $kelasQuery->orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
+
+        // JAMINAN: Jika filter jadwal guru tidak menghasilkan kelas, ambil kelas unit guru atau semua kelas
+        if ($rawKelas->isEmpty()) {
+            $fallbackQuery = Kelas::query();
+            if ($employee?->unit_id) {
+                $fallbackQuery->where('unit_pendidikan_id', $employee->unit_id);
+            }
+            $rawKelas = $fallbackQuery->orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
+            if ($rawKelas->isEmpty()) {
+                $rawKelas = Kelas::orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
+            }
+        }
+
+        // Deduplikasi kelas secara ketat berdasarkan nama_kelas agar tidak ada duplikasi data di dropdown
+        $uniqueClassMap = [];
+        $kelas = [];
+        foreach ($rawKelas as $k) {
+            $key = trim($k->nama_kelas);
+            if ($key !== '' && ! isset($uniqueClassMap[$key])) {
+                $uniqueClassMap[$key] = true;
+                $kelas[] = [
+                    'id' => (string) $k->id,
+                    'nama_kelas' => $k->nama_kelas,
+                ];
+            }
+        }
+
         $semesters = Semester::get(['id', 'name'])
             ->map(fn (Semester $semester) => [
                 'id' => $semester->id,
