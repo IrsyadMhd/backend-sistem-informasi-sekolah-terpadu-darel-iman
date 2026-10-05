@@ -718,11 +718,184 @@ class KepalaSekolahDashboardService
             }
         }
 
+        // 6b. Presensi Realtime Guru & Tendik (Hadir, Izin Dinas Luar, Sakit, Alfa)
+        $employeeAttendanceList = [];
+        $empHadirCount = 0;
+        $empIzinDinasCount = 0;
+        $empSakitCount = 0;
+        $empAlfaCount = 0;
+
+        $isWeekPeriod = ($filters['period'] ?? '') === 'this_week';
+        $hasCustomRange = ! empty($filters['date_from']) && ! empty($filters['date_to']);
+        $isRangeMode = $isWeekPeriod || $hasCustomRange;
+
+        $rangeStart = $hasCustomRange 
+            ? $filters['date_from'] 
+            : ($isWeekPeriod ? now()->startOfWeek()->toDateString() : $attDateToUse);
+        $rangeEnd = $hasCustomRange 
+            ? $filters['date_to'] 
+            : ($isWeekPeriod ? now()->toDateString() : $attDateToUse);
+
+        if (Schema::hasTable('employees')) {
+            $empListQuery = (clone $employeeQuery)
+                ->with(['position', 'teacher', 'teachings'])
+                ->orderBy('nama_lengkap');
+
+            $allEmployees = $empListQuery->get();
+
+            if ($allEmployees->isNotEmpty()) {
+                $allEmpIds = $allEmployees->pluck('id');
+
+                $empAttRecords = Schema::hasTable('attendances')
+                    ? ($isRangeMode
+                        ? DB::table('attendances')
+                            ->whereIn('employee_id', $allEmpIds)
+                            ->whereBetween('attendance_date', [$rangeStart, $rangeEnd])
+                            ->orderByDesc('attendance_date')
+                            ->get()
+                            ->groupBy('employee_id')
+                        : DB::table('attendances')
+                            ->whereIn('employee_id', $allEmpIds)
+                            ->whereDate('attendance_date', $attDateToUse)
+                            ->get()
+                            ->keyBy('employee_id'))
+                    : collect();
+
+                foreach ($allEmployees as $index => $emp) {
+                    $empId = (string) $emp->id;
+                    $empName = $emp->nama_lengkap ?? $emp->name ?? 'Pegawai';
+                    $nip = $emp->nuptk ? 'NUPTK. ' . $emp->nuptk : ($emp->niy ? 'NIY. ' . $emp->niy : ($emp->nik ? 'NIK. ' . $emp->nik : 'ID: ' . substr($empId, 0, 8)));
+                    
+                    $isGuru = $emp->teacher || ($emp->teachings && $emp->teachings->isNotEmpty())
+                        || stripos($emp->status_pegawai ?? '', 'guru') !== false
+                        || stripos($emp->position?->name ?? '', 'guru') !== false
+                        || stripos($emp->position?->name ?? '', 'pendidik') !== false;
+
+                    $roleType = $isGuru ? 'Guru' : 'Tendik';
+                    $positionName = $emp->position?->name ?? $emp->status_pegawai ?? ($isGuru ? 'Tenaga Pendidik' : 'Tenaga Kependidikan');
+
+                    $status = 'Hadir';
+                    $waktu = '—';
+                    $keterangan = '—';
+                    $lokasi = 'SIMS Madrasah';
+
+                    if ($isRangeMode) {
+                        $records = $empAttRecords->get($emp->id, collect());
+                        $att = $records->first();
+                    } else {
+                        $att = $empAttRecords->get($emp->id);
+                    }
+
+                    if ($att) {
+                        $rawStatus = strtoupper(trim($att->status ?? ''));
+                        $rawKet = $att->keterangan ?? '';
+
+                        if (in_array($rawStatus, ['HADIR', 'PRESENT', 'TERLAMBAT', 'LATE'])) {
+                            $status = 'Hadir';
+                            $timeFmt = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') : null;
+                            $waktu = $timeFmt ? $timeFmt . ' WIB' : 'Tercatat';
+                            if ($isRangeMode) {
+                                $recordsCount = $records->filter(fn($r) => in_array(strtoupper(trim($r->status ?? '')), ['HADIR', 'PRESENT', 'TERLAMBAT', 'LATE']))->count();
+                                $keterangan = $rawKet ?: "Hadir {$recordsCount} hari dalam periode";
+                            } else {
+                                $keterangan = $rawKet ?: ($rawStatus === 'TERLAMBAT' ? 'Hadir Terlambat' : 'Hadir Tepat Waktu');
+                            }
+                            $lokasi = $att->location ?? 'Gerbang Utama';
+                            $empHadirCount++;
+                        } elseif (
+                            in_array($rawStatus, ['DINAS_LUAR', 'IZIN_DINAS', 'DINAS']) 
+                            || stripos($rawStatus, 'DINAS') !== false 
+                            || stripos($rawKet, 'dinas') !== false
+                        ) {
+                            $status = 'Izin Dinas Luar';
+                            $waktu = 'Surat Tugas';
+                            $keterangan = $rawKet ?: 'Penugasan Luar / Dinas Pendidikan';
+                            $lokasi = $att->location ?? 'Luar Kampus';
+                            $empIzinDinasCount++;
+                        } elseif (in_array($rawStatus, ['SAKIT', 'SICK'])) {
+                            $status = 'Sakit';
+                            $waktu = 'Surat Dokter';
+                            $keterangan = $rawKet ?: 'Izin sakit / pemulihan kesehatan';
+                            $lokasi = 'Kediaman';
+                            $empSakitCount++;
+                        } elseif (in_array($rawStatus, ['ALPHA', 'ALFA', 'ABSENT'])) {
+                            $status = 'Alfa';
+                            $waktu = 'Tidak Hadir';
+                            $keterangan = $rawKet ?: 'Belum ada konfirmasi kehadiran';
+                            $lokasi = '—';
+                            $empAlfaCount++;
+                        } else {
+                            $status = 'Izin Dinas Luar';
+                            $waktu = 'Izin Resmi';
+                            $keterangan = $rawKet ?: 'Izin dispensasi kegiatan luar';
+                            $lokasi = 'Luar Kampus';
+                            $empIzinDinasCount++;
+                        }
+                    } else {
+                        // Tidak ada presensi tercatat di database untuk pegawai ini pada tanggal/periode terpilih
+                        $status = 'Alfa';
+                        $waktu = '—';
+                        $keterangan = $isRangeMode ? 'Belum ada catatan presensi pada periode ini' : 'Belum ada catatan presensi hari ini';
+                        $lokasi = '—';
+                        $empAlfaCount++;
+                    }
+
+                    $employeeAttendanceList[] = [
+                        'id' => $empId,
+                        'nama' => $empName,
+                        'nip' => $nip,
+                        'role_type' => $roleType,
+                        'jabatan' => $positionName,
+                        'status' => $status,
+                        'waktu' => $waktu,
+                        'keterangan' => $keterangan,
+                        'lokasi' => $lokasi,
+                        'no_hp' => $emp->no_hp ?? $emp->phone_number ?? $emp->telepon ?? null,
+                        'avatar_url' => $emp->foto ?? $emp->avatar_url ?? null,
+                        'gender' => $emp->jenis_kelamin ?? 'L',
+                    ];
+                }
+
+                // Sort urutan prioritas: Hadir -> Izin Dinas Luar -> Sakit -> Alfa
+                usort($employeeAttendanceList, function ($a, $b) {
+                    $order = [
+                        'Hadir' => 0,
+                        'Izin Dinas Luar' => 1,
+                        'Sakit' => 2,
+                        'Alfa' => 3,
+                    ];
+                    return ($order[$a['status']] ?? 9) <=> ($order[$b['status']] ?? 9);
+                });
+            }
+        }
+
+        $empTotalCount = count($employeeAttendanceList);
+        $dateLabel = $isRangeMode
+            ? (Carbon::parse($rangeStart)->translatedFormat('d M') . ' - ' . Carbon::parse($rangeEnd)->translatedFormat('d M Y'))
+            : Carbon::parse($attDateToUse)->translatedFormat('d M Y');
+
+        $employeeAttendanceSummary = [
+            'total' => $empTotalCount,
+            'hadir' => $empHadirCount,
+            'izin_dinas' => $empIzinDinasCount,
+            'sakit' => $empSakitCount,
+            'alfa' => $empAlfaCount,
+            'persentase_hadir' => $empTotalCount > 0 ? round(($empHadirCount / $empTotalCount) * 100, 1) : 0,
+            'date_label' => $dateLabel,
+            'is_range' => $isRangeMode,
+            'date' => $attDateToUse,
+            'range_start' => $rangeStart,
+            'range_end' => $rangeEnd,
+        ];
+
         // 7. Data Profil Pengurus Yayasan (Ketua, Sekretaris, Bendahara)
         $activeYearLabel = $activeAcademicYear ? ($activeAcademicYear->name ?? $activeAcademicYear->year_name ?? $activeAcademicYear->nama) : null;
-        $currentCalYear = (int) date('Y');
-        $startPeriodYear = $currentCalYear - ($currentCalYear % 5);
-        $periodeYayasan = $activeYearLabel ? 'Periode ' . $activeYearLabel : "{$startPeriodYear} - " . ($startPeriodYear + 5);
+        $startYear = $activeAcademicYear && $activeAcademicYear->start_date 
+            ? Carbon::parse($activeAcademicYear->start_date)->year 
+            : (int) date('Y');
+        $startPeriodYear = (int) (floor($startYear / 5) * 5);
+        $endPeriodYear = $startPeriodYear + 5;
+        $periodeYayasan = "{$startPeriodYear} - {$endPeriodYear}";
 
         $officeDefinitions = [
             [
@@ -994,6 +1167,10 @@ class KepalaSekolahDashboardService
             'online_users' => $onlineUsers,
             'online_logs' => $onlineLogs,
             'student_attendance' => $studentAttendance,
+            'employee_attendance' => [
+                'summary' => $employeeAttendanceSummary,
+                'list' => $employeeAttendanceList,
+            ],
             'attendance_meta' => [
                 'date' => $attDateToUse,
                 'date_label' => Carbon::parse($attDateToUse)->translatedFormat('d M Y'),
@@ -1005,7 +1182,9 @@ class KepalaSekolahDashboardService
                 'total_evaluated' => count($studentAttendance),
             ],
             'pengurus_yayasan' => $pengurusYayasan,
-            'kpis' => $kpis,
+            'kpis' => array_merge($kpis, [
+                'absensi_guru_tendik' => $employeeAttendanceSummary,
+            ]),
             'charts' => [
                 'attendance_trend' => $attendanceTrend,
                 'fullday_trend' => $fulldayTrend,
