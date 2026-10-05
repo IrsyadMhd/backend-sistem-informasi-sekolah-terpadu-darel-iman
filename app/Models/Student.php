@@ -96,6 +96,18 @@ class Student extends Model
         return $this->hasMany(Attendance::class, 'student_id');
     }
 
+    public function mutations()
+    {
+        return $this->hasMany(StudentMutation::class, 'student_id')->latest('created_at');
+    }
+
+    public function activeMutation()
+    {
+        return $this->hasOne(StudentMutation::class, 'student_id')
+            ->where('status', 'menunggu_persetujuan')
+            ->latest('created_at');
+    }
+
     // Scopes
     public function scopeActive($query)
     {
