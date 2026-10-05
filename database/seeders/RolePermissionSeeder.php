@@ -685,8 +685,9 @@ class RolePermissionSeeder extends Seeder
             'mutabaah.agenda.view', 'mutabaah.agenda.create', 'mutabaah.agenda.update', 'mutabaah.agenda.delete', 'mutabaah.agenda.restore',
             'mutabaah.template.view', 'mutabaah.template.create', 'mutabaah.template.update', 'mutabaah.template.delete', 'mutabaah.template.assign',
             'mutabaah.supervisor.view', 'mutabaah.supervisor.create', 'mutabaah.supervisor.update', 'mutabaah.supervisor.delete',
-            'student.view', 'student.create', 'student.update', 'student.export', 'student.import',
+            'student.view', 'student.create', 'student.update', 'student.delete', 'student.export', 'student.import',
             'employee.view', 'employee.create', 'employee.update', 'employee.export',
+            'teacher.student_note.view',
         ];
         foreach (['Tata Usaha', 'TU', 'tu', 'operator', 'tata_usaha', 'Operator'] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap['Tata Usaha'] ?? ['dashboard.view'], $tuPermissions)));
