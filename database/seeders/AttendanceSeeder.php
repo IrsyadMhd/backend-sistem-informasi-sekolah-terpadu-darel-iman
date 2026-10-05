@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\Student;
+use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Str;
 
@@ -86,31 +87,78 @@ class AttendanceSeeder extends Seeder
             }
         }
 
-        // 2. Seed Presensi Pegawai/Guru
-        if ($employees->isNotEmpty()) {
-            foreach ($employees as $employee) {
-                Attendance::updateOrCreate(
-                    [
-                        'employee_id' => $employee->id,
-                        'attendance_date' => $today,
-                    ],
-                    [
-                        'id' => (string) Str::uuid(),
-                        'tipe_presensi' => 'Pegawai',
-                        'employee_id' => $employee->id,
-                        'academic_year_id' => $academicYearId,
-                        'semester_id' => $semesterId,
-                        'attendance_date' => $today,
-                        'check_in_time' => now()->setHour(6)->setMinute(45),
-                        'check_out_time' => now()->setHour(16)->setMinute(00),
-                        'status' => 'HADIR',
-                        'attendance_method' => 'GEOLOCATION',
-                        'location' => 'Ruang Guru / Unit SDIT',
-                        'latitude' => -6.200000,
-                        'longitude' => 106.816666,
-                        'keterangan' => 'Presensi Mengajar Guru',
-                    ]
-                );
+        // 2. Seed Presensi Pegawai/Guru untuk hari ini, kemarin, dan pekan berjalan
+        $allEmployees = Employee::all();
+        if ($allEmployees->isNotEmpty()) {
+            $datesToSeed = [
+                $today,
+                $yesterday,
+                now()->subDays(2)->toDateString(),
+                now()->subDays(3)->toDateString(),
+            ];
+
+            foreach ($datesToSeed as $dayOffset => $dateStr) {
+                $targetCarbon = Carbon::parse($dateStr);
+                // Lewati akhir pekan (Minggu) jika ingin realistis KBM
+                if ($targetCarbon->isSunday()) {
+                    continue;
+                }
+
+                foreach ($allEmployees as $index => $employee) {
+                    $mod = ($index + $dayOffset) % 8;
+                    $status = 'HADIR';
+                    $checkIn = $targetCarbon->copy()->setHour(6)->setMinute(40 + ($index % 18));
+                    $checkOut = $targetCarbon->copy()->setHour(16)->setMinute(0);
+                    $location = 'Presensi Gerbang Utama';
+                    $keterangan = 'Presensi Masuk Tepat Waktu';
+
+                    if ($mod === 3) {
+                        $status = 'DINAS_LUAR';
+                        $checkIn = $targetCarbon->copy()->setHour(7)->setMinute(15);
+                        $checkOut = $targetCarbon->copy()->setHour(15)->setMinute(30);
+                        $location = 'Balai Diklat / Dinas Pendidikan';
+                        $keterangan = 'Penugasan Luar / Pelatihan Kurikulum';
+                    } elseif ($mod === 5) {
+                        $status = 'SAKIT';
+                        $checkIn = null;
+                        $checkOut = null;
+                        $location = 'Kediaman Pegawai';
+                        $keterangan = 'Izin Sakit (Surat Dokter Terlampir)';
+                    } elseif ($mod === 7) {
+                        $status = 'ALPHA';
+                        $checkIn = null;
+                        $checkOut = null;
+                        $location = null;
+                        $keterangan = 'Tidak Hadir / Belum Ada Keterangan';
+                    }
+
+                    $unitId = $employee->unit_id ?? $employee->unit_pendidikan_id ?? null;
+
+                    Attendance::updateOrCreate(
+                        [
+                            'employee_id' => $employee->id,
+                            'attendance_date' => $dateStr,
+                        ],
+                        [
+                            'id' => (string) Str::uuid(),
+                            'tipe_presensi' => 'Pegawai',
+                            'employee_id' => $employee->id,
+                            'unit_pendidikan_id' => $unitId,
+                            'academic_year_id' => $academicYearId,
+                            'semester_id' => $semesterId,
+                            'month' => $targetCarbon->month,
+                            'attendance_date' => $dateStr,
+                            'check_in_time' => $checkIn,
+                            'check_out_time' => $checkOut,
+                            'status' => $status,
+                            'attendance_method' => $status === 'DINAS_LUAR' ? 'MANUAL' : 'GEOLOCATION',
+                            'location' => $location,
+                            'latitude' => -6.200000,
+                            'longitude' => 106.816666,
+                            'keterangan' => $keterangan,
+                        ]
+                    );
+                }
             }
         }
     }
