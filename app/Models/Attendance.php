@@ -14,6 +14,40 @@ class Attendance extends Model
 
     protected $table = 'attendances';
 
+    // ── Status Constants ──────────────────────────────────────────────────────
+    public const STATUS_HADIR       = 'HADIR';
+    public const STATUS_PRESENT     = 'present';   // alias lama
+    public const STATUS_TERLAMBAT   = 'TERLAMBAT';
+    public const STATUS_SAKIT       = 'SAKIT';
+    public const STATUS_IZIN        = 'IZIN';
+    public const STATUS_ALPHA       = 'ALPHA';
+    public const STATUS_ABSENT      = 'absent';    // alias lama
+    public const STATUS_DINAS_LUAR  = 'DINAS_LUAR';
+
+    /** Status yang dianggap "hadir" untuk kalkulasi persentase */
+    public const STATUSES_HADIR     = [self::STATUS_HADIR, self::STATUS_PRESENT];
+    /** Status alpha / tidak hadir tanpa keterangan */
+    public const STATUSES_ALPHA     = [self::STATUS_ALPHA, self::STATUS_ABSENT];
+    /** Status dinas luar / tugas luar */
+    public const STATUSES_DINAS     = [self::STATUS_DINAS_LUAR, 'dinas_luar'];
+
+    // ── Tipe Presensi Constants ───────────────────────────────────────────────
+    public const TIPE_PEGAWAI = 'Pegawai';
+    public const TIPE_SISWA   = 'Siswa';
+
+    // ── Method Constants ──────────────────────────────────────────────────────
+    public const METHOD_MANUAL  = 'MANUAL';
+    public const METHOD_QR      = 'QR';
+    public const METHOD_RFID    = 'RFID';
+
+    // ── Storage ───────────────────────────────────────────────────────────────
+    public const STORAGE_DISK   = 'public';
+    public const STORAGE_PATH   = 'attendance_attachments';
+
+    // ── Default Values ────────────────────────────────────────────────────────
+    public const DEFAULT_LOCATION  = 'SIMS Mobile App';
+    public const DEFAULT_KETERANGAN_MASUK = 'Absen masuk terdaftar.';
+
     protected $fillable = [
         'tipe_presensi',
         'student_id',
@@ -47,7 +81,7 @@ class Attendance extends Model
         'updated_by',
     ];
 
-    protected $appends = ['status_label', 'status_badge_color'];
+    protected $appends = ['status_label', 'status_badge_color', 'attachment_url'];
 
     protected static function booted(): void
     {
@@ -97,27 +131,27 @@ class Attendance extends Model
     // Scopes
     public function scopeHadir($query)
     {
-        return $query->whereIn('status', ['HADIR', 'present']);
+        return $query->whereIn('status', self::STATUSES_HADIR);
     }
 
     public function scopeTerlambat($query)
     {
-        return $query->where('status', 'TERLAMBAT');
+        return $query->where('status', self::STATUS_TERLAMBAT);
     }
 
     public function scopeIzin($query)
     {
-        return $query->where('status', 'IZIN');
+        return $query->where('status', self::STATUS_IZIN);
     }
 
     public function scopeSakit($query)
     {
-        return $query->where('status', 'SAKIT');
+        return $query->where('status', self::STATUS_SAKIT);
     }
 
     public function scopeAlpha($query)
     {
-        return $query->whereIn('status', ['ALPHA', 'absent']);
+        return $query->whereIn('status', self::STATUSES_ALPHA);
     }
 
     public function scopeHariIni($query)
@@ -140,12 +174,12 @@ class Attendance extends Model
     {
         return match (strtoupper($this->status ?? '')) {
             'HADIR', 'PRESENT' => 'Hadir Tepat Waktu',
-            'TERLAMBAT' => 'Hadir Terlambat',
-            'SAKIT' => 'Sakit (Surat Dokter)',
-            'IZIN' => 'Izin (Keterangan)',
-            'ALPHA', 'ABSENT' => 'Tanpa Keterangan (Alpha)',
-            'DINAS_LUAR' => 'Dinas Luar',
-            default => $this->status ?? 'Belum Absen',
+            'TERLAMBAT'        => 'Hadir Terlambat',
+            'SAKIT'            => 'Sakit (Surat Dokter)',
+            'IZIN'             => 'Izin (Keterangan)',
+            'ALPHA', 'ABSENT'  => 'Tanpa Keterangan (Alpha)',
+            'DINAS_LUAR'       => 'Dinas Luar',
+            default            => $this->status ?? 'Belum Absen',
         };
     }
 
@@ -160,5 +194,18 @@ class Attendance extends Model
             'DINAS_LUAR' => 'primary',
             default => 'default',
         };
+    }
+
+    public function getAttachmentUrlAttribute(): ?string
+    {
+        if (empty($this->attachment_path)) {
+            return null;
+        }
+
+        if (str_starts_with($this->attachment_path, 'http://') || str_starts_with($this->attachment_path, 'https://')) {
+            return $this->attachment_path;
+        }
+
+        return url('storage/' . ltrim($this->attachment_path, '/'));
     }
 }
