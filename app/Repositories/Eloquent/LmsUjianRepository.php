@@ -23,10 +23,8 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
             return $query;
         }
 
-        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan'];
-        $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
-
-        if ($userRoles->intersect($adminRoles)->isNotEmpty()) {
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        if ($accessScope->hasGlobalScope($user)) {
             return $query;
         }
 
@@ -37,13 +35,39 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
             $employee?->id,
             $teacher?->id,
         ])));
+        $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+        $accessibleRombelIds = $accessScope->accessibleRombels($user)->pluck('id')->all();
 
-        return $query->where(function ($q) use ($teacherIds, $user) {
-            if (! empty($teacherIds)) {
-                $q->whereIn('guru_id', $teacherIds)
-                  ->orWhere('created_by', $user->id);
-            } else {
-                $q->where('created_by', $user->id);
+        $isTeacherOnly = ! $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan',
+            'Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum',
+            'Waka Kesiswaan', 'waka_kesiswaan', 'Tata Usaha', 'tata_usaha', 'tu',
+        ]) && $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']);
+
+        if ($isTeacherOnly) {
+            return $query->where(function ($q) use ($teacherIds, $user, $unitIds, $accessibleRombelIds) {
+                if (! empty($teacherIds)) {
+                    $q->whereIn('guru_id', $teacherIds)
+                      ->orWhere('created_by', $user->id);
+                } else {
+                    $q->where('created_by', $user->id);
+                }
+                if (! empty($accessibleRombelIds)) {
+                    $q->orWhereIn('kelas_id', $accessibleRombelIds);
+                }
+                if (! empty($unitIds)) {
+                    $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds));
+                }
+            });
+        }
+
+        // Staff / TU / Kepsek: Strictly scoped to their unit's classes/rombels
+        return $query->where(function ($q) use ($unitIds, $accessibleRombelIds) {
+            if (! empty($accessibleRombelIds)) {
+                $q->whereIn('kelas_id', $accessibleRombelIds);
+            }
+            if (! empty($unitIds)) {
+                $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds));
             }
         });
     }
@@ -59,6 +83,17 @@ class LmsUjianRepository implements LmsUjianRepositoryInterface
         ])->withCount('sesi');
 
         $this->applyTeacherScope($query);
+
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $query->where(function ($q) use ($filters) {
+                $q->whereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $filters['unit_ids']));
+                if (! empty($filters['kelas_ids'])) {
+                    $q->orWhereIn('kelas_id', $filters['kelas_ids']);
+                }
+            });
+        } elseif (! empty($filters['kelas_ids'])) {
+            $query->whereIn('kelas_id', $filters['kelas_ids']);
+        }
 
         if (! empty($filters['with_trashed']) && filter_var($filters['with_trashed'], FILTER_VALIDATE_BOOLEAN)) {
             $query->withTrashed();

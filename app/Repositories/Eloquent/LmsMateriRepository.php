@@ -53,6 +53,22 @@ class LmsMateriRepository implements LmsMateriRepositoryInterface
             }
         }
 
+        if (! empty($filters['unit_pendidikan_id'])) {
+            $unitId = $filters['unit_pendidikan_id'];
+            $query->where(function ($q) use ($unitId) {
+                $q->whereHas('modulAjar', fn ($m) => $m->where('unit_pendidikan_id', $unitId))
+                  ->orWhereHas('subject', fn ($s) => $s->where('unit_pendidikan_id', $unitId));
+            });
+        }
+
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $unitIds = $filters['unit_ids'];
+            $query->where(function ($q) use ($unitIds) {
+                $q->whereHas('modulAjar', fn ($m) => $m->whereIn('unit_pendidikan_id', $unitIds))
+                  ->orWhereHas('subject', fn ($s) => $s->whereIn('unit_pendidikan_id', $unitIds));
+            });
+        }
+
         if (! empty($filters['search'])) {
             $search = '%'.$filters['search'].'%';
             $query->where(function ($q) use ($search) {
@@ -119,19 +135,57 @@ class LmsMateriRepository implements LmsMateriRepositoryInterface
         return (bool) $materi->restore();
     }
 
-    public function getStats(): array
+    public function getStats(array $filters = []): array
     {
+        $baseQuery = LmsMateri::query();
+
+        if (! empty($filters['unit_pendidikan_id'])) {
+            $unitId = $filters['unit_pendidikan_id'];
+            $baseQuery->where(function ($q) use ($unitId) {
+                $q->whereHas('modulAjar', fn ($m) => $m->where('unit_pendidikan_id', $unitId))
+                  ->orWhereHas('subject', fn ($s) => $s->where('unit_pendidikan_id', $unitId));
+            });
+        }
+
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $unitIds = $filters['unit_ids'];
+            $baseQuery->where(function ($q) use ($unitIds) {
+                $q->whereHas('modulAjar', fn ($m) => $m->whereIn('unit_pendidikan_id', $unitIds))
+                  ->orWhereHas('subject', fn ($s) => $s->whereIn('unit_pendidikan_id', $unitIds));
+            });
+        }
+
+        if (! empty($filters['guru_id'])) {
+            $baseQuery->where('guru_id', $filters['guru_id']);
+        }
+
+        $modulQuery = LmsModulAjar::query();
+        if (! empty($filters['unit_pendidikan_id'])) {
+            $modulQuery->where('unit_pendidikan_id', $filters['unit_pendidikan_id']);
+        } elseif (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $modulQuery->whereIn('unit_pendidikan_id', $filters['unit_ids']);
+        }
+
         return [
-            'total_materi' => LmsMateri::count(),
-            'materi_aktif' => LmsMateri::where(function ($q) {
+            'total_materi' => (clone $baseQuery)->count(),
+            'materi_aktif' => (clone $baseQuery)->where(function ($q) {
                 $q->where('is_published', true)
                   ->orWhere('status', 'aktif')
                   ->orWhere('status', 'published');
             })->count(),
-            'materi_dokumen' => LmsMateri::whereIn('tipe', ['dokumen', 'pdf', 'file'])->orWhereIn('tipe_materi', ['dokumen', 'pdf'])->count(),
-            'materi_video' => LmsMateri::whereIn('tipe', ['video'])->orWhereIn('tipe_materi', ['video'])->count(),
-            'materi_link' => LmsMateri::whereIn('tipe', ['link', 'url'])->orWhereIn('tipe_materi', ['link'])->count(),
-            'total_modul_ajar' => LmsModulAjar::count(),
+            'materi_dokumen' => (clone $baseQuery)->where(function ($q) {
+                $q->whereIn('tipe', ['dokumen', 'pdf', 'file'])
+                  ->orWhereIn('tipe_materi', ['dokumen', 'pdf']);
+            })->count(),
+            'materi_video' => (clone $baseQuery)->where(function ($q) {
+                $q->whereIn('tipe', ['video'])
+                  ->orWhereIn('tipe_materi', ['video']);
+            })->count(),
+            'materi_link' => (clone $baseQuery)->where(function ($q) {
+                $q->whereIn('tipe', ['link', 'url'])
+                  ->orWhereIn('tipe_materi', ['link']);
+            })->count(),
+            'total_modul_ajar' => $modulQuery->count(),
         ];
     }
 }

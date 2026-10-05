@@ -53,6 +53,40 @@ class EmployeeRepository implements EmployeeRepositoryInterface
             $query->where('jenis_kelamin', $filters['jenis_kelamin']);
         }
 
+        if (! empty($filters['exclude_restricted_roles'])) {
+            $query->whereDoesntHave('position', function ($q) {
+                $q->whereIn('level_jabatan', [1, 2, 7])
+                    ->orWhere('satuan_kerja', 'Pengurus')
+                    ->orWhere('satuan_kerja', 'Bidang Pendidikan')
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%pembina%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%pengawas%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%superadmin%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%super admin%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%administrator%']);
+            });
+            $query->whereDoesntHave('user.roles', function ($q) {
+                $q->whereIn('name', [
+                    'Super Admin',
+                    'super_admin',
+                    'superadmin',
+                    'Admin',
+                    'admin',
+                    'administrator',
+                    'Operator',
+                    'operator',
+                    'operator_sekolah',
+                    'Pengurus Yayasan',
+                    'pengurus_yayasan',
+                    'Yayasan',
+                    'yayasan',
+                ]);
+            });
+        }
+
         $sortBy = $filters['sort_by'] ?? 'created_at';
         $sortOrder = strtolower($filters['sort_order'] ?? 'desc');
         if (! in_array($sortOrder, ['asc', 'desc'])) {

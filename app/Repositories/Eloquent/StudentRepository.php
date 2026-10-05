@@ -20,7 +20,7 @@ class StudentRepository implements StudentRepositoryInterface
     ): LengthAwarePaginator
     {
         return Student::query()
-            ->with(['kelas:id,nama_kelas,tingkat,unit_pendidikan_id', 'educationUnit:id,name'])
+            ->with(['kelas:id,nama_kelas,tingkat,unit_pendidikan_id', 'educationUnit:id,name,metadata'])
             ->when(! $canAccessAllUnits, function ($query) use ($unitId) {
                 $query->when(
                     $unitId,

@@ -31,7 +31,16 @@ class LmsDiskusiRepository implements LmsDiskusiRepositoryInterface
             $query->whereHas('modulAjar', fn ($modulQuery) => $modulQuery->where('guru_id', $filters['guru_id']));
         }
 
-        if (! empty($filters['kelas_ids'])) {
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $query->whereHas('modulAjar', function ($modulQuery) use ($filters) {
+                $modulQuery->where(function ($mq) use ($filters) {
+                    $mq->whereIn('unit_pendidikan_id', $filters['unit_ids']);
+                    if (! empty($filters['kelas_ids'])) {
+                        $mq->orWhereIn('kelas_id', $filters['kelas_ids']);
+                    }
+                });
+            });
+        } elseif (! empty($filters['kelas_ids'])) {
             $query->whereHas('modulAjar', fn ($modulQuery) => $modulQuery->whereIn('kelas_id', $filters['kelas_ids']));
         }
 

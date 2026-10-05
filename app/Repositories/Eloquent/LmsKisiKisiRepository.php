@@ -19,10 +19,8 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
             return $query;
         }
 
-        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan'];
-        $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
-
-        if ($userRoles->intersect($adminRoles)->isNotEmpty()) {
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        if ($accessScope->hasGlobalScope($user)) {
             return $query;
         }
 
@@ -33,18 +31,40 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
             $employee?->id,
             $teacher?->id,
         ])));
-        $unitId = $employee?->unit_id;
+        $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+        $accessibleRombelIds = $accessScope->accessibleRombels($user)->pluck('id')->all();
 
-        return $query->where(function ($q) use ($teacherIds, $user, $unitId) {
-            $q->where('created_by', $user->id)
-              ->orWhereNull('created_by');
+        $isTeacherOnly = ! $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan',
+            'Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum',
+            'Waka Kesiswaan', 'waka_kesiswaan', 'Tata Usaha', 'tata_usaha', 'tu',
+        ]) && $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']);
 
-            if (! empty($teacherIds)) {
-                $q->orWhereIn('guru_id', $teacherIds);
+        if ($isTeacherOnly) {
+            return $query->where(function ($q) use ($teacherIds, $user, $unitIds, $accessibleRombelIds) {
+                $q->where('created_by', $user->id)
+                  ->orWhereNull('created_by');
+
+                if (! empty($teacherIds)) {
+                    $q->orWhereIn('guru_id', $teacherIds);
+                }
+                if (! empty($accessibleRombelIds)) {
+                    $q->orWhereIn('kelas_id', $accessibleRombelIds);
+                }
+                if (! empty($unitIds)) {
+                    $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds))
+                      ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds));
+                }
+            });
+        }
+
+        return $query->where(function ($q) use ($unitIds, $accessibleRombelIds) {
+            if (! empty($accessibleRombelIds)) {
+                $q->whereIn('kelas_id', $accessibleRombelIds);
             }
-            if ($unitId) {
-                $q->orWhereHas('kelas', fn ($qk) => $qk->where('unit_pendidikan_id', $unitId))
-                  ->orWhereHas('subject', fn ($qs) => $qs->where('unit_pendidikan_id', $unitId));
+            if (! empty($unitIds)) {
+                $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds))
+                  ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds));
             }
         });
     }
@@ -63,6 +83,18 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
         ])->withCount(['bankSoal', 'ujian']);
 
         $this->applyTeacherScope($query);
+
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $query->where(function ($q) use ($filters) {
+                $q->whereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $filters['unit_ids']))
+                  ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $filters['unit_ids']));
+                if (! empty($filters['kelas_ids'])) {
+                    $q->orWhereIn('kelas_id', $filters['kelas_ids']);
+                }
+            });
+        } elseif (! empty($filters['kelas_ids'])) {
+            $query->whereIn('kelas_id', $filters['kelas_ids']);
+        }
 
         if (! empty($filters['search'])) {
             $search = $filters['search'];
