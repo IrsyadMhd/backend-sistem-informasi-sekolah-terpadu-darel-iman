@@ -22,5 +22,5 @@ interface LmsMateriRepositoryInterface
 
     public function restore(string $id): bool;
 
-    public function getStats(): array;
+    public function getStats(array $filters = []): array;
 }

@@ -27,5 +27,5 @@ interface LmsPenugasanRepositoryInterface
 
     public function submitOrGrade(string $penugasanId, array $data): LmsPengumpulanTugas;
 
-    public function getStats(): array;
+    public function getStats(array $filters = []): array;
 }
