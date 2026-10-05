@@ -9,6 +9,8 @@ use App\Http\Resources\LmsUjianResource;
 use App\Models\LmsUjian;
 use App\Models\LmsUjianSesi;
 use App\Models\Student;
+use App\Models\User;
+use App\Services\AccessScopeService;
 use App\Services\LmsUjianService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,7 +20,8 @@ use Illuminate\Support\Str;
 class LmsUjianController extends Controller
 {
     public function __construct(
-        protected LmsUjianService $ujianService
+        protected LmsUjianService $ujianService,
+        protected AccessScopeService $accessScope
     ) {}
 
     /** Pengguna internal (guru/operator/admin); bukan Siswa/Orang Tua/Alumni. */
@@ -56,8 +59,37 @@ class LmsUjianController extends Controller
         return $this->isStaffUser($user);
     }
 
+    private function assertCanAccessUjian(?User $user, LmsUjian $ujian): void
+    {
+        if (! $user || $this->accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+        $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+
+        $match = false;
+        if ($ujian->kelas_id && in_array($ujian->kelas_id, $accessibleRombelIds, true)) {
+            $match = true;
+        } elseif ($ujian->kelas && in_array($ujian->kelas->unit_pendidikan_id, $allowedUnitIds, true)) {
+            $match = true;
+        } elseif ($ujian->kisiKisi) {
+            $kisi = $ujian->kisiKisi;
+            if ($kisi->kelas_id && in_array($kisi->kelas_id, $accessibleRombelIds, true)) {
+                $match = true;
+            } elseif ($kisi->kelas && in_array($kisi->kelas->unit_pendidikan_id, $allowedUnitIds, true)) {
+                $match = true;
+            } elseif ($kisi->subject && in_array($kisi->subject->unit_pendidikan_id, $allowedUnitIds, true)) {
+                $match = true;
+            }
+        }
+
+        abort_unless($match, 403, 'Akses ditolak: Ujian CBT berada di luar unit wewenang Anda.');
+    }
+
     public function index(Request $request): AnonymousResourceCollection
     {
+        $user = $request->user();
         $filters = $request->only([
             'search',
             'kisi_kisi_id',
@@ -65,6 +97,18 @@ class LmsUjianController extends Controller
             'status',
             'with_trashed',
         ]);
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            $filters['unit_ids'] = $allowedUnitIds;
+
+            if (! empty($filters['kelas_id'])) {
+                abort_unless(in_array($filters['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar cakupan unit Anda.');
+            } else {
+                $filters['kelas_ids'] = $accessibleRombelIds;
+            }
+        }
 
         $perPage = (int) $request->get('per_page', 15);
         $orderBy = $request->get('order_by', 'created_at');
@@ -87,7 +131,7 @@ class LmsUjianController extends Controller
         ], 201);
     }
 
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         $ujian = $this->ujianService->cariBerdasarkanId($id, true);
 
@@ -98,6 +142,8 @@ class LmsUjianController extends Controller
             ], 404);
         }
 
+        $this->assertCanAccessUjian($request->user(), $ujian);
+
         return response()->json([
             'success' => true,
             'data' => new LmsUjianResource($ujian),
@@ -106,9 +152,7 @@ class LmsUjianController extends Controller
 
     public function update(UpdateLmsUjianRequest $request, string $id): JsonResponse
     {
-        $validated = $request->validated();
-        $ujian = $this->ujianService->ubah($id, $validated);
-
+        $ujian = $this->ujianService->cariBerdasarkanId($id, true);
         if (! $ujian) {
             return response()->json([
                 'success' => false,
@@ -116,23 +160,30 @@ class LmsUjianController extends Controller
             ], 404);
         }
 
+        $this->assertCanAccessUjian($request->user(), $ujian);
+        $validated = $request->validated();
+        $updated = $this->ujianService->ubah($id, $validated);
+
         return response()->json([
             'success' => true,
             'message' => 'Sesi CBT Ujian berhasil diperbarui.',
-            'data' => new LmsUjianResource($ujian),
+            'data' => new LmsUjianResource($updated),
         ]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
-        $success = $this->ujianService->hapus($id);
-
-        if (! $success) {
+        $ujian = $this->ujianService->cariBerdasarkanId($id, true);
+        if (! $ujian) {
             return response()->json([
                 'success' => false,
                 'message' => 'Sesi CBT Ujian tidak ditemukan atau gagal dihapus.',
             ], 404);
         }
+
+        $this->assertCanAccessUjian($request->user(), $ujian);
+
+        $this->ujianService->hapus($id);
 
         return response()->json([
             'success' => true,
@@ -140,16 +191,19 @@ class LmsUjianController extends Controller
         ]);
     }
 
-    public function restore(string $id): JsonResponse
+    public function restore(Request $request, string $id): JsonResponse
     {
-        $success = $this->ujianService->pulihkan($id);
-
-        if (! $success) {
+        $ujian = $this->ujianService->cariBerdasarkanId($id, true);
+        if (! $ujian) {
             return response()->json([
                 'success' => false,
                 'message' => 'Sesi CBT Ujian tidak ditemukan atau tidak dalam status terhapus.',
             ], 400);
         }
+
+        $this->assertCanAccessUjian($request->user(), $ujian);
+
+        $this->ujianService->pulihkan($id);
 
         return response()->json([
             'success' => true,
@@ -157,16 +211,19 @@ class LmsUjianController extends Controller
         ]);
     }
 
-    public function duplicate(string $id): JsonResponse
+    public function duplicate(Request $request, string $id): JsonResponse
     {
-        $duplicated = $this->ujianService->duplikasi($id);
-
-        if (! $duplicated) {
+        $ujian = $this->ujianService->cariBerdasarkanId($id, true);
+        if (! $ujian) {
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal menduplikasi Sesi CBT Ujian.',
             ], 400);
         }
+
+        $this->assertCanAccessUjian($request->user(), $ujian);
+
+        $duplicated = $this->ujianService->duplikasi($id);
 
         return response()->json([
             'success' => true,
@@ -177,11 +234,21 @@ class LmsUjianController extends Controller
 
     public function togglePublish(Request $request, string $id): JsonResponse
     {
+        $ujian = $this->ujianService->cariBerdasarkanId($id, true);
+        if (! $ujian) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Sesi CBT Ujian tidak ditemukan.',
+            ], 404);
+        }
+
+        $this->assertCanAccessUjian($request->user(), $ujian);
+
         $request->validate([
             'status' => ['required', 'string', 'in:draft,published,berlangsung,selesai,dibatalkan'],
         ]);
 
-        $ujian = $this->ujianService->ubahStatusPublish($id, $request->status);
+        $updated = $this->ujianService->ubahStatusPublish($id, $request->status);
 
         if (! $ujian) {
             return response()->json([
