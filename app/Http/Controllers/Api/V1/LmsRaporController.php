@@ -225,6 +225,14 @@ class LmsRaporController extends Controller
                 'nis' => $s->nis,
                 'kelas_id' => $s->kelas_id,
             ])->values()->all();
+
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $options['employees'] = \App\Models\Employee::query()
+                ->whereIn('unit_id', $allowedUnitIds)
+                ->select('id', 'nama_lengkap', 'niy', 'nik')
+                ->orderBy('nama_lengkap')
+                ->get()
+                ->all();
         }
 
         return response()->json([

@@ -65,6 +65,10 @@ class EmployeeController extends Controller
 
         $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
 
+        if (! $isGlobalUser || $request->user()->hasAnyRole(['Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu']) || $request->boolean('exclude_restricted_roles')) {
+            $filters['exclude_restricted_roles'] = true;
+        }
+
         if (! $isGlobalUser) {
             if (! empty($filters['unit_id'])) {
                 $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
@@ -165,11 +169,24 @@ class EmployeeController extends Controller
             $query = \App\Models\Position::query();
         }
 
-        if (! $this->accessScopeService->hasGlobalScope($user) && ! $this->accessScopeService->canManageUnitAccess($user)) {
-            $query->whereNotIn('level_jabatan', [1, 2])
+        if (! $this->accessScopeService->hasGlobalScope($user) || $user->hasAnyRole(['Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu'])) {
+            $query->whereNotIn('level_jabatan', [1, 2, 7])
+                  ->where(function ($q) {
+                      $q->whereNull('satuan_kerja')
+                        ->orWhereNotIn('satuan_kerja', ['Pengurus', 'Bidang Pendidikan']);
+                  })
                   ->where(function ($q) {
                       $q->whereNull('scope_akses')
                         ->orWhereNotIn('scope_akses', ['semua_unit', 'lintas_unit']);
+                  })
+                  ->where(function ($q) {
+                      $q->whereRaw('LOWER(name) NOT LIKE ?', ['%yayasan%'])
+                        ->whereRaw('LOWER(name) NOT LIKE ?', ['%pembina%'])
+                        ->whereRaw('LOWER(name) NOT LIKE ?', ['%pengawas%'])
+                        ->whereRaw('LOWER(name) NOT LIKE ?', ['%operator%'])
+                        ->whereRaw('LOWER(name) NOT LIKE ?', ['%superadmin%'])
+                        ->whereRaw('LOWER(name) NOT LIKE ?', ['%super admin%'])
+                        ->whereRaw('LOWER(name) NOT LIKE ?', ['%administrator%']);
                   });
         }
 

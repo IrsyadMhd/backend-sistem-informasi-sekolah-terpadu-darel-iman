@@ -113,7 +113,11 @@ class AttendanceWorkflowController extends Controller
 
     public function schedules(Request $request): JsonResponse
     {
-        $this->permit($request, ['lesson_attendance.view_own', 'lesson_attendance.create'], ['Guru']);
+        $this->permit(
+            $request,
+            ['lesson_attendance.view_own', 'lesson_attendance.create', 'homeroom_attendance.view', 'attendance.view', 'kehadiran.siswa.monitoring'],
+            ['Guru', 'Wali Kelas', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Super Admin', 'super_admin']
+        );
         $date = ($request->date('date') ?: now())->startOfDay();
         $schedules = $this->access->teacherSchedules($request->user())
             ->with(['subject', 'kelas.unitPendidikan', 'kelas.tahunAjaran', 'kelas.semester', 'employee'])
@@ -140,8 +144,8 @@ class AttendanceWorkflowController extends Controller
     {
         $this->permit(
             $request,
-            ['lesson_attendance.view_own', 'lesson_attendance.create', 'homeroom_attendance.view'],
-            ['Guru', 'Wali Kelas']
+            ['lesson_attendance.view_own', 'lesson_attendance.create', 'homeroom_attendance.view', 'attendance.view', 'kehadiran.siswa.monitoring'],
+            ['Guru', 'Wali Kelas', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Super Admin', 'super_admin']
         );
 
         $now = now();
@@ -158,8 +162,8 @@ class AttendanceWorkflowController extends Controller
     {
         $this->permit(
             $request,
-            ['lesson_attendance.view_own', 'lesson_attendance.create', 'homeroom_attendance.view'],
-            ['Guru', 'Wali Kelas']
+            ['lesson_attendance.view_own', 'lesson_attendance.create', 'homeroom_attendance.view', 'attendance.view', 'kehadiran.siswa.monitoring'],
+            ['Guru', 'Wali Kelas', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Super Admin', 'super_admin']
         );
         $scheduleModel = $request->string('attendance_context')->toString() === 'active_login'
             ? $this->access->assertCanTakeActiveSchedule($request->user(), $schedule, now())

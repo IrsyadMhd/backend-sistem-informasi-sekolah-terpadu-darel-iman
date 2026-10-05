@@ -13,6 +13,7 @@ use App\Models\LmsDiskusiKomentar;
 use App\Models\LmsModulAjar;
 use App\Models\Student;
 use App\Models\User;
+use App\Services\AccessScopeService;
 use App\Services\LmsDiskusiService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,19 +22,24 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 class LmsDiskusiController extends Controller
 {
     public function __construct(
-        protected LmsDiskusiService $diskusiService
+        protected LmsDiskusiService $diskusiService,
+        protected AccessScopeService $accessScope
     ) {}
 
     public function index(Request $request): AnonymousResourceCollection
     {
-        $this->authorizeView($request->user());
+        $user = $request->user();
+        $this->authorizeView($user);
         $filters = $request->only(['search', 'modul_ajar_id', 'kategori', 'status']);
-        if ($this->isTeacher($request->user())) {
-            $filters['guru_id'] = $this->teacherEmployeeId($request->user());
-        }
-        if ($this->isStudent($request->user())) {
-            $filters['kelas_ids'] = $this->studentClassIds($request->user());
+        if ($this->isTeacher($user)) {
+            $filters['guru_id'] = $this->teacherEmployeeId($user);
+        } elseif ($this->isStudent($user)) {
+            $filters['kelas_ids'] = $this->studentClassIds($user);
             $filters['published_only'] = true;
+        } elseif (! $this->canAccessAllUnits($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $filters['unit_ids'] = $allowedUnitIds;
+            $filters['kelas_ids'] = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
         }
         $perPage = (int) $request->get('per_page', 15);
         $orderBy = $request->get('order_by', 'created_at');
@@ -408,16 +414,38 @@ class LmsDiskusiController extends Controller
                 403
             );
         }
+
+        if (! $this->canAccessAllUnits($user) && ! $this->isTeacher($user) && ! $this->isStudent($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $allowedKelasIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            $modul = $diskusi->modulAjar;
+            if ($modul) {
+                $matchesUnit = $modul->unit_pendidikan_id && in_array($modul->unit_pendidikan_id, $allowedUnitIds, true);
+                $matchesKelas = $modul->kelas_id && in_array($modul->kelas_id, $allowedKelasIds, true);
+                abort_unless($matchesUnit || $matchesKelas, 403, 'Akses ditolak: Diskusi berada di luar cakupan unit Anda.');
+            }
+        }
     }
 
     private function assertCanManageDiskusi(User $user, LmsDiskusi $diskusi): bool
     {
-        if ($this->canAccessAllUnits($user) || $user->hasAnyPermission(['pembelajaran.materi'])) {
+        if ($this->canAccessAllUnits($user)) {
             return true;
         }
 
-        abort_unless($this->isTeacher($user), 403);
-        $this->assertCanManageModul($user, $diskusi->modul_ajar_id);
+        if ($this->isTeacher($user)) {
+            $this->assertCanManageModul($user, $diskusi->modul_ajar_id);
+            return true;
+        }
+
+        $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+        $allowedKelasIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+        $modul = $diskusi->modulAjar;
+        if ($modul) {
+            $matchesUnit = $modul->unit_pendidikan_id && in_array($modul->unit_pendidikan_id, $allowedUnitIds, true);
+            $matchesKelas = $modul->kelas_id && in_array($modul->kelas_id, $allowedKelasIds, true);
+            abort_unless($matchesUnit || $matchesKelas, 403, 'Akses ditolak: Diskusi berada di luar cakupan unit Anda.');
+        }
 
         return true;
     }

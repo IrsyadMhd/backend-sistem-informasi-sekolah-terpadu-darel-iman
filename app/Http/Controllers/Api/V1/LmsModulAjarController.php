@@ -56,7 +56,9 @@ class LmsModulAjarController extends Controller
             }
         } elseif (! $this->canAccessAllUnits($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
-            if (empty($filters['unit_pendidikan_id'])) {
+            if (! empty($filters['unit_pendidikan_id'])) {
+                abort_unless(in_array($filters['unit_pendidikan_id'], $allowedUnitIds, true), 403, 'Akses ditolak: Unit pendidikan di luar cakupan wewenang Anda.');
+            } else {
                 $filters['unit_ids'] = $allowedUnitIds;
             }
         }
@@ -326,6 +328,14 @@ class LmsModulAjarController extends Controller
             $kelasId = $data['kelas_id'] ?? $modul->kelas_id;
             $mapelId = $data['mata_pelajaran_id'] ?? $modul->mata_pelajaran_id;
             $this->assertTeacherAssignment($user, $kelasId, $mapelId);
+        } elseif (! $this->canAccessAllUnits($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if ($modul->unit_pendidikan_id) {
+                abort_unless(in_array($modul->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses ditolak: Modul Ajar berada di luar cakupan unit Anda.');
+            }
+            if (! empty($data['unit_pendidikan_id'])) {
+                abort_unless(in_array($data['unit_pendidikan_id'], $allowedUnitIds, true), 403, 'Akses ditolak: Unit pendidikan tujuan di luar cakupan wewenang Anda.');
+            }
         }
 
         $modul = $this->modulAjarService->ubah($id, $data);
@@ -353,6 +363,11 @@ class LmsModulAjarController extends Controller
         if ($this->isTeacher($user)) {
             $employeeId = $this->teacherEmployeeId($user);
             abort_unless($modul->guru_id === $employeeId, 403, 'Akses ditolak: Modul Ajar milik guru lain.');
+        } elseif (! $this->canAccessAllUnits($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if ($modul->unit_pendidikan_id) {
+                abort_unless(in_array($modul->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses ditolak: Modul Ajar berada di luar cakupan unit Anda.');
+            }
         }
 
         $deleted = $this->modulAjarService->hapus($id);
@@ -690,6 +705,11 @@ class LmsModulAjarController extends Controller
     {
         if ($this->isTeacher($user)) {
             abort_unless($modul->guru_id === $this->teacherEmployeeId($user), 403);
+        } elseif (! $this->canAccessAllUnits($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if ($modul->unit_pendidikan_id) {
+                abort_unless(in_array($modul->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses ditolak: Modul Ajar berada di luar cakupan unit Anda.');
+            }
         }
     }
 }

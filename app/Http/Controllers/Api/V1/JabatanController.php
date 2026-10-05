@@ -97,6 +97,23 @@ class JabatanController extends Controller
     {
         $user = $request->user();
         $validated = $request->validated();
+
+        if ($this->isUnitOnlyManager($request)) {
+            $userUnitIds = $this->unitScopeIds($request) ?? [];
+            $defaultUnitId = $userUnitIds[0] ?? null;
+
+            if (empty($validated['unit_sekolah_id']) || ! in_array($validated['unit_sekolah_id'], $userUnitIds, true)) {
+                $validated['unit_sekolah_id'] = $defaultUnitId;
+            }
+            $validated['satuan_kerja'] = 'Unit Pendidikan';
+            if (empty($validated['scope_akses']) || in_array($validated['scope_akses'], ['semua_unit', 'bidang_pendidikan'], true)) {
+                $validated['scope_akses'] = 'unit_sendiri';
+            }
+            if (($validated['level_jabatan'] ?? 0) <= 2) {
+                $validated['level_jabatan'] = 8;
+            }
+        }
+
         if ($denied = $this->positionMutationDenied($user, null, $validated)) {
             return $denied;
         }
@@ -144,6 +161,19 @@ class JabatanController extends Controller
         $user = $request->user();
         $existing = Position::withTrashed()->find($id);
         $validated = $request->validated();
+
+        if ($this->isUnitOnlyManager($request)) {
+            $userUnitIds = $this->unitScopeIds($request) ?? [];
+            $defaultUnitId = $userUnitIds[0] ?? null;
+
+            if (empty($validated['unit_sekolah_id']) && ! empty($existing?->unit_sekolah_id)) {
+                $validated['unit_sekolah_id'] = $existing->unit_sekolah_id;
+            } elseif (empty($validated['unit_sekolah_id'])) {
+                $validated['unit_sekolah_id'] = $defaultUnitId;
+            }
+            $validated['satuan_kerja'] = 'Unit Pendidikan';
+        }
+
         if ($denied = $this->positionMutationDenied($user, $existing, $validated)) {
             return $denied;
         }
@@ -185,6 +215,37 @@ class JabatanController extends Controller
     }
 
     /**
+     * Hapus massal data jabatan (Bulk Soft Delete).
+     */
+    public function batchDelete(Request $request): JsonResponse
+    {
+        $ids = $request->input('ids', []);
+        if (! is_array($ids) || empty($ids)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Pilih setidaknya satu data jabatan untuk dihapus.',
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $user = $request->user();
+        $positions = Position::whereIn('id', $ids)->get();
+
+        foreach ($positions as $position) {
+            if ($denied = $this->positionMutationDenied($user, $position)) {
+                return $denied;
+            }
+        }
+
+        $result = $this->jabatanService->hapusBanyak($ids);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Berhasil menghapus {$result['berhasil']} data jabatan.",
+            'data' => $result,
+        ]);
+    }
+
+    /**
      * Pulihkan data jabatan terhapus.
      */
     public function restore(Request $request, string $id): JsonResponse
@@ -221,22 +282,43 @@ class JabatanController extends Controller
             ], Response::HTTP_UNPROCESSABLE_ENTITY);
         }
 
-        if ($this->isUnitOnlyManager($request)) {
-            foreach ($rows as $row) {
-                $denied = $this->positionMutationDenied($request->user(), null, [
-                    'unit_sekolah_id' => $row['unit_sekolah_id'] ?? $row['unit_id'] ?? null,
-                    'level_jabatan' => $row['level_jabatan'] ?? 8,
-                    'satuan_kerja' => $row['satuan_kerja'] ?? 'Unit Pendidikan',
-                    'scope_akses' => $row['scope_akses'] ?? 'unit_sendiri',
+        $user = $request->user();
+        $isUnitOnly = $this->isUnitOnlyManager($request);
+        $userUnitIds = $this->unitScopeIds($request) ?? [];
+        $defaultUnitId = $userUnitIds[0] ?? null;
+
+        $normalizedRows = [];
+        foreach ($rows as $row) {
+            if ($isUnitOnly) {
+                $rowUnitId = $row['unit_sekolah_id'] ?? $row['unit_id'] ?? null;
+                if (empty($rowUnitId) || ! in_array($rowUnitId, $userUnitIds, true)) {
+                    $row['unit_sekolah_id'] = $defaultUnitId;
+                }
+                $row['satuan_kerja'] = 'Unit Pendidikan';
+                $row['scope_akses'] = in_array($row['scope_akses'] ?? '', ['rombel_sendiri', 'kelas_mapel_sendiri', 'siswa_binaan'], true)
+                    ? $row['scope_akses']
+                    : 'unit_sendiri';
+                $level = isset($row['level_jabatan']) && is_numeric($row['level_jabatan']) ? (int) $row['level_jabatan'] : 8;
+                if ($level <= 2) {
+                    $level = 8;
+                }
+                $row['level_jabatan'] = $level;
+
+                $denied = $this->positionMutationDenied($user, null, [
+                    'unit_sekolah_id' => $row['unit_sekolah_id'],
+                    'level_jabatan' => $row['level_jabatan'],
+                    'satuan_kerja' => $row['satuan_kerja'],
+                    'scope_akses' => $row['scope_akses'],
                 ]);
                 if ($denied) {
                     return $denied;
                 }
             }
+            $normalizedRows[] = $row;
         }
 
-        $userId = $request->user()?->id;
-        $hasil = $this->jabatanService->prosesImport($rows, $userId);
+        $userId = $user?->id;
+        $hasil = $this->jabatanService->prosesImport($normalizedRows, $userId);
 
         return response()->json([
             'status' => 'success',
@@ -276,6 +358,7 @@ class JabatanController extends Controller
                 'Unit Sekolah',
                 'Atasan Langsung',
                 'Role Sistem',
+                'Scope Akses',
                 'Urutan',
                 'Status',
                 'Tampil Struktur',

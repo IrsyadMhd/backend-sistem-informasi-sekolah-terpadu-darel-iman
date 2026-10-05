@@ -126,7 +126,7 @@ class ScheduleController extends Controller
             $query->where('day_of_week', (int) $request->query('day_of_week'));
         }
 
-        $perPage = min(max((int) $request->query('per_page', 15), 1), 100);
+        $perPage = min(max((int) $request->query('per_page', 15), 1), 500);
         $data = $query->orderBy('day_of_week')->orderBy('time_start')->paginate($perPage);
 
         foreach ($data->items() as $item) {
@@ -581,6 +581,13 @@ class ScheduleController extends Controller
                 'guru',
                 'Staf',
                 'staf',
+                'Tata Usaha',
+                'tata_usaha',
+                'TU',
+                'tu',
+                'staf_tu',
+                'Staff TU',
+                'Admin TU',
                 'Operator',
                 'operator',
             ])
@@ -599,6 +606,13 @@ class ScheduleController extends Controller
                 'kepala_sekolah',
                 'Divisi Pendidikan',
                 'divisi_pendidikan',
+                'Tata Usaha',
+                'tata_usaha',
+                'TU',
+                'tu',
+                'staf_tu',
+                'Staff TU',
+                'Admin TU',
                 'Admin',
                 'admin',
                 'Super Admin',
@@ -666,6 +680,7 @@ class ScheduleController extends Controller
 
         $metaUnitId = data_get($user->metadata, 'unit_id')
             ?? data_get($user->metadata, 'unit_pendidikan_id')
+            ?? data_get($user->metadata, 'education_unit_id')
             ?? data_get($user->metadata, 'unit_sekolah_id');
 
         if ($metaUnitId) {

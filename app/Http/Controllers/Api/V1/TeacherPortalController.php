@@ -466,16 +466,19 @@ class TeacherPortalController extends Controller
             $checkOut = $row->check_out_time ? Carbon::parse($row->check_out_time) : null;
             $duration = ($checkIn && $checkOut)
                 ? sprintf('%d jam %d mnt', (int) $checkIn->diffInHours($checkOut), ((int) $checkIn->diffInMinutes($checkOut)) % 60)
-                : '8 jam 45 mnt';
+                : ($checkIn ? 'Sedang Berlangsung' : '-');
 
             $metadata = is_string($row->metadata) ? json_decode($row->metadata, true) : (array) ($row->metadata ?? []);
 
             return [
                 'id' => $row->id,
                 'date' => $dateObj->toDateString(),
+                'attendance_date' => $dateObj->toDateString(),
                 'day' => $dateObj->translatedFormat('l'),
-                'check_in' => $checkIn ? $checkIn->format('H:i') : ($metadata['check_in'] ?? '07:15'),
-                'check_out' => $checkOut ? $checkOut->format('H:i') : ($metadata['check_out'] ?? '16:00'),
+                'check_in_time' => $row->check_in_time,
+                'check_out_time' => $row->check_out_time,
+                'check_in' => $checkIn ? $checkIn->format('H:i') : null,
+                'check_out' => $checkOut ? $checkOut->format('H:i') : null,
                 'duration' => $duration,
                 'status' => $row->status ?? 'HADIR',
                 'method' => $row->attendance_method ?? ($metadata['method'] ?? 'RFID Tap'),
@@ -1841,7 +1844,8 @@ class TeacherPortalController extends Controller
             'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah',
             'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan',
             'Guru BK', 'guru_bk', 'Pengurus Yayasan',
-            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'guru_pengajar'
+            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'guru_pengajar',
+            'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU', 'Operator', 'operator'
         ])) {
             return true;
         }
@@ -1913,7 +1917,11 @@ class TeacherPortalController extends Controller
             ->unique()
             ->toArray();
 
-        $isElevated = $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'Pengurus Yayasan']);
+        $isElevated = $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'Admin', 'admin',
+            'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'Pengurus Yayasan',
+            'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU', 'Operator', 'operator'
+        ]);
 
         $messagesQuery = PortalMessage::query()
             ->with(['student.kelas.unitPendidikan', 'student.educationUnit', 'sender:id,name,email', 'recipient:id,name,email'])
@@ -2080,7 +2088,8 @@ class TeacherPortalController extends Controller
         $isElevated = $user->hasAnyRole([
             'Super Admin', 'super_admin', 'Admin', 'admin',
             'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'Pengurus Yayasan',
-            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'Guru Tahfizh', 'Musyrif'
+            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'Guru Tahfizh', 'Musyrif',
+            'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU', 'Operator', 'operator'
         ]);
 
         $messagesQuery = PortalMessage::query()

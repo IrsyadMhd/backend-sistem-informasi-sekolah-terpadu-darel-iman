@@ -101,7 +101,7 @@ class StudentController extends Controller
         }
 
         if (array_key_exists('kelas_id', $validated)) {
-            $payload['kelas_id'] = $this->authorizedKelasId($payload['kelas_id'], $payload['unit_id'] ?? $model->unit_id);
+            $payload['kelas_id'] = $this->authorizedKelasId($payload['kelas_id'], $payload['unit_id'] ?? $model->unit_id, $student);
         } else {
             unset($payload['kelas_id']);
         }
@@ -161,8 +161,11 @@ class StudentController extends Controller
                 COUNT(CASE WHEN is_active = true THEN 1 END) as siswa_aktif,
                 COUNT(CASE WHEN is_active = false THEN 1 END) as siswa_nonaktif,
                 COUNT(CASE WHEN created_at >= ? THEN 1 END) as siswa_baru,
-                COUNT(CASE WHEN is_active = false THEN 1 END) as mutasi_keluar,
-                COUNT(CASE WHEN LOWER(COALESCE(metadata->>'status', '')) IN ('alumni', 'lulus') THEN 1 END) as alumni,
+                COUNT(CASE WHEN metadata->>'mutasi_type' = 'keluar' OR (is_active = false AND metadata->>'mutasi_type' IS NOT NULL) THEN 1 END) as mutasi_keluar,
+                COUNT(CASE WHEN metadata->>'is_alumni' = 'true' 
+                            OR LOWER(COALESCE(metadata->>'status_siswa', '')) IN ('alumni', 'lulus') 
+                            OR LOWER(COALESCE(metadata->>'status_alumni', '')) IN ('alumni', 'lulus', 'tamat')
+                            OR LOWER(COALESCE(metadata->>'status', '')) IN ('alumni', 'lulus') THEN 1 END) as alumni,
                 COUNT(CASE WHEN metadata->>'mutasi_type' = 'masuk' THEN 1 END) as mutasi_masuk,
                 COUNT(CASE WHEN LOWER(gender) IN ('l', 'laki-laki', 'laki laki', 'male') THEN 1 END) as laki_laki,
                 COUNT(CASE WHEN LOWER(gender) IN ('p', 'perempuan', 'female') THEN 1 END) as perempuan
@@ -241,6 +244,24 @@ class StudentController extends Controller
                     'tbl_kelas.nama_kelas as kelas',
                     'students.gender as jenis_kelamin',
                     'students.is_active as aktif',
+                    \Illuminate\Support\Facades\DB::raw("
+                        CASE 
+                            WHEN students.metadata->>'is_alumni' = 'true' OR LOWER(COALESCE(students.metadata->>'status_siswa', '')) IN ('alumni', 'lulus') OR LOWER(COALESCE(students.metadata->>'status_alumni', '')) IN ('alumni', 'lulus', 'tamat') THEN 'alumni'
+                            WHEN students.metadata->>'mutasi_type' = 'keluar' THEN 'mutasi_keluar'
+                            WHEN students.metadata->>'mutasi_type' = 'berhenti' THEN 'nonaktif'
+                            WHEN students.metadata->>'mutasi_type' = 'antar_unit' THEN 'mutasi'
+                            WHEN students.metadata->>'status' IS NOT NULL THEN students.metadata->>'status'
+                            WHEN students.is_active = true THEN 'aktif'
+                            ELSE 'nonaktif'
+                        END as status
+                    "),
+                    \Illuminate\Support\Facades\DB::raw("
+                        CASE 
+                            WHEN students.metadata->>'is_alumni' = 'true' OR LOWER(COALESCE(students.metadata->>'status_siswa', '')) IN ('alumni', 'lulus') OR LOWER(COALESCE(students.metadata->>'status_alumni', '')) IN ('alumni', 'lulus', 'tamat') THEN true
+                            ELSE false
+                        END as is_alumni
+                    "),
+                    \Illuminate\Support\Facades\DB::raw("students.metadata->>'mutasi_type' as mutasi_type"),
                 ])
                 ->orderBy('students.full_name')
                 ->get()
@@ -351,18 +372,44 @@ class StudentController extends Controller
         return $unitId;
     }
 
-    private function authorizedKelasId(?string $kelasId, ?string $unitId): ?string
+    private function authorizedKelasId(?string $kelasId, ?string $unitId, ?string $currentStudentId = null): ?string
     {
         if (! $kelasId) {
             return null;
         }
 
         abort_unless($unitId, 422, 'Unit pendidikan wajib ditetapkan sebelum memilih kelas.');
+
+        $kelas = Kelas::query()
+            ->whereKey($kelasId)
+            ->where('unit_pendidikan_id', $unitId)
+            ->withCount(['siswa' => function ($q) {
+                $q->where('is_active', true);
+            }])
+            ->first();
+
         abort_unless(
-            Kelas::query()->whereKey($kelasId)->where('unit_pendidikan_id', $unitId)->exists(),
+            $kelas,
             403,
             'Kelas tidak sesuai dengan unit pendidikan siswa.'
         );
+
+        if ($kelas->kapasitas && (int) $kelas->kapasitas > 0) {
+            $isAlreadyInThisClass = false;
+            if ($currentStudentId) {
+                $isAlreadyInThisClass = Student::query()
+                    ->whereKey($currentStudentId)
+                    ->where('kelas_id', $kelasId)
+                    ->exists();
+            }
+
+            if (! $isAlreadyInThisClass && $kelas->siswa_count >= (int) $kelas->kapasitas) {
+                abort(
+                    422,
+                    "Kuota kelas '{$kelas->nama_kelas}' sudah penuh ({$kelas->siswa_count}/{$kelas->kapasitas} siswa). Silakan pilih rombel lain."
+                );
+            }
+        }
 
         return $kelasId;
     }

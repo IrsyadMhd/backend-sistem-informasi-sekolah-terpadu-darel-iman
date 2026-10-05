@@ -43,17 +43,27 @@ class KelasController extends Controller
             'dengan_sampah' => $request->query('dengan_sampah'),
         ];
 
-        if ($filters['unit_pendidikan_id'] && $filters['unit_pendidikan_id'] !== 'all') {
-            if (! $this->accessScopeService->hasGlobalScope($request->user())) {
-                $allowedUnitIds = $this->accessScopeService
-                    ->accessibleEducationUnits($request->user())
-                    ->pluck('id')
-                    ->all();
+        $emp = \App\Models\Employee::where('user_id', $request->user()->id)->first();
+        $userUnitId = $emp?->unit_id 
+            ?? data_get($request->user()->metadata, 'education_unit_id') 
+            ?? data_get($request->user()->metadata, 'unit_id');
+
+        if (! $this->accessScopeService->hasGlobalScope($request->user())) {
+            $allowedUnitIds = $this->accessScopeService
+                ->accessibleEducationUnits($request->user())
+                ->pluck('id')
+                ->all();
+
+            if (! empty($filters['unit_pendidikan_id']) && $filters['unit_pendidikan_id'] !== 'all') {
                 abort_unless(
                     in_array($filters['unit_pendidikan_id'], $allowedUnitIds, true),
                     403,
                     'Unit pendidikan tidak berada dalam cakupan akun.'
                 );
+            } elseif ($userUnitId) {
+                $filters['unit_pendidikan_id'] = $userUnitId;
+            } elseif (! empty($allowedUnitIds)) {
+                $filters['allowed_unit_ids'] = $allowedUnitIds;
             }
         }
 

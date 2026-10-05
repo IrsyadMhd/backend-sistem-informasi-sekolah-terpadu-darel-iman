@@ -134,7 +134,14 @@ class AttendanceCaptureController extends Controller
 
     public function studentToken(Request $request, Student $student): JsonResponse
     {
-        abort_unless($request->user()?->hasAnyRole(['Super Admin', 'Admin TU']) || $request->user()?->hasPermissionTo('attendance_device.manage'), 403);
+        abort_unless(
+            $request->user()?->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Admin TU', 'Tata Usaha', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah', 'Waka Kesiswaan', 'Guru'])
+                || $request->user()?->hasPermissionTo('attendance_device.manage')
+                || $request->user()?->hasPermissionTo('kesiswaan.kartu_pelajar')
+                || $request->user()?->hasPermissionTo('kesiswaan.siswa')
+                || $request->user()?->hasPermissionTo('kehadiran.siswa.absensi_digital'),
+            403
+        );
 
         return response()->json(['success' => true, 'data' => ['student_id' => $student->id, 'qr_token' => $this->capture->studentQrToken($student)]]);
     }
