@@ -339,6 +339,9 @@ class KepalaSekolahDashboardService
                     : ($announcement->target_peran ?: 'Semua Unit'),
                 'prioritas' => $announcement->prioritas,
                 'created_at' => $announcement->created_at,
+                'gambar_url' => data_get($announcement->data_tambahan, 'gambar_url') ?? data_get($announcement->data_tambahan, 'image_url') ?? null,
+                'kategori' => data_get($announcement->data_tambahan, 'kategori') ?? 'Informasi',
+                'ringkasan' => data_get($announcement->data_tambahan, 'ringkasan') ?? null,
             ]);
 
         // 4. Rekapitulasi Prestasi Siswa (Data Riil dari Database)
@@ -716,13 +719,18 @@ class KepalaSekolahDashboardService
         }
 
         // 7. Data Profil Pengurus Yayasan (Ketua, Sekretaris, Bendahara)
+        $activeYearLabel = $activeAcademicYear ? ($activeAcademicYear->name ?? $activeAcademicYear->year_name ?? $activeAcademicYear->nama) : null;
+        $currentCalYear = (int) date('Y');
+        $startPeriodYear = $currentCalYear - ($currentCalYear % 5);
+        $periodeYayasan = $activeYearLabel ? 'Periode ' . $activeYearLabel : "{$startPeriodYear} - " . ($startPeriodYear + 5);
+
         $officeDefinitions = [
             [
                 'id' => 'pengurus-1',
                 'jabatan' => 'Ketua Yayasan',
                 'code' => 'JBT-001',
                 'roles' => ['Ketua Yayasan', 'ketua_yayasan', 'Yayasan'],
-                'periode' => '2021 - 2026',
+                'periode' => $periodeYayasan,
                 'gender' => 'male',
                 'badge_variant' => 'emerald',
                 'role_code' => 'KETUA',
@@ -732,7 +740,7 @@ class KepalaSekolahDashboardService
                 'jabatan' => 'Sekretaris Yayasan',
                 'code' => 'JBT-002',
                 'roles' => ['Sekretaris Yayasan', 'sekretaris_yayasan'],
-                'periode' => '2021 - 2026',
+                'periode' => $periodeYayasan,
                 'gender' => 'male',
                 'badge_variant' => 'blue',
                 'role_code' => 'SEKRETARIS',
@@ -742,7 +750,7 @@ class KepalaSekolahDashboardService
                 'jabatan' => 'Bendahara Yayasan',
                 'code' => 'JBT-015',
                 'roles' => ['Bendahara Yayasan', 'bendahara_yayasan'],
-                'periode' => '2021 - 2026',
+                'periode' => $periodeYayasan,
                 'gender' => 'male',
                 'badge_variant' => 'purple',
                 'role_code' => 'BENDAHARA',
@@ -847,6 +855,116 @@ class KepalaSekolahDashboardService
             ];
         }
 
+        // 8. Data Tabel Detail Riil untuk Drilldown KPI Kepala Sekolah
+        $tableSiswa = [];
+        if (Schema::hasTable('students')) {
+            $tableSiswa = (clone $studentQuery)
+                ->where(function ($q) {
+                    $q->where('is_active', true)->orWhereNull('is_active');
+                })
+                ->where(function ($q) {
+                    $q->whereNull('metadata->mutasi_type')
+                      ->orWhere('metadata->mutasi_type', '!=', 'keluar');
+                })
+                ->with(['kelas'])
+                ->orderBy('full_name')
+                ->limit(100)
+                ->get()
+                ->map(function ($st) {
+                    $name = $st->full_name ?? $st->name ?? 'Siswa';
+                    $nisn = $st->nisn ? 'NISN. ' . $st->nisn : ($st->nis ? 'NIS. ' . $st->nis : 'NISN/NIS: -');
+                    $kelas = $st->kelas?->nama_kelas ? 'Kelas ' . $st->kelas->nama_kelas : 'Belum Ada Kelas';
+                    return [
+                        'id' => (string) $st->id,
+                        'name' => $name,
+                        'id_num' => $nisn,
+                        'extra' => $kelas,
+                        'status' => $st->status ?? 'Aktif',
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $tableGuru = [];
+        if (Schema::hasTable('employees')) {
+            $tableGuru = (clone $employeeQuery)
+                ->where(function ($q) use ($like) {
+                    $q->whereHas('teacher')
+                      ->orWhereHas('teachings')
+                      ->orWhere('status_pegawai', $like, '%Guru%')
+                      ->orWhereHas('position', function ($p) use ($like) {
+                          $p->where('name', $like, '%Guru%')
+                            ->orWhere('name', $like, '%Pendidik%');
+                      });
+                })
+                ->with(['position'])
+                ->orderBy('nama_lengkap')
+                ->limit(100)
+                ->get()
+                ->map(function ($emp) {
+                    $name = $emp->nama_lengkap ?? $emp->name ?? 'Guru';
+                    $nip = $emp->nuptk ? 'NUPTK. ' . $emp->nuptk : ($emp->niy ? 'NIY. ' . $emp->niy : ($emp->nik ? 'NIK. ' . $emp->nik : 'ID: -'));
+                    $pos = $emp->position?->name ?? $emp->status_pegawai ?? 'Tenaga Pendidik';
+                    return [
+                        'id' => (string) $emp->id,
+                        'name' => $name,
+                        'id_num' => $nip,
+                        'extra' => $pos,
+                        'status' => $emp->status ?? 'Aktif',
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $tablePegawai = [];
+        if (Schema::hasTable('employees')) {
+            $tablePegawai = (clone $employeeQuery)
+                ->with(['position'])
+                ->orderBy('nama_lengkap')
+                ->limit(100)
+                ->get()
+                ->map(function ($emp) {
+                    $name = $emp->nama_lengkap ?? $emp->name ?? 'Pegawai';
+                    $nik = $emp->nik ? 'NIK. ' . $emp->nik : ($emp->niy ? 'NIY. ' . $emp->niy : ($emp->nuptk ? 'NUPTK. ' . $emp->nuptk : 'ID: -'));
+                    $pos = $emp->position?->name ?? $emp->status_pegawai ?? 'Staf / Tenaga Kependidikan';
+                    return [
+                        'id' => (string) $emp->id,
+                        'name' => $name,
+                        'id_num' => $nik,
+                        'extra' => $pos,
+                        'status' => $emp->status ?? 'Aktif',
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $tableKelas = [];
+        if (Schema::hasTable('tbl_kelas')) {
+            $tableKelas = (clone $classQuery)
+                ->with(['waliKelas'])
+                ->withCount(['siswa'])
+                ->orderBy('nama_kelas')
+                ->limit(100)
+                ->get()
+                ->map(function ($k) {
+                    $wali = $k->waliKelas?->nama_lengkap ?? $k->waliKelas?->name ?? 'Belum Ditentukan';
+                    $kapasitas = $k->kapasitas ? "Kapasitas: {$k->kapasitas} Siswa" : 'Kapasitas: -';
+                    $siswaCount = $k->siswa_count ?? 0;
+                    return [
+                        'id' => (string) $k->id,
+                        'name' => $k->nama_kelas ?? 'Kelas',
+                        'id_num' => $kapasitas,
+                        'extra' => 'Wali Kelas: ' . $wali,
+                        'status' => $siswaCount > 0 ? "{$siswaCount} Terisi" : 'Aktif',
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
         return [
             'context' => [
                 'role' => 'Kepala Sekolah',
@@ -898,7 +1016,15 @@ class KepalaSekolahDashboardService
             'tables' => [
                 'announcements' => $recentAnnouncements,
                 'rekap_prestasi' => $rekapPrestasi,
+                'total_siswa' => $tableSiswa,
+                'total_guru' => $tableGuru,
+                'total_pegawai' => $tablePegawai,
+                'total_kelas' => $tableKelas,
             ],
+            'students_list' => $tableSiswa,
+            'teachers_list' => $tableGuru,
+            'staff_list' => $tablePegawai,
+            'rombel_list' => $tableKelas,
             'alerts' => [],
         ];
     }

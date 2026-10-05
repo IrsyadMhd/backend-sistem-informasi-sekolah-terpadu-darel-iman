@@ -102,14 +102,23 @@ class LmsPenugasanService
         return $this->penugasanRepository->submitOrGrade($penugasanId, $data);
     }
 
-    public function dapatkanStatistik(): array
+    public function dapatkanStatistik(array $filters = []): array
     {
-        return $this->penugasanRepository->getStats();
+        return $this->penugasanRepository->getStats($filters);
     }
 
-    public function dapatkanOpsi(): array
+    public function dapatkanOpsi(?\App\Models\User $user = null): array
     {
-        $modulOptions = LmsModulAjar::get()
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        $hasGlobal = $user ? $accessScope->hasGlobalScope($user) : false;
+        $unitIds = ($user && ! $hasGlobal) ? $accessScope->accessibleEducationUnits($user)->pluck('id')->all() : [];
+        $rombelIds = ($user && ! $hasGlobal) ? $accessScope->accessibleRombels($user)->pluck('id')->all() : [];
+
+        $modulQuery = LmsModulAjar::query();
+        if (! empty($unitIds)) {
+            $modulQuery->whereIn('unit_pendidikan_id', $unitIds);
+        }
+        $modulOptions = $modulQuery->get()
             ->map(fn ($item) => [
                 'value' => $item->id,
                 'label' => $item->kode_modul ? "[{$item->kode_modul}] ".($item->judul_modul ?? $item->judul ?? 'Modul Ajar') : ($item->judul_modul ?? $item->judul ?? 'Modul Ajar'),
@@ -119,7 +128,13 @@ class LmsPenugasanService
             ->values()
             ->toArray();
 
-        $kelasOptions = Kelas::get()
+        $kelasQuery = Kelas::query();
+        if (! empty($rombelIds)) {
+            $kelasQuery->whereIn('id', $rombelIds);
+        } elseif (! empty($unitIds)) {
+            $kelasQuery->whereIn('unit_pendidikan_id', $unitIds);
+        }
+        $kelasOptions = $kelasQuery->get()
             ->map(fn ($item) => [
                 'value' => $item->id,
                 'label' => $item->nama_kelas ?? $item->name ?? 'Kelas',
@@ -129,7 +144,11 @@ class LmsPenugasanService
             ->toArray();
 
         if (empty($kelasOptions) && class_exists(ClassRoom::class)) {
-            $kelasOptions = ClassRoom::get()
+            $classRoomQuery = ClassRoom::query();
+            if (! empty($unitIds)) {
+                $classRoomQuery->whereIn('unit_pendidikan_id', $unitIds);
+            }
+            $kelasOptions = $classRoomQuery->get()
                 ->map(fn ($item) => [
                     'value' => $item->id,
                     'label' => $item->name ?? $item->code ?? 'Kelas',
@@ -139,7 +158,11 @@ class LmsPenugasanService
                 ->toArray();
         }
 
-        $guruOptions = Employee::get()
+        $guruQuery = Employee::query();
+        if (! empty($unitIds)) {
+            $guruQuery->whereIn('unit_id', $unitIds);
+        }
+        $guruOptions = $guruQuery->get()
             ->map(fn ($item) => [
                 'value' => $item->id,
                 'label' => $item->nama_lengkap ?? $item->nama_panggilan ?? $item->name ?? 'Guru',
@@ -161,7 +184,11 @@ class LmsPenugasanService
                 ->toArray();
         }
 
-        $subjectOptions = Subject::get()
+        $subjectQuery = Subject::query();
+        if (! empty($unitIds)) {
+            $subjectQuery->whereIn('unit_pendidikan_id', $unitIds);
+        }
+        $subjectOptions = $subjectQuery->get()
             ->map(fn ($item) => [
                 'value' => $item->id,
                 'label' => $item->nama_mapel ?? $item->name ?? 'Mata Pelajaran',

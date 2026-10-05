@@ -165,16 +165,16 @@ class LmsKisiKisiService
     public function opsi(?string $mataPelajaranId = null, ?string $cpId = null, ?string $unitId = null): array
     {
         $user = Auth::user();
-        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan', 'wakakurikulum', 'kurikulum'];
-        $isAdmin = false;
-        if ($user) {
-            $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
-            $isAdmin = $userRoles->intersect($adminRoles)->isNotEmpty();
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        $hasGlobal = $user ? $accessScope->hasGlobalScope($user) : false;
+
+        if ($user && ! $hasGlobal && empty($unitId)) {
+            $unitId = $accessScope->accessibleEducationUnits($user)->value('id');
         }
 
         $employee = $user ? Employee::where('user_id', $user->id)->first() : null;
         $teacher = $user ? (Teacher::where('user_id', $user->id)->first() ?? ($employee ? Teacher::where('employee_id', $employee->id)->first() : null)) : null;
-        $isTeacherScope = ($user && ! $isAdmin && ($employee || $teacher));
+        $isTeacherScope = ($user && ! $hasGlobal && ($employee || $teacher) && ! $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'tu', 'Waka Kurikulum', 'waka_kurikulum']));
 
         $subjectQuery = Subject::where(function ($q) {
             $q->where('status', true)->orWhereNull('status');

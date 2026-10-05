@@ -115,9 +115,12 @@ class LmsPenilaianService
         if ($user && ! $accessScope->hasGlobalScope($user)) {
             $kelas = $accessScope->accessibleRombels($user)->orderBy('nama_kelas', 'asc')->get(['id', 'nama_kelas']);
             $allowedMapelIds = $accessScope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique();
+            $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
             $subjectsQuery = Subject::orderBy('name', 'asc');
             if ($allowedMapelIds->isNotEmpty()) {
                 $subjectsQuery->whereIn('id', $allowedMapelIds);
+            } elseif (! empty($unitIds)) {
+                $subjectsQuery->whereIn('unit_pendidikan_id', $unitIds);
             }
             $subjects = $subjectsQuery->get(['id', 'code', 'name']);
         } else {

@@ -127,15 +127,21 @@ class LmsMateriService
         return $this->materiRepository->restore($id);
     }
 
-    public function statistik(): array
+    public function statistik(array $filters = []): array
     {
-        return $this->materiRepository->getStats();
+        return $this->materiRepository->getStats($filters);
     }
 
-    public function opsi(?\App\Models\User $user = null, ?string $search = null, ?int $limit = null, ?string $includeId = null): array
+    public function opsi(?\App\Models\User $user = null, ?string $search = null, ?int $limit = null, ?string $includeId = null, ?string $unitId = null, array $unitIds = []): array
     {
         $query = LmsModulAjar::with('subject')
-            ->select('id', 'kode_modul', 'judul_modul', 'mata_pelajaran_id', 'fase', 'guru_id');
+            ->select('id', 'kode_modul', 'judul_modul', 'mata_pelajaran_id', 'fase', 'guru_id', 'unit_pendidikan_id');
+
+        if (! empty($unitId)) {
+            $query->where('unit_pendidikan_id', $unitId);
+        } elseif (! empty($unitIds)) {
+            $query->whereIn('unit_pendidikan_id', $unitIds);
+        }
 
         $isGlobalOrLeadership = $user && (
             $user->hasAnyRole([

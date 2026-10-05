@@ -260,6 +260,26 @@ class JabatanService
     }
 
     /**
+     * Hapus banyak data jabatan (Bulk Soft Delete).
+     */
+    public function hapusBanyak(array $ids): array
+    {
+        $berhasil = 0;
+        $gagal = 0;
+
+        foreach ($ids as $id) {
+            $jabatan = Position::find($id);
+            if ($jabatan && $jabatan->delete()) {
+                $berhasil++;
+            } else {
+                $gagal++;
+            }
+        }
+
+        return compact('berhasil', 'gagal');
+    }
+
+    /**
      * Pulihkan data jabatan terhapus.
      */
     public function pulihkan(string $id): bool
@@ -273,7 +293,7 @@ class JabatanService
     }
 
     /**
-     * Impor kumpulan data jabatan.
+     * Impor kumpulan data jabatan dengan dukungan format ekspor (round-trip).
      */
     public function prosesImport(array $rows, ?string $userId = null): array
     {
@@ -281,30 +301,149 @@ class JabatanService
         $gagal = 0;
         $errors = [];
 
+        // Preload maps untuk lookup cepat
+        $unitCache = EducationUnit::all();
+        $roleCache = Role::all();
+        $employeeCache = Employee::select('id', 'nama_lengkap')->get();
+
+        $parseBoolean = function ($val, $default = true) {
+            if (is_null($val) || $val === '' || $val === '-') {
+                return $default;
+            }
+            if (is_bool($val)) {
+                return $val;
+            }
+            if (is_numeric($val)) {
+                return (int) $val === 1;
+            }
+            $s = strtolower(trim((string) $val));
+            if (in_array($s, ['ya', 'y', 'true', '1', 'aktif', 'active', 'yes'], true)) {
+                return true;
+            }
+            if (in_array($s, ['tidak', 't', 'false', '0', 'nonaktif', 'inactive', 'no'], true)) {
+                return false;
+            }
+
+            return $default;
+        };
+
         foreach ($rows as $index => $row) {
             try {
-                if (empty($row['nama_jabatan'])) {
+                $nama = trim((string) ($row['nama_jabatan'] ?? $row['nama'] ?? $row['name'] ?? ''));
+                if (empty($nama)) {
                     $gagal++;
                     $errors[] = 'Baris '.($index + 1).': Nama jabatan kosong.';
 
                     continue;
                 }
 
-                $this->simpan([
-                    'kode_jabatan' => $row['kode_jabatan'] ?? null,
-                    'nama_jabatan' => $row['nama_jabatan'],
-                    'satuan_kerja' => $row['satuan_kerja'] ?? 'Unit Pendidikan',
-                    'scope_akses' => $row['scope_akses'] ?? 'unit_sendiri',
-                    'level_jabatan' => $row['level_jabatan'] ?? 8,
-                    'unit_sekolah_id' => $row['unit_sekolah_id'] ?? null,
-                    'urutan' => $row['urutan'] ?? 0,
-                    'warna' => $row['warna'] ?? '#3B82F6',
-                    'ikon' => $row['ikon'] ?? 'UserCheck',
-                    'deskripsi' => $row['deskripsi'] ?? null,
-                    'status' => $row['status'] ?? 'Aktif',
-                    'tampil_struktur' => isset($row['tampil_struktur']) ? (bool) $row['tampil_struktur'] : true,
-                    'boleh_login' => isset($row['boleh_login']) ? (bool) $row['boleh_login'] : false,
-                ], $userId);
+                $kode = trim((string) ($row['kode_jabatan'] ?? $row['kode'] ?? $row['code'] ?? ''));
+                $kode = $kode !== '' && $kode !== '-' ? strtoupper($kode) : null;
+
+                // Satuan Kerja
+                $satuanKerja = trim((string) ($row['satuan_kerja'] ?? 'Unit Pendidikan'));
+                if (empty($satuanKerja) || $satuanKerja === '-') {
+                    $satuanKerja = 'Unit Pendidikan';
+                }
+
+                // Scope Akses
+                $scopeAkses = trim((string) ($row['scope_akses'] ?? 'unit_sendiri'));
+                if (empty($scopeAkses) || $scopeAkses === '-' || ! array_key_exists($scopeAkses, Position::SCOPE_AKSES_OPTIONS)) {
+                    $scopeAkses = 'unit_sendiri';
+                }
+
+                // Level Jabatan
+                $level = $row['level_jabatan'] ?? $row['level'] ?? 8;
+                if (is_string($level) && preg_match('/(\d+)/', $level, $m)) {
+                    $level = (int) $m[1];
+                }
+                $level = (int) $level;
+                if ($level < 1 || $level > 10) {
+                    $level = 8;
+                }
+
+                // Resolusi Unit Sekolah ID
+                $unitSekolahId = $row['unit_sekolah_id'] ?? $row['unit_id'] ?? null;
+                if (empty($unitSekolahId) && ! empty($row['unit_sekolah']) && $row['unit_sekolah'] !== '-') {
+                    $unitText = strtolower(trim((string) $row['unit_sekolah']));
+                    $foundUnit = $unitCache->first(function ($u) use ($unitText) {
+                        return strtolower($u->name) === $unitText || strtolower($u->code ?? '') === $unitText;
+                    });
+                    if ($foundUnit) {
+                        $unitSekolahId = $foundUnit->id;
+                    }
+                }
+
+                // Resolusi Role Sistem ID
+                $roleSistemId = $row['role_sistem_id'] ?? null;
+                if (empty($roleSistemId) && ! empty($row['role_sistem']) && $row['role_sistem'] !== '-') {
+                    $roleText = strtolower(trim((string) $row['role_sistem']));
+                    $foundRole = $roleCache->first(function ($r) use ($roleText) {
+                        return strtolower($r->name) === $roleText;
+                    });
+                    if ($foundRole) {
+                        $roleSistemId = $foundRole->id;
+                    }
+                }
+
+                // Resolusi Atasan Pegawai
+                $atasanPegawaiId = $row['atasan_pegawai_id'] ?? null;
+                if (empty($atasanPegawaiId) && ! empty($row['atasan_langsung']) && $row['atasan_langsung'] !== '-') {
+                    $atasanText = strtolower(trim((string) $row['atasan_langsung']));
+                    $foundEmp = $employeeCache->first(function ($e) use ($atasanText) {
+                        return strtolower($e->nama_lengkap) === $atasanText;
+                    });
+                    if ($foundEmp) {
+                        $atasanPegawaiId = $foundEmp->id;
+                    }
+                }
+
+                $deskripsi = $row['deskripsi'] ?? $row['description'] ?? null;
+                if ($deskripsi === '-') {
+                    $deskripsi = null;
+                }
+
+                $statusVal = $row['status'] ?? 'Aktif';
+                $isActive = $parseBoolean($statusVal, true);
+                $status = $isActive ? 'Aktif' : 'Nonaktif';
+
+                $tampilStruktur = $parseBoolean($row['tampil_struktur'] ?? null, true);
+                $bolehLogin = $parseBoolean($row['boleh_login'] ?? null, false);
+
+                $payload = [
+                    'kode_jabatan' => $kode,
+                    'nama_jabatan' => $nama,
+                    'satuan_kerja' => $satuanKerja,
+                    'scope_akses' => $scopeAkses,
+                    'level_jabatan' => $level,
+                    'unit_sekolah_id' => $unitSekolahId,
+                    'role_sistem_id' => $roleSistemId,
+                    'atasan_pegawai_id' => $atasanPegawaiId,
+                    'atasan_langsung_id' => $row['atasan_langsung_id'] ?? null,
+                    'urutan' => isset($row['urutan']) && is_numeric($row['urutan']) ? (int) $row['urutan'] : 0,
+                    'warna' => ! empty($row['warna']) && $row['warna'] !== '-' ? $row['warna'] : '#3B82F6',
+                    'ikon' => ! empty($row['ikon']) && $row['ikon'] !== '-' ? $row['ikon'] : 'UserCheck',
+                    'deskripsi' => $deskripsi,
+                    'status' => $status,
+                    'is_active' => $isActive,
+                    'tampil_struktur' => $tampilStruktur,
+                    'boleh_login' => $bolehLogin,
+                ];
+
+                // Upsert: jika kode_jabatan sudah ada di DB, perbarui record lama
+                $existing = null;
+                if ($kode) {
+                    $existing = Position::withTrashed()->where('code', $kode)->first();
+                }
+
+                if ($existing) {
+                    if ($existing->trashed()) {
+                        $existing->restore();
+                    }
+                    $this->ubah($existing->id, $payload, $userId);
+                } else {
+                    $this->simpan($payload, $userId);
+                }
 
                 $berhasil++;
             } catch (\Exception $e) {

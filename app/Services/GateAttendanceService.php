@@ -232,11 +232,38 @@ class GateAttendanceService
 
     public function resolveStudent(array $data): ?Student
     {
-        if (! empty($data['student_id'])) {
-            return Student::active()->find($data['student_id']);
+        // 1. Resolve via valid student_id (ignore dummy/client pseudo-ids starting with scan-)
+        if (! empty($data['student_id']) && ! str_starts_with((string) $data['student_id'], 'scan-')) {
+            $student = Student::active()->find($data['student_id']);
+            if ($student) {
+                return $student;
+            }
         }
+
+        // 2. Resolve via qr_token (supports all web-dashboard, ID card print, & portal QR formats)
         if (! empty($data['qr_token'])) {
             $qrToken = trim($data['qr_token']);
+
+            // 2a. JSON-encoded QR Token: {"student_id": "...", "nis": "..."}
+            if (str_starts_with($qrToken, '{') && str_ends_with($qrToken, '}')) {
+                try {
+                    $json = json_decode($qrToken, true, flags: JSON_THROW_ON_ERROR);
+                    if (! empty($json['student_id']) && ($st = Student::active()->find($json['student_id']))) {
+                        return $st;
+                    }
+                    if (! empty($json['id']) && ($st = Student::active()->find($json['id']))) {
+                        return $st;
+                    }
+                    if (! empty($json['nis']) && ($st = Student::active()->where('nis', $json['nis'])->first())) {
+                        return $st;
+                    }
+                    if (! empty($json['nisn']) && ($st = Student::active()->where('nisn', $json['nisn'])->first())) {
+                        return $st;
+                    }
+                } catch (\Throwable) {}
+            }
+
+            // 2b. Formatted ID card QR: "STUDENT_CARD:{NIS_or_ID}:{NAME}"
             if (str_starts_with($qrToken, 'STUDENT_CARD:')) {
                 $parts = explode(':', $qrToken, 3);
                 $cardId = trim($parts[1] ?? '');
@@ -267,14 +294,42 @@ class GateAttendanceService
                     }
                 }
             }
-            return $this->studentQr->resolve($qrToken);
+
+            // 2c. Official cryptographic token: stuqr:v1:...
+            if (str_starts_with($qrToken, 'stuqr:v1:')) {
+                $student = $this->studentQr->resolve($qrToken);
+                if ($student) {
+                    return $student;
+                }
+            }
+
+            // 2d. Fallback raw identifier matching (NIS, NISN, ID, or custom card/QR metadata)
+            $found = Student::active()
+                ->where(function ($query) use ($qrToken) {
+                    $query->where('nis', $qrToken)
+                        ->orWhere('nisn', $qrToken)
+                        ->orWhere('id', $qrToken)
+                        ->orWhere('metadata->card_number', $qrToken)
+                        ->orWhere('metadata->qr_code', $qrToken);
+                })
+                ->first();
+
+            if ($found) {
+                return $found;
+            }
         }
+
+        // 3. Resolve via direct NISN
         if (! empty($data['nisn'])) {
             return Student::active()->where('nisn', $data['nisn'])->first();
         }
-        if (! empty($data['nis'])) {
+
+        // 4. Resolve via direct NIS
+        if (! empty($data['nis']) && ! str_starts_with((string) $data['nis'], 'scan-') && ! str_starts_with((string) $data['nis'], 'stuqr:')) {
             return Student::active()->where('nis', $data['nis'])->first();
         }
+
+        // 5. Resolve via card_number
         if (! empty($data['card_number'])) {
             $cardNum = trim($data['card_number']);
             if ($student = $this->studentQr->resolve($cardNum)) {
@@ -353,7 +408,7 @@ class GateAttendanceService
     private function attendancePayload(Attendance $attendance): array
     {
         $payload = $attendance->toArray();
-        $student = $attendance->relationLoaded('student') ? $attendance->student : $attendance->student()->first();
+        $student = $attendance->relationLoaded('student') ? $attendance->student : $attendance->student()->with('kelas')->first();
 
         $payload['student'] = $student ? [
             'id' => $student->id,
@@ -363,6 +418,12 @@ class GateAttendanceService
             'nisn' => $student->nisn,
             'class_id' => $student->class_id,
             'kelas_id' => $student->kelas_id,
+            'kelas' => $student->kelas ? [
+                'id' => $student->kelas->id,
+                'nama_kelas' => $student->kelas->nama_kelas,
+            ] : null,
+            'kelas_name' => $student->kelas?->nama_kelas ?? $student->kelas_name ?? null,
+            'avatar' => $student->avatar ?? $student->photo_url ?? null,
         ] : null;
 
         if ($attendance->relationLoaded('educationUnit') && $attendance->educationUnit) {

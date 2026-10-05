@@ -27,6 +27,26 @@ class AccessScopeService
         'Bendahara Yayasan', 'bendahara_yayasan',
     ];
 
+    /**
+     * Role yang memiliki akses di atas Tata Usaha:
+     * boleh melihat rekap kehadiran SELURUH pegawai unit.
+     * TU dan di bawahnya hanya boleh melihat kehadiran milik diri sendiri.
+     */
+    public const ABOVE_TU_ROLES = [
+        'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
+        'Admin', 'admin',
+        'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+        'pengurus_yayasan', 'Pengurus Yayasan',
+        'Sekretaris Yayasan', 'sekretaris_yayasan',
+        'Bendahara Yayasan', 'bendahara_yayasan',
+        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
+        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
+        'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+        'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
+        'Wakil Kepala Sekolah', 'Waka Kurikulum', 'Wakil Kurikulum', 'waka_kurikulum',
+        'Waka Kesiswaan', 'Wakil Kesiswaan', 'waka_kesiswaan',
+    ];
+
     private const GLOBAL_ACCESS_MANAGER_ROLES = [
         'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
         'Admin', 'admin',
@@ -74,6 +94,15 @@ class AccessScopeService
     public function hasGlobalScope(User $user): bool
     {
         return $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES);
+    }
+
+    /**
+     * Apakah user memiliki role di atas Tata Usaha?
+     * Digunakan sebagai security guard untuk endpoint presensi pegawai.
+     */
+    public function isAboveTu(User $user): bool
+    {
+        return $this->hasAnyRole($user, self::ABOVE_TU_ROLES);
     }
 
     /**

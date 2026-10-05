@@ -291,16 +291,12 @@ class LmsUjianService
     public function opsi(): array
     {
         $user = Auth::user();
-        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan', 'wakakurikulum', 'kurikulum'];
-        $isAdmin = false;
-        if ($user) {
-            $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
-            $isAdmin = $userRoles->intersect($adminRoles)->isNotEmpty();
-        }
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        $hasGlobal = $user ? $accessScope->hasGlobalScope($user) : false;
 
         $employee = $user ? Employee::where('user_id', $user->id)->first() : null;
         $teacher = $user ? (Teacher::where('user_id', $user->id)->first() ?? ($employee ? Teacher::where('employee_id', $employee->id)->first() : null)) : null;
-        $isTeacherScope = ($user && ! $isAdmin && ($employee || $teacher));
+        $isTeacherScope = ($user && ! $hasGlobal && ($employee || $teacher) && ! $user->hasAnyRole(['Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'tu', 'Waka Kurikulum', 'waka_kurikulum']));
 
         $kisiKisiQuery = LmsKisiKisi::with(['subject:id,name', 'kelas:id,nama_kelas'])
             ->where(function ($q) {
@@ -367,6 +363,28 @@ class LmsUjianService
                 if ($employee?->unit_id) {
                     $q->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $employee->unit_id))
                       ->orWhereHas('subject', fn ($sq) => $sq->where('unit_pendidikan_id', $employee->unit_id));
+                }
+            });
+        } elseif ($user && ! $hasGlobal) {
+            $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $rombelIds = $accessScope->accessibleRombels($user)->pluck('id')->all();
+
+            $kelasQuery->where(function ($q) use ($unitIds, $rombelIds) {
+                if (! empty($unitIds)) {
+                    $q->whereIn('unit_pendidikan_id', $unitIds);
+                }
+                if (! empty($rombelIds)) {
+                    $q->orWhereIn('id', $rombelIds);
+                }
+            });
+
+            $kisiKisiQuery->where(function ($q) use ($unitIds, $rombelIds) {
+                if (! empty($unitIds)) {
+                    $q->whereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $unitIds))
+                      ->orWhereHas('subject', fn ($sq) => $sq->whereIn('unit_pendidikan_id', $unitIds));
+                }
+                if (! empty($rombelIds)) {
+                    $q->orWhereIn('kelas_id', $rombelIds);
                 }
             });
         }

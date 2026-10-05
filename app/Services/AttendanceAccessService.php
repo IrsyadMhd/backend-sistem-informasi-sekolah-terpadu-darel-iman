@@ -76,6 +76,12 @@ class AttendanceAccessService
 
     public function teacherSchedules(User $user): Builder
     {
+        if ($user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Tata Usaha', 'TU', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan'])) {
+            $unitId = $user->unit_id ?? $user->education_unit_id ?? $user->employee?->unit_id;
+
+            return ClassSchedule::query()->when($unitId, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $unitId)));
+        }
+
         $employee = $this->employee($user);
 
         return ClassSchedule::query()->where(function (Builder $query) use ($employee, $user) {
@@ -171,6 +177,9 @@ class AttendanceAccessService
     public function assertCanTakeActiveSchedule(User $user, string $scheduleId, Carbon $at): ClassSchedule
     {
         $schedule = $this->activeSchedules($user, $at)->firstWhere('id', $scheduleId);
+        if (! $schedule && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Tata Usaha', 'TU', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan'])) {
+            $schedule = ClassSchedule::with(['subject', 'kelas', 'schoolClass', 'employee', 'teacher'])->find($scheduleId);
+        }
         if (! $schedule) {
             throw ValidationException::withMessages([
                 'schedule_id' => 'Jadwal tidak aktif saat ini atau tidak dapat diakses oleh akun Anda.',
@@ -182,7 +191,7 @@ class AttendanceAccessService
 
     public function assertTeacherOwnsSchedule(User $user, string $scheduleId): ClassSchedule
     {
-        if ($user->hasAnyRole(['Super Admin', 'Admin TU', 'Kepala Sekolah', 'kepala_sekolah', 'KepalaSekolah'])) {
+        if ($user->hasAnyRole(['Super Admin', 'super_admin', 'Admin TU', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'KepalaSekolah', 'Divisi Pendidikan', 'divisi_pendidikan'])) {
             $schedule = ClassSchedule::find($scheduleId);
         } else {
             $schedule = $this->teacherSchedules($user)->find($scheduleId);
