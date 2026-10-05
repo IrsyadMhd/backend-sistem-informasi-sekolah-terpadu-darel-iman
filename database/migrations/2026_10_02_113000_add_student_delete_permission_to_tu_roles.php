@@ -2,7 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+
 use Spatie\Permission\PermissionRegistrar;
 
 return new class extends Migration
@@ -14,9 +14,7 @@ return new class extends Migration
     {
         $perm = DB::table('permissions')->where('name', 'student.delete')->first();
         if (! $perm) {
-            $permId = (string) Str::uuid();
             DB::table('permissions')->insert([
-                'id' => $permId,
                 'name' => 'student.delete',
                 'guard_name' => 'web',
                 'created_at' => now(),
