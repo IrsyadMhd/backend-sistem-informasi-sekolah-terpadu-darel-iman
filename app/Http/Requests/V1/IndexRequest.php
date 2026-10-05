@@ -16,7 +16,7 @@ class IndexRequest extends FormRequest
         return [
             'search' => ['nullable', 'string', 'max:100'],
             'page' => ['nullable', 'integer', 'min:1'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:1000'],
             'unit_id' => ['nullable', 'string', 'max:100'],
             'unit_pendidikan_id' => ['nullable', 'string', 'max:100'],
             'kelas_id' => ['nullable', 'string', 'max:100'],

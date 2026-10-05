@@ -24,6 +24,11 @@ class SimpanJabatanRequest extends FormRequest
             $nama = preg_replace('/\s+/', ' ', $nama);
             $updates['nama_jabatan'] = $nama;
         }
+        foreach (['unit_sekolah_id', 'atasan_langsung_id', 'atasan_pegawai_id', 'role_sistem_id'] as $field) {
+            if ($this->has($field) && ($this->$field === '' || $this->$field === 'null')) {
+                $updates[$field] = null;
+            }
+        }
         if (! empty($updates)) {
             $this->merge($updates);
         }

@@ -30,6 +30,69 @@ class StoreStudentRequest extends FormRequest
             $nisn = preg_replace('/\s+/', ' ', $nisn);
             $updates['nisn'] = $nisn !== '' ? $nisn : null;
         }
+        if ($this->has('unit_id')) {
+            $uId = trim((string) $this->unit_id);
+            $updates['unit_id'] = $uId !== '' ? $uId : null;
+        }
+        if ($this->has('kelas_id')) {
+            $kId = trim((string) $this->kelas_id);
+            $updates['kelas_id'] = $kId !== '' ? $kId : null;
+        }
+        if ($this->has('birth_date')) {
+            $bd = trim((string) $this->birth_date);
+            $updates['birth_date'] = $bd !== '' ? $bd : null;
+        }
+        if ($this->has('birth_place')) {
+            $bp = trim((string) $this->birth_place);
+            $updates['birth_place'] = $bp !== '' ? $bp : null;
+        }
+        if ($this->has('address')) {
+            $addr = trim((string) $this->address);
+            $updates['address'] = $addr !== '' ? $addr : null;
+        }
+
+        // Sanitasi metadata bersarang agar string kosong tidak memicu kegagalan rule (uuid, digits:16, email, dll)
+        if ($this->has('metadata') && is_array($this->metadata)) {
+            $meta = $this->metadata;
+            $emptyToNullKeys = [
+                'unit_asal_id', 'nik', 'no_kk', 'no_registrasi_akta_lahir', 'nisn',
+                'agama', 'email', 'riwayat_penyakit', 'foto_url', 'sekolah_asal',
+                'status_sekolah_asal', 'kecamatan_sekolah_asal', 'kota_kab_sekolah_asal',
+                'nama_ayah', 'hp_ayah', 'nomor_wa_ayah', 'pekerjaan_ayah', 'pendidikan_terakhir_ayah', 'nik_ayah',
+                'nama_ibu', 'hp_ibu', 'nomor_wa_ibu', 'pekerjaan_ibu', 'pendidikan_terakhir_ibu', 'nik_ibu',
+                'nama_wali', 'hp_wali', 'nomor_wa_wali', 'pekerjaan_wali', 'nik_wali',
+                'nis_pembayaran', 'no_pendaftaran',
+            ];
+            foreach ($emptyToNullKeys as $key) {
+                if (array_key_exists($key, $meta)) {
+                    $val = is_string($meta[$key]) ? trim($meta[$key]) : $meta[$key];
+                    $meta[$key] = ($val === '' || $val === '-' || $val === 'undefined' || $val === 'null') ? null : $val;
+                }
+            }
+
+            // Sanitasi angka (anak_ke, jumlah_saudara)
+            if (array_key_exists('anak_ke', $meta)) {
+                $ak = is_string($meta['anak_ke']) ? trim($meta['anak_ke']) : $meta['anak_ke'];
+                $meta['anak_ke'] = ($ak === '' || $ak === null) ? null : max(1, (int) $ak);
+            }
+            if (array_key_exists('jumlah_saudara', $meta)) {
+                $js = is_string($meta['jumlah_saudara']) ? trim($meta['jumlah_saudara']) : $meta['jumlah_saudara'];
+                $meta['jumlah_saudara'] = ($js === '' || $js === null) ? null : max(0, (int) $js);
+            }
+
+            // Sanitasi sub-array orang_tua jika ada
+            if (isset($meta['orang_tua']) && is_array($meta['orang_tua'])) {
+                foreach (['nik_ayah', 'nik_ibu', 'nik_wali', 'nama_ayah', 'nama_ibu', 'nama_wali', 'no_hp'] as $otKey) {
+                    if (array_key_exists($otKey, $meta['orang_tua'])) {
+                        $v = is_string($meta['orang_tua'][$otKey]) ? trim($meta['orang_tua'][$otKey]) : $meta['orang_tua'][$otKey];
+                        $meta['orang_tua'][$otKey] = ($v === '' || $v === '-' || $v === 'undefined' || $v === 'null') ? null : $v;
+                    }
+                }
+            }
+
+            $updates['metadata'] = $meta;
+        }
+
         if (! empty($updates)) {
             $this->merge($updates);
         }
@@ -48,7 +111,7 @@ class StoreStudentRequest extends FormRequest
                 'required',
                 'string',
                 'max:50',
-                Rule::unique('students', 'nis')->ignore($studentId),
+                Rule::unique('students', 'nis')->ignore($studentId)->withoutTrashed(),
             ],
             'full_name' => ['required', 'string', 'max:255'],
             'gender' => ['required', 'string', Rule::in(['male', 'female'])],
@@ -57,6 +120,8 @@ class StoreStudentRequest extends FormRequest
             'address' => ['nullable', 'string'],
             'is_active' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],
+            'metadata.jenis_pendaftaran' => ['nullable', 'string', Rule::in(['baru', 'pindahan_eksternal', 'pindahan_internal'])],
+            'metadata.unit_asal_id' => ['nullable', 'uuid', 'exists:education_units,id'],
             'metadata.no_pendaftaran' => ['nullable', 'string', 'max:100'],
             'metadata.nik' => ['nullable', 'string', 'max:50'],
             'metadata.no_registrasi_akta_lahir' => ['nullable', 'string', 'max:100'],
