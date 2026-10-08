@@ -34,6 +34,10 @@ class EmployeeController extends Controller
 
         $isGlobalUser = $this->accessScopeService->hasGlobalScope($request->user());
 
+        if (! $isGlobalUser || $request->user()->hasAnyRole(['Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu']) || $request->boolean('exclude_restricted_roles')) {
+            $filters['exclude_restricted_roles'] = true;
+        }
+
         if (! $isGlobalUser) {
             if (! empty($filters['unit_id'])) {
                 $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
@@ -43,11 +47,6 @@ class EmployeeController extends Controller
                 $filters['allowed_unit_ids'] = $this->accessScopeService->accessibleEducationUnits($request->user())->pluck('id')->all();
             }
         }
-
-        $filters['allowed_unit_ids'] = $this->accessScopeService
-            ->accessibleEducationUnits($request->user())
-            ->pluck('id')
-            ->all();
 
         $stats = $this->employeeService->getDashboardStats($filters);
 
@@ -107,6 +106,18 @@ class EmployeeController extends Controller
             ], 404);
         }
 
+        $employee->load([
+            'unit:id,name,code',
+            'position:id,name,code,level_jabatan',
+            'division:id,name',
+            'user:id,name,email',
+            'role:id,name',
+            'teachings.subject:id,name,nama_mapel,kode_mapel',
+            'teachings.classroom:id,name',
+            'schedules.subject:id,name,nama_mapel,kode_mapel',
+            'schedules.kelas:id,nama_kelas',
+        ]);
+
         return response()->json([
             'status' => 'success',
             'data' => $employee,
@@ -118,6 +129,18 @@ class EmployeeController extends Controller
         $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
         $data = $request->validated();
         $employee = $this->employeeService->create($data);
+
+        // SYNC TEACHINGS jika diberikan saat pembuatan data pegawai baru
+        $teachings = $request->get('teachings') ?? data_get($data, 'metadata.teachings');
+        if (is_array($teachings) && ! empty($teachings)) {
+            $this->employeeService->assignTeaching($employee->id, $teachings);
+            $employee->load([
+                'unit:id,name,code',
+                'position:id,name,code,level_jabatan',
+                'teachings.subject:id,name,nama_mapel,kode_mapel',
+                'teachings.classroom:id,name',
+            ]);
+        }
 
         return response()->json([
             'status' => 'success',
@@ -140,6 +163,32 @@ class EmployeeController extends Controller
         }
 
         $employee = $this->employeeService->update($id, $data);
+
+        // SYNC TEACHINGS jika dikirimkan dalam request (relasional atau via metadata.teachings).
+        // Default behavior: jika teachings tidak dikirimkan atau dikirim sebagai array kosong tanpa instruksi
+        // eksplisit clear_teachings, preserve existing assignment (jangan hapus).
+        $hasTeachingsInRequest = $request->has('teachings') || $request->has('metadata.teachings');
+        if ($hasTeachingsInRequest) {
+            $teachings = $request->get('teachings') ?? data_get($data, 'metadata.teachings');
+            if (is_array($teachings) && ! empty($teachings)) {
+                $this->employeeService->assignTeaching($id, $teachings);
+                $employee->load([
+                    'unit:id,name,code',
+                    'position:id,name,code,level_jabatan',
+                    'teachings.subject:id,name,nama_mapel,kode_mapel',
+                    'teachings.classroom:id,name',
+                ]);
+            } elseif (is_array($teachings) && empty($teachings) && $request->boolean('clear_teachings')) {
+                // Hanya hapus jika klien secara eksplisit mengirimkan parameter clear_teachings: true
+                $this->employeeService->assignTeaching($id, []);
+                $employee->load([
+                    'unit:id,name,code',
+                    'position:id,name,code,level_jabatan',
+                    'teachings.subject:id,name,nama_mapel,kode_mapel',
+                    'teachings.classroom:id,name',
+                ]);
+            }
+        }
 
         return response()->json([
             'status' => 'success',
@@ -209,14 +258,24 @@ class EmployeeController extends Controller
             'teachings.*.academic_year_id' => 'nullable|uuid',
             'teachings.*.semester_id' => 'nullable|uuid',
             'teachings.*.aktif' => 'nullable|boolean',
+            'teachings.*.mapel' => 'nullable|string',
+            'teachings.*.kelas' => 'nullable|string',
+            'teachings.*.tahun' => 'nullable|string',
+            'teachings.*.semester' => 'nullable|string',
+            'teachings.*.metadata' => 'nullable|array',
         ]);
 
         $res = $this->employeeService->assignTeaching($id, $request->get('teachings'));
+        $employee = Employee::with([
+            'teachings.subject:id,name,nama_mapel,kode_mapel',
+            'teachings.classroom:id,name',
+        ])->find($id);
 
         return response()->json([
             'status' => 'success',
             'message' => 'Penugasan mengajar berhasil diperbarui',
             'data' => $res,
+            'employee' => $employee,
         ]);
     }
 
