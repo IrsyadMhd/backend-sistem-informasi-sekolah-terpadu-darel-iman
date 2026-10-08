@@ -106,11 +106,18 @@ class WorshipAttendanceController extends Controller
 
         if ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
-            if ($unitIds->isNotEmpty()) {
+            if ($request->filled('unit_id')) {
+                $requestedUnit = (string) $request->query('unit_id');
+                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->whereHas('template', fn ($tq) => $tq->where('education_unit_id', $requestedUnit));
+            } elseif ($unitIds->isNotEmpty()) {
                 $query->whereHas('template', function ($tq) use ($unitIds) {
                     $tq->whereIn('education_unit_id', $unitIds)->orWhereNull('education_unit_id');
                 });
             }
+        } elseif ($request->filled('unit_id')) {
+            $rawUnit = (string) $request->query('unit_id');
+            $query->whereHas('template', fn ($tq) => $tq->where('education_unit_id', $rawUnit));
         }
 
         if ($request->filled('template_id')) {
@@ -131,6 +138,13 @@ class WorshipAttendanceController extends Controller
         $session->load(['template', 'supervisor', 'details.student']);
 
         $user = $request->user();
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $templateUnit = $session->template?->education_unit_id;
+            if ($templateUnit) {
+                $this->accessScope->assertEducationUnitAccess($user, (string) $templateUnit);
+            }
+        }
 
         // Format details with female privacy masking if user lacks permission
         $formattedDetails = $session->details->map(function ($detail) use ($user) {
