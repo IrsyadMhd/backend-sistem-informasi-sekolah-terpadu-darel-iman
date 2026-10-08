@@ -566,8 +566,8 @@ class AttendanceWorkflowController extends Controller
     {
         $this->permit(
             $request,
-            ['homeroom_attendance.verify_permission', 'teacher.attendance.create', 'teacher.attendance.view'],
-            ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas', 'Super Admin', 'super_admin', 'Admin', 'Tata Usaha']
+            ['homeroom_attendance.verify_permission', 'teacher.attendance.create', 'teacher.attendance.view', 'kehadiran.siswa.monitoring', 'attendance.view', 'attendance_permission.review'],
+            ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas', 'Super Admin', 'super_admin', 'Admin', 'admin', 'Tata Usaha', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah']
         );
 
         $user = $request->user();
