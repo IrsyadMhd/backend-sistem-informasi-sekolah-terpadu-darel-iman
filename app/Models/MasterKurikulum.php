@@ -140,6 +140,13 @@ class MasterKurikulum extends Model
             }
         });
 
+        $query->when(! empty($filters['unit_ids']), function ($q) use ($filters) {
+            $q->where(function ($sub) use ($filters) {
+                $sub->whereIn('unit_pendidikan_id', $filters['unit_ids'])
+                    ->orWhereNull('unit_pendidikan_id');
+            });
+        });
+
         $query->when($filters['tahun_ajaran_id'] ?? null, function ($q, $tahunId) {
             if ($tahunId !== '' && $tahunId !== 'semua') {
                 $q->where('tahun_ajaran_id', $tahunId);
