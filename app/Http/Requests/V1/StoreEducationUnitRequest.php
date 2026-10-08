@@ -3,6 +3,7 @@
 namespace App\Http\Requests\V1;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreEducationUnitRequest extends FormRequest
 {
@@ -36,9 +37,26 @@ class StoreEducationUnitRequest extends FormRequest
     {
         return [
             'jenis_unit_id' => ['nullable', 'string'],
-            'code' => ['nullable', 'string', 'max:30', 'unique:education_units,code'],
-            'name' => ['required', 'string', 'max:120', 'unique:education_units,name'],
+            'code' => [
+                'nullable',
+                'string',
+                'max:30',
+                Rule::unique('education_units', 'code')->whereNull('deleted_at'),
+            ],
+            'name' => [
+                'required',
+                'string',
+                'max:120',
+                Rule::unique('education_units', 'name')->whereNull('deleted_at'),
+            ],
             'level' => ['nullable', 'string', 'max:50'],
+            'program_type' => ['nullable', 'string', 'in:fullday,boarding'],
+            'jam_masuk' => ['nullable', 'string', 'max:10'],
+            'jam_pulang' => ['nullable', 'string', 'max:10'],
+            'jam_kegiatan' => ['nullable', 'string', 'max:100'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'radius_meter' => ['nullable', 'integer', 'min:1', 'max:50000'],
             'description' => ['nullable', 'string'],
             'is_active' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],

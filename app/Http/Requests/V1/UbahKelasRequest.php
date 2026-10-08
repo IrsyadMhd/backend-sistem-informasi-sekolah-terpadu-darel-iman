@@ -23,17 +23,17 @@ class UbahKelasRequest extends FormRequest
         $kelasId = $this->route('kelas') ?? $this->route('id');
 
         return [
-            'unit_pendidikan_id' => ['required', 'uuid', 'exists:education_units,id'],
-            'tahun_ajaran_id' => ['required', 'uuid', 'exists:academic_years,id'],
-            'semester_id' => ['required', 'uuid', 'exists:semesters,id'],
-            'jenjang' => ['required', 'string', 'max:50'],
-            'tingkat' => ['required', 'string', 'max:20'],
-            'kode_kelas' => ['required', 'string', 'max:50', Rule::unique('tbl_kelas', 'kode_kelas')->ignore($kelasId)],
-            'nama_kelas' => ['required', 'string', 'max:100'],
+            'unit_pendidikan_id' => ['sometimes', 'required', 'uuid', 'exists:education_units,id'],
+            'tahun_ajaran_id' => ['sometimes', 'required', 'uuid', 'exists:academic_years,id'],
+            'semester_id' => ['sometimes', 'required', 'uuid', 'exists:semesters,id'],
+            'jenjang' => ['sometimes', 'required', 'string', 'max:50'],
+            'tingkat' => ['sometimes', 'required', 'string', 'max:20'],
+            'kode_kelas' => ['sometimes', 'required', 'string', 'max:50', Rule::unique('tbl_kelas', 'kode_kelas')->ignore($kelasId)],
+            'nama_kelas' => ['sometimes', 'required', 'string', 'max:100'],
             'wali_kelas_id' => ['nullable', 'uuid', 'exists:employees,id'],
-            'kapasitas' => ['required', 'integer', 'min:1', 'max:200'],
+            'kapasitas' => ['sometimes', 'required', 'integer', 'min:1', 'max:200'],
             'ruangan' => ['nullable', 'string', 'max:100'],
-            'status' => ['required', 'string', Rule::in(['Aktif', 'Nonaktif'])],
+            'status' => ['sometimes', 'required', 'string', Rule::in(['Aktif', 'Nonaktif'])],
         ];
     }
 

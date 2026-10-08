@@ -76,6 +76,7 @@ class UpdateEmployeeRequest extends FormRequest
             'user_id' => 'nullable|uuid|exists:users,id',
             'role_id' => 'nullable|integer',
             'metadata' => 'nullable|array',
+            'teachings' => 'nullable|array',
         ];
     }
 }
