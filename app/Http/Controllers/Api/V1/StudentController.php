@@ -6,8 +6,10 @@ use App\Exports\StudentExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\IndexRequest;
 use App\Http\Requests\V1\StoreStudentRequest;
+use App\Models\AcademicYear;
 use App\Models\Employee;
 use App\Models\Kelas;
+use App\Models\Semester;
 use App\Models\Student;
 use App\Models\User;
 use App\Repositories\Contracts\StudentRepositoryInterface;
@@ -34,7 +36,9 @@ class StudentController extends Controller
             abort_if($requestedUnitId && $requestedUnitId !== $unitId, 403, 'Akses data lintas unit tidak diizinkan.');
             $effectiveUnitId = $unitId;
         } else {
-            $effectiveUnitId = $requestedUnitId;
+            $effectiveUnitId = ($requestedUnitId && ! in_array(strtolower((string) $requestedUnitId), ['all', 'semua'], true))
+                ? $requestedUnitId
+                : null;
         }
 
         $requestedKelasId = $request->validated('kelas_id')
@@ -140,7 +144,9 @@ class StudentController extends Controller
             abort_if($requestedUnitId && $requestedUnitId !== $unitPengguna, 403, 'Akses data lintas unit tidak diizinkan.');
             $effectiveUnitId = $unitPengguna;
         } else {
-            $effectiveUnitId = $requestedUnitId;
+            $effectiveUnitId = ($requestedUnitId && ! in_array(strtolower((string) $requestedUnitId), ['all', 'semua'], true))
+                ? $requestedUnitId
+                : null;
         }
 
         $studentQuery = Student::query()
@@ -267,7 +273,12 @@ class StudentController extends Controller
                 ->get()
             : [];
 
+        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first();
+        $activeSemester = Semester::query()->where('is_active', true)->first();
+
         return response()->json([
+            'academic_year' => $activeAcademicYear?->name ?? 'Tahun Ajaran Aktif',
+            'semester' => $activeSemester?->name ?? 'Semester Aktif',
             'akses' => [
                 'semua_unit' => $bolehSemuaUnit,
                 'unit_id' => $bolehSemuaUnit ? null : $unitPengguna,
@@ -281,6 +292,7 @@ class StudentController extends Controller
                 'alumni' => $alumni,
                 'siswa_aktif' => $siswaAktif,
                 'siswa_nonaktif' => $siswaNonaktif,
+                'total_prestasi' => \App\Models\RekapPrestasiSiswa::query()->when(! empty($effectiveUnitId), fn ($q) => $q->whereHas('siswa', fn ($sq) => $sq->where('unit_id', $effectiveUnitId)))->count(),
             ],
             'komposisi_gender' => [
                 'laki_laki' => $lakiLaki,
@@ -416,6 +428,7 @@ class StudentController extends Controller
 
     private function scopeForUser(User $user): array
     {
+        $accessScope = app(\App\Services\AccessScopeService::class);
         $employee = Employee::query()
             ->with([
                 'position:id,name,scope_akses',
@@ -423,12 +436,13 @@ class StudentController extends Controller
             ])
             ->where('user_id', $user->id)
             ->first();
-        $canAccessAllUnits = $user->can('student.view_all')
+        $canAccessAllUnits = $accessScope->hasGlobalScope($user)
             || $user->can('foundation.student.view')
             || $user->can('report.cross_unit.view')
             || $employee?->position?->scope_akses === 'semua_unit'
             || str_contains(strtolower((string) $employee?->position?->name), 'yayasan');
         $unitId = $employee?->unit_id
+            ?? $accessScope->accessibleEducationUnits($user)->value('id')
             ?? data_get($user->metadata, 'unit_id')
             ?? data_get($user->metadata, 'unit_pendidikan_id');
 
@@ -445,7 +459,9 @@ class StudentController extends Controller
             abort_if($requestedUnitId && $requestedUnitId !== $unitId, 403, 'Akses ekspor data lintas unit tidak diizinkan.');
             $effectiveUnitId = $unitId;
         } else {
-            $effectiveUnitId = $requestedUnitId;
+            $effectiveUnitId = ($requestedUnitId && ! in_array(strtolower((string) $requestedUnitId), ['all', 'semua'], true))
+                ? $requestedUnitId
+                : null;
         }
 
         $query = Student::query()
