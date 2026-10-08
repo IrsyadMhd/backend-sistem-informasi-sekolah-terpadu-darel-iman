@@ -468,13 +468,43 @@ class EducationUnitController extends Controller
             $jenisUnitId = JenisUnitPendidikan::query()->value('uuid');
         }
 
+        $metadata = $validated['metadata'] ?? [];
+        if (isset($validated['program_type'])) {
+            $metadata['program_type'] = $validated['program_type'];
+        }
+        if (isset($validated['jam_masuk'])) {
+            $metadata['jam_masuk'] = $validated['jam_masuk'];
+        }
+        if (isset($validated['jam_pulang'])) {
+            $metadata['jam_pulang'] = $validated['jam_pulang'];
+        }
+        if (isset($validated['jam_kegiatan'])) {
+            $metadata['jam_kegiatan'] = $validated['jam_kegiatan'];
+        }
+        if (isset($validated['latitude'])) {
+            $metadata['latitude'] = $validated['latitude'];
+        }
+        if (isset($validated['longitude'])) {
+            $metadata['longitude'] = $validated['longitude'];
+        }
+        if (isset($validated['radius_meter'])) {
+            $metadata['radius_meter'] = $validated['radius_meter'];
+        }
+
         $payload = [
             'code' => $code,
             'name' => $validated['name'],
             'level' => $level,
+            'program_type' => $validated['program_type'] ?? 'fullday',
+            'jam_masuk' => $validated['jam_masuk'] ?? null,
+            'jam_pulang' => $validated['jam_pulang'] ?? null,
+            'jam_kegiatan' => $validated['jam_kegiatan'] ?? null,
+            'latitude' => isset($validated['latitude']) && $validated['latitude'] !== '' && $validated['latitude'] !== null ? (float) $validated['latitude'] : null,
+            'longitude' => isset($validated['longitude']) && $validated['longitude'] !== '' && $validated['longitude'] !== null ? (float) $validated['longitude'] : null,
+            'radius_meter' => isset($validated['radius_meter']) && $validated['radius_meter'] !== '' && $validated['radius_meter'] !== null ? (int) $validated['radius_meter'] : 100,
             'description' => $validated['description'] ?? null,
             'is_active' => Arr::get($validated, 'is_active', true),
-            'metadata' => $validated['metadata'] ?? [],
+            'metadata' => $metadata,
         ];
 
         if (! empty($jenisUnitId)) {
