@@ -300,6 +300,24 @@ class EmployeeChatController extends Controller
     }
 
     /**
+     * Memeriksa apakah suatu akun terdaftar sebagai pegawai atau memiliki role staf/pegawai.
+     */
+    private function isEmployeeUser(User $user): bool
+    {
+        return Employee::query()->where('user_id', $user->id)->exists()
+            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole([
+                'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan',
+                'Divisi Pendidikan', 'Kepala Sekolah', 'Guru', 'Tata Usaha', 'TU', 'Operator',
+                'Musyrif', 'Wali Kelas', 'Guru Tahfizh', 'Guru BK', 'Guru PAI', 'Guru Mata Pelajaran',
+                'Pembimbing', 'Musyrifah', 'Musyrif / Musyrifah', 'Waka Kurikulum', 'Waka Kesiswaan',
+                'Wakil Kepala Sekolah', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan',
+                'Kepala Bidang Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
+                'Divisi Program Khusus', 'Wakil Kurikulum', 'Wakil Kesiswaan', 'tata_usaha', 'tu',
+                'guru', 'wali_kelas', 'kepala_sekolah'
+            ]));
+    }
+
+    /**
      * Get chat messages between current user and recipient employee
      */
     public function employeeMessages(Request $request, string $recipientUserId): JsonResponse
@@ -309,6 +327,12 @@ class EmployeeChatController extends Controller
             abort(401, 'Unauthenticated.');
         }
         $userId = $user->id;
+
+        $recipientUser = User::query()->where('id', $recipientUserId)->first();
+        if (! $recipientUser) {
+            return response()->json(['success' => false, 'message' => 'Penerima tidak ditemukan.'], 404);
+        }
+        abort_unless($this->isEmployeeUser($recipientUser), 403, 'Penerima pesan pegawai harus berstatus pegawai/staf.');
 
         // Mark unread messages as read only if unread messages exist
         $hasUnread = PortalMessage::query()
@@ -397,6 +421,7 @@ class EmployeeChatController extends Controller
         if (! $recipientUser) {
             return response()->json(['success' => false, 'message' => 'Penerima tidak ditemukan.'], 404);
         }
+        abort_unless($this->isEmployeeUser($recipientUser), 403, 'Penerima pesan pegawai harus berstatus pegawai/staf.');
 
         $existingStudentId = PortalMessage::query()
             ->where(fn ($q) => $q->where('sender_user_id', $recipientUserId)->orWhere('recipient_user_id', $recipientUserId))
