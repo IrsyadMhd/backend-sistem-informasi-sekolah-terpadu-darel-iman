@@ -32,6 +32,7 @@ use App\Models\TahfizhDailyLog;
 use App\Models\Teacher;
 use App\Services\AccessScopeService;
 use App\Services\RealtimeBroadcastService;
+use App\Support\RoleName;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1465,9 +1466,11 @@ class TeacherPortalController extends Controller
     {
         $studentId = $request->query('student_id');
         $classId = $request->query('class_id');
+        $user = $request->user();
+        $isSupervisor = $user?->hasRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'Super Admin', 'super_admin', 'Tata Usaha', 'tu', 'tata_usaha']) || $user?->can('tahfizh.monitoring_target');
         $teacher = $this->getTeacherContext($request);
         $classIds = $this->teacherClassIds($request, $teacher);
-        if ($classId) {
+        if ($classId && ! $isSupervisor) {
             abort_unless($classIds->contains($classId), 403, 'Rombel berada di luar scope pembimbing.');
         }
 
@@ -1475,8 +1478,16 @@ class TeacherPortalController extends Controller
             ->with(['student', 'teacher', 'classModel'])
             ->whereIn('student_id', $this->accessScope->accessibleStudents($request->user())->select('id'))
             ->when($studentId, fn ($q) => $q->where('student_id', $studentId))
-            ->when($classId, fn ($q) => $q->where('class_id', $classId))
-            ->when($teacher, fn ($q) => $q->where('teacher_id', $teacher->id))
+            ->when($classId && $classId !== 'all', function ($q) use ($classId) {
+                $q->where(function ($sub) use ($classId) {
+                    $sub->where('class_id', $classId)
+                        ->orWhereHas('student', function ($sq) use ($classId) {
+                            $sq->where('kelas_id', $classId)
+                               ->orWhere('class_id', $classId);
+                        });
+                });
+            })
+            ->when($teacher && ! $isSupervisor, fn ($q) => $q->where('teacher_id', $teacher->id))
             ->orderBy('record_date', 'desc')
             ->paginate($request->query('per_page', 200));
 
@@ -1574,20 +1585,29 @@ class TeacherPortalController extends Controller
     {
         $date = $request->query('date', now()->toDateString());
         $user = $request->user();
-        abort_unless($user->hasRole('Super Admin') || $user->can('mutabaah.daily.view'), 403);
+        $isSupervisor = $user->hasRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'Super Admin', 'super_admin', 'Tata Usaha', 'tu', 'tata_usaha'])
+            || $user->can('mutabaah.supervisor.view')
+            || $user->can('mutabaah.report.view');
+
+        abort_unless($isSupervisor || $user->can('mutabaah.daily.view'), 403);
 
         $employeeId = Employee::query()->where('user_id', $user->id)->value('id');
-        abort_unless($employeeId || $user->hasRole('Super Admin'), 403, 'Akun belum terhubung dengan data pembimbing.');
-        $assignmentIds = MutabaahSupervisorAssignment::query()
-            ->active()->byDate($date)
-            ->when(! $user->hasRole('Super Admin'), fn ($query) => $query->where('employee_id', $employeeId))
-            ->pluck('id');
+        abort_unless($employeeId || $isSupervisor, 403, 'Akun belum terhubung dengan data pembimbing.');
 
-        $headers = MutabaahDailyHeader::query()
+        $query = MutabaahDailyHeader::query()
             ->with(['student', 'details'])
             ->whereDate('activity_date', $date)
-            ->whereIn('supervisor_assignment_id', $assignmentIds)
-            ->paginate($request->query('per_page', 20));
+            ->whereIn('student_id', $this->accessScope->accessibleStudents($user)->select('id'));
+
+        if (! $isSupervisor) {
+            $assignmentIds = MutabaahSupervisorAssignment::query()
+                ->active()->byDate($date)
+                ->where('employee_id', $employeeId)
+                ->pluck('id');
+            $query->whereIn('supervisor_assignment_id', $assignmentIds);
+        }
+
+        $headers = $query->paginate($request->query('per_page', 20));
 
         return response()->json([
             'success' => true,
@@ -1839,14 +1859,10 @@ class TeacherPortalController extends Controller
     private function isAssignedToStudent(Request $request, Student $student): bool
     {
         $user = $request->user();
-        if ($user && $user->hasAnyRole([
-            'Super Admin', 'super_admin', 'Admin', 'admin',
-            'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah',
-            'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan',
-            'Guru BK', 'guru_bk', 'Pengurus Yayasan',
-            'Guru', 'guru', 'Wali Kelas', 'wali_kelas', 'Guru Pengajar', 'guru_pengajar',
-            'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU', 'Operator', 'operator'
-        ])) {
+        if ($user && (
+            RoleName::userHasAny($user, ['Super Admin', 'super_admin'])
+            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin']))
+        )) {
             return true;
         }
 
