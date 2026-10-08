@@ -263,19 +263,80 @@ class DashboardPemantauanController extends Controller
     public function daftarRekapPrestasiSiswa(DaftarPemantauanDashboardRequest $request): JsonResponse
     {
         $this->pastikanHakAkses($request);
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
 
-        $data = RekapPrestasiSiswa::query()
-            ->with('siswa:id,full_name,nis')
-            ->when($request->filled('search'), function ($query) use ($request) {
-                $search = (string) $request->validated('search');
-                $query->where(function ($inner) use ($search) {
-                    $inner->where('nama_prestasi', 'ilike', "%{$search}%")
-                        ->orWhere('jenis_prestasi', 'ilike', "%{$search}%")
-                        ->orWhere('tingkat_prestasi', 'ilike', "%{$search}%");
+        $query = RekapPrestasiSiswa::query()
+            ->with(['siswa.educationUnit:id,name,code', 'siswa.kelas:id,nama_kelas']);
+
+        $rawUnitId = $request->query('unit_id');
+        $isUnitAll = empty($rawUnitId) || in_array(strtolower((string) $rawUnitId), ['all', 'semua'], true);
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if (! $isUnitAll) {
+                $requestedUnit = (string) $rawUnitId;
+                if (! \Illuminate\Support\Str::isUuid($requestedUnit)) {
+                    abort(403, 'Unit pendidikan tidak berada dalam cakupan akun.');
+                }
+                $accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->whereHas('siswa', fn ($sq) => $sq->where('unit_id', $requestedUnit));
+            } else {
+                $query->whereHas('siswa', function ($sq) use ($allowedUnitIds) {
+                    $sq->whereIn('unit_id', $allowedUnitIds);
                 });
-            })
-            ->latest('tanggal_prestasi')
-            ->paginate((int) $request->validated('per_page', 15));
+            }
+        } elseif (! $isUnitAll) {
+            $unitId = (string) $rawUnitId;
+            if (\Illuminate\Support\Str::isUuid($unitId)) {
+                $query->whereHas('siswa', fn ($sq) => $sq->where('unit_id', $unitId));
+            }
+        }
+
+        if ($request->filled('jenis_prestasi')) {
+            $jenis = (string) $request->query('jenis_prestasi');
+            if (! in_array(strtolower($jenis), ['all', 'semua'], true)) {
+                $query->where('jenis_prestasi', 'ilike', "%{$jenis}%");
+            }
+        }
+
+        if ($request->filled('tingkat_prestasi')) {
+            $tingkat = (string) $request->query('tingkat_prestasi');
+            if (! in_array(strtolower($tingkat), ['all', 'semua'], true)) {
+                $query->where('tingkat_prestasi', 'ilike', "%{$tingkat}%");
+            }
+        }
+
+        if ($request->filled('period')) {
+            $period = strtolower((string) $request->query('period'));
+            if ($period === 'today' || $period === 'hari') {
+                $query->whereDate('tanggal_prestasi', now()->toDateString());
+            } elseif ($period === 'month' || $period === 'bulan') {
+                $query->whereMonth('tanggal_prestasi', now()->month)
+                    ->whereYear('tanggal_prestasi', now()->year);
+            } elseif ($period === 'year' || $period === 'tahun') {
+                $query->whereYear('tanggal_prestasi', now()->year);
+            }
+        }
+
+        if ($request->filled('search')) {
+            $search = (string) $request->query('search');
+            $query->where(function ($inner) use ($search) {
+                $inner->where('nama_prestasi', 'ilike', "%{$search}%")
+                    ->orWhere('jenis_prestasi', 'ilike', "%{$search}%")
+                    ->orWhere('tingkat_prestasi', 'ilike', "%{$search}%")
+                    ->orWhereHas('siswa', fn ($sq) => $sq->where('full_name', 'ilike', "%{$search}%")->orWhere('nis', 'like', "%{$search}%"));
+            });
+        }
+
+        $perPage = (int) ($request->query('per_page') ?? 15);
+        if ($perPage < 1) {
+            $perPage = 15;
+        } elseif ($perPage > 100) {
+            $perPage = 100;
+        }
+
+        $data = $query->latest('tanggal_prestasi')->paginate($perPage);
 
         return response()->json($data);
     }
@@ -283,6 +344,14 @@ class DashboardPemantauanController extends Controller
     public function simpanRekapPrestasiSiswa(SimpanRekapPrestasiSiswaRequest $request): JsonResponse
     {
         $this->pastikanHakAkses($request, true);
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            $targetStudent = Student::findOrFail($request->validated('id_siswa'));
+            abort_unless($targetStudent->unit_id && $allowedUnitIds->contains($targetStudent->unit_id), 403, 'Akses input prestasi siswa lintas unit tidak diizinkan.');
+        }
 
         $model = RekapPrestasiSiswa::query()->create([
             ...$request->validated(),
@@ -295,15 +364,44 @@ class DashboardPemantauanController extends Controller
     public function detailRekapPrestasiSiswa(Request $request, string $id): JsonResponse
     {
         $this->pastikanHakAkses($request);
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
 
-        return response()->json(RekapPrestasiSiswa::query()->with('siswa:id,full_name,nis')->findOrFail($id));
+        if (! \Illuminate\Support\Str::isUuid($id)) {
+            abort(404, 'Data prestasi siswa tidak ditemukan.');
+        }
+
+        $model = RekapPrestasiSiswa::query()->with(['siswa.educationUnit:id,name,code', 'siswa.kelas:id,nama_kelas'])->findOrFail($id);
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            abort_unless($model->siswa && $allowedUnitIds->contains($model->siswa->unit_id), 403, 'Akses prestasi siswa di luar unit wewenang Anda tidak diizinkan.');
+        }
+
+        return response()->json($model);
     }
 
     public function ubahRekapPrestasiSiswa(SimpanRekapPrestasiSiswaRequest $request, string $id): JsonResponse
     {
         $this->pastikanHakAkses($request, true);
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
 
-        $model = RekapPrestasiSiswa::query()->findOrFail($id);
+        if (! \Illuminate\Support\Str::isUuid($id)) {
+            abort(404, 'Data prestasi siswa tidak ditemukan.');
+        }
+
+        $model = RekapPrestasiSiswa::query()->with('siswa:id,unit_id')->findOrFail($id);
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            abort_unless($model->siswa && $allowedUnitIds->contains($model->siswa->unit_id), 403, 'Akses ubah prestasi siswa di luar unit wewenang Anda tidak diizinkan.');
+            if ($request->filled('id_siswa')) {
+                $targetStudent = Student::findOrFail($request->validated('id_siswa'));
+                abort_unless($targetStudent->unit_id && $allowedUnitIds->contains($targetStudent->unit_id), 403, 'Akses pemindahan prestasi ke siswa lintas unit tidak diizinkan.');
+            }
+        }
+
         $model->update($request->validated());
 
         return response()->json(['message' => 'Rekap prestasi siswa berhasil diperbarui.', 'data' => $model->fresh()]);
@@ -312,7 +410,21 @@ class DashboardPemantauanController extends Controller
     public function hapusRekapPrestasiSiswa(Request $request, string $id): JsonResponse
     {
         $this->pastikanHakAkses($request, true);
-        RekapPrestasiSiswa::query()->findOrFail($id)->delete();
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
+
+        if (! \Illuminate\Support\Str::isUuid($id)) {
+            abort(404, 'Data prestasi siswa tidak ditemukan.');
+        }
+
+        $model = RekapPrestasiSiswa::query()->with('siswa:id,unit_id')->findOrFail($id);
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            abort_unless($model->siswa && $allowedUnitIds->contains($model->siswa->unit_id), 403, 'Akses hapus prestasi siswa di luar unit wewenang Anda tidak diizinkan.');
+        }
+
+        $model->delete();
 
         return response()->json(['message' => 'Rekap prestasi siswa berhasil dihapus.']);
     }
