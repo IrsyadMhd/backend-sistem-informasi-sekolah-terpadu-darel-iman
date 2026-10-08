@@ -2743,7 +2743,7 @@ class StudentParentPortalController extends Controller
                 }
             }
 
-            return User::query()->where('id', $teacherUserId)->exists();
+            return false;
         });
     }
 
@@ -3025,6 +3025,10 @@ class StudentParentPortalController extends Controller
         $user = $request->user();
 
         if ($student && Str::isUuid($student->id)) {
+            if (! $this->isValidTeacherContact($student, $teacherUserId)) {
+                return response()->json(['success' => false, 'message' => 'Guru tidak terhubung dengan siswa ini.'], 403);
+            }
+
             // Mark incoming messages as read only when unread messages actually exist
             $hasUnread = PortalMessage::query()
                 ->where('student_id', $student->id)
