@@ -10,7 +10,15 @@ class EmployeeRepository implements EmployeeRepositoryInterface
 {
     public function paginate(array $filters = [], int $perPage = 15): LengthAwarePaginator
     {
-        $query = Employee::query()->with(['unit:id,name,code', 'position:id,name,code,level_jabatan', 'division:id,name', 'user:id,name,email']);
+        $query = Employee::query()->with([
+            'unit:id,name,code',
+            'position:id,name,code,level_jabatan',
+            'division:id,name',
+            'user:id,name,email',
+            'teacher:id,employee_id',
+            'teachings.subject:id,name,nama_mapel,kode_mapel',
+            'teachings.classroom:id,name',
+        ]);
 
         if (! empty($filters['search'])) {
             $search = '%'.$filters['search'].'%';
@@ -83,7 +91,55 @@ class EmployeeRepository implements EmployeeRepositoryInterface
                     'pengurus_yayasan',
                     'Yayasan',
                     'yayasan',
+                    'Ketua Yayasan',
+                    'ketua_yayasan',
+                    'Sekretaris Yayasan',
+                    'sekretaris_yayasan',
+                    'Bendahara Yayasan',
+                    'bendahara_yayasan',
+                    'Divisi Pendidikan',
+                    'divisi_pendidikan',
+                    'Kepala Bidang Pendidikan',
+                    'kepala_bidang_pendidikan',
                 ]);
+            });
+            $query->whereDoesntHave('role', function ($q) {
+                $q->whereIn('name', [
+                    'Super Admin',
+                    'super_admin',
+                    'superadmin',
+                    'Admin',
+                    'admin',
+                    'administrator',
+                    'Operator',
+                    'operator',
+                    'operator_sekolah',
+                    'Pengurus Yayasan',
+                    'pengurus_yayasan',
+                    'Yayasan',
+                    'yayasan',
+                    'Ketua Yayasan',
+                    'ketua_yayasan',
+                    'Sekretaris Yayasan',
+                    'sekretaris_yayasan',
+                    'Bendahara Yayasan',
+                    'bendahara_yayasan',
+                    'Divisi Pendidikan',
+                    'divisi_pendidikan',
+                    'Kepala Bidang Pendidikan',
+                    'kepala_bidang_pendidikan',
+                ]);
+            });
+            $query->where(function ($q) {
+                $q->whereNull('nama_lengkap')
+                  ->orWhere(function ($sq) {
+                      $sq->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%yayasan%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%divisi pendidikan%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%bidang pendidikan%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%superadmin%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%super admin%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%operator%']);
+                  });
             });
         }
 
