@@ -19,6 +19,13 @@ class EducationUnit extends Model
         'code',
         'name',
         'level',
+        'program_type',
+        'jam_masuk',
+        'jam_pulang',
+        'jam_kegiatan',
+        'latitude',
+        'longitude',
+        'radius_meter',
         'description',
         'is_active',
         'metadata',
@@ -31,6 +38,9 @@ class EducationUnit extends Model
         return [
             'is_active' => 'boolean',
             'metadata' => 'array',
+            'latitude' => 'float',
+            'longitude' => 'float',
+            'radius_meter' => 'integer',
         ];
     }
 
