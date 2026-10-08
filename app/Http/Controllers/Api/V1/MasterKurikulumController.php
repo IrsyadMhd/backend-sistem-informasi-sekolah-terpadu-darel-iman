@@ -24,6 +24,9 @@ class MasterKurikulumController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
+
         $filters = [
             'search' => $request->query('search'),
             'status' => $request->query('status'),
@@ -33,6 +36,17 @@ class MasterKurikulumController extends Controller
             'tahun_ajaran_id' => $request->query('tahun_ajaran_id'),
             'dengan_sampah' => $request->query('dengan_sampah'),
         ];
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if ($request->filled('unit_pendidikan_id')) {
+                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+                $accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $filters['unit_pendidikan_id'] = $requestedUnit;
+            } else {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
+        }
 
         $perPage = (int) $request->query('per_page', 15);
         $orderBy = (string) $request->query('order_by', 'created_at');
@@ -61,7 +75,19 @@ class MasterKurikulumController extends Controller
      */
     public function dropdown(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
         $unitId = $request->query('unit_pendidikan_id');
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if ($unitId) {
+                $accessScope->assertEducationUnitAccess($user, (string) $unitId);
+            } else {
+                $unitId = $allowedUnitIds[0] ?? null;
+            }
+        }
+
         $data = $this->service->dapatkanDropdown($unitId);
 
         return response()->json([
@@ -102,8 +128,10 @@ class MasterKurikulumController extends Controller
     /**
      * Detail data master kurikulum.
      */
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
         $kurikulum = $this->service->cariBerdasarkanId($id);
 
         if (! $kurikulum) {
@@ -111,6 +139,11 @@ class MasterKurikulumController extends Controller
                 'status' => 'error',
                 'message' => 'Data master kurikulum tidak ditemukan.',
             ], Response::HTTP_NOT_FOUND);
+        }
+
+        if ($user && ! $accessScope->hasGlobalScope($user) && $kurikulum->unit_pendidikan_id) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            abort_unless(in_array($kurikulum->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses kurikulum di luar unit wewenang Anda tidak diizinkan.');
         }
 
         return response()->json([
@@ -211,6 +244,9 @@ class MasterKurikulumController extends Controller
      */
     public function export(Request $request)
     {
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
+
         $filters = [
             'search' => $request->query('search'),
             'status' => $request->query('status'),
@@ -219,6 +255,17 @@ class MasterKurikulumController extends Controller
             'unit_pendidikan_id' => $request->query('unit_pendidikan_id'),
             'tahun_ajaran_id' => $request->query('tahun_ajaran_id'),
         ];
+
+        if ($user && ! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            if ($request->filled('unit_pendidikan_id')) {
+                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+                $accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $filters['unit_pendidikan_id'] = $requestedUnit;
+            } else {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
+        }
 
         $data = $this->service->eksporData($filters);
 
