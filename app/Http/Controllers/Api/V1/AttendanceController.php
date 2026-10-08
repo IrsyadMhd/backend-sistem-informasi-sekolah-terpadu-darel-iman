@@ -29,27 +29,53 @@ class AttendanceController extends Controller
 
         if ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
-            if ($request->filled('unit_pendidikan_id')) {
-                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+            $requestedUnit = (string) ($request->query('unit_pendidikan_id') ?? $request->query('unit_id') ?? '');
+            if ($requestedUnit !== '' && ! in_array(strtolower($requestedUnit), ['all', 'semua'], true)) {
                 $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
-                $query->where('unit_pendidikan_id', $requestedUnit);
+                $query->where(function ($q) use ($requestedUnit) {
+                    $q->where('unit_pendidikan_id', $requestedUnit)
+                        ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $requestedUnit))
+                        ->orWhereHas('schoolClass', fn ($cq) => $cq->where('unit_pendidikan_id', $requestedUnit))
+                        ->orWhereHas('employee', fn ($eq) => $eq->where('unit_id', $requestedUnit));
+                });
             } elseif ($unitIds->isNotEmpty()) {
                 $query->where(function ($q) use ($unitIds) {
                     $q->whereIn('unit_pendidikan_id', $unitIds)
                         ->orWhereHas('student', fn ($sq) => $sq->whereIn('unit_id', $unitIds))
-                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds));
+                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds))
+                        ->orWhereHas('employee', fn ($eq) => $eq->whereIn('unit_id', $unitIds));
                 });
             } else {
                 $query->whereRaw('1 = 0');
             }
-        } elseif ($request->filled('unit_pendidikan_id')) {
-            $query->where('unit_pendidikan_id', (string) $request->query('unit_pendidikan_id'));
+        } elseif ($request->filled('unit_pendidikan_id') || $request->filled('unit_id')) {
+            $rawUnit = (string) ($request->query('unit_pendidikan_id') ?? $request->query('unit_id'));
+            if (\Illuminate\Support\Str::isUuid($rawUnit)) {
+                $query->where(function ($q) use ($rawUnit) {
+                    $q->where('unit_pendidikan_id', $rawUnit)
+                        ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $rawUnit));
+                });
+            }
         }
 
         // Security Guard: Pegawai Attendance Filtering
         // Hanya role di atas TU yang boleh melihat rekap kehadiran seluruh pegawai.
         // Role TU dan di bawahnya HANYA boleh melihat kehadiran miliknya sendiri.
         if ($request->query('tipe_presensi') === Attendance::TIPE_PEGAWAI || $request->filled('employee_id')) {
+            $query->whereHas('employee', function ($eq) {
+                $eq->where(function ($sq) {
+                    $sq->whereNull('satuan_kerja')
+                       ->orWhere('satuan_kerja', 'Unit Pendidikan')
+                       ->orWhereNotIn('satuan_kerja', ['Pengurus', 'Bidang Pendidikan']);
+                })->whereDoesntHave('position', function ($pq) {
+                    $pq->whereIn('satuan_kerja', ['Pengurus', 'Bidang Pendidikan'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%kepala bidang%']);
+                });
+            });
+
             if ($user && ! $this->accessScope->isAboveTu($user)) {
                 $userEmpId = Employee::where('user_id', $user->id)->value('id');
                 $query->where(function ($q) use ($userEmpId, $user) {
@@ -87,10 +113,12 @@ class AttendanceController extends Controller
             $search = '%'.$request->query('search').'%';
             $query->where(function ($q) use ($search) {
                 $q->whereHas('student', function ($sq) use ($search) {
-                    $sq->where('nama_lengkap', 'like', $search)->orWhere('nisn', 'like', $search);
+                    $sq->where('full_name', 'ilike', $search)
+                       ->orWhere('nis', 'like', $search)
+                       ->orWhere('nisn', 'like', $search);
                 })->orWhereHas('employee', function ($eq) use ($search) {
-                    $eq->where('nama_lengkap', 'like', $search)->orWhere('nip', 'like', $search);
-                })->orWhere('keterangan', 'like', $search);
+                    $eq->where('nama_lengkap', 'ilike', $search)->orWhere('niy', 'like', $search)->orWhere('nik', 'like', $search);
+                })->orWhere('keterangan', 'ilike', $search);
             });
         }
 
@@ -117,7 +145,12 @@ class AttendanceController extends Controller
             if ($request->filled('unit_pendidikan_id')) {
                 $requestedUnit = (string) $request->query('unit_pendidikan_id');
                 $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
-                $query->where('unit_pendidikan_id', $requestedUnit);
+                $query->where(function ($q) use ($requestedUnit) {
+                    $q->where('unit_pendidikan_id', $requestedUnit)
+                      ->orWhereHas('employee', fn ($eq) => $eq->where('unit_id', $requestedUnit))
+                      ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $requestedUnit))
+                      ->orWhereHas('schoolClass', fn ($cq) => $cq->where('unit_pendidikan_id', $requestedUnit));
+                });
             } elseif ($unitIds->isNotEmpty()) {
                 $userEmployeeId = Employee::where('user_id', $user->id)->value('id');
                 $query->where(function ($q) use ($unitIds, $userEmployeeId, $user) {
@@ -136,11 +169,31 @@ class AttendanceController extends Controller
                 $query->whereRaw('1 = 0');
             }
         } elseif ($request->filled('unit_pendidikan_id')) {
-            $query->where('unit_pendidikan_id', (string) $request->query('unit_pendidikan_id'));
+            $requestedUnit = (string) $request->query('unit_pendidikan_id');
+            $query->where(function ($q) use ($requestedUnit) {
+                $q->where('unit_pendidikan_id', $requestedUnit)
+                  ->orWhereHas('employee', fn ($eq) => $eq->where('unit_id', $requestedUnit))
+                  ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $requestedUnit))
+                  ->orWhereHas('schoolClass', fn ($cq) => $cq->where('unit_pendidikan_id', $requestedUnit));
+            });
         }
 
         // Security Guard: Pegawai Attendance Stats
         if ($request->query('tipe_presensi') === Attendance::TIPE_PEGAWAI || $request->filled('employee_id')) {
+            $query->whereHas('employee', function ($eq) {
+                $eq->where(function ($sq) {
+                    $sq->whereNull('satuan_kerja')
+                       ->orWhere('satuan_kerja', 'Unit Pendidikan')
+                       ->orWhereNotIn('satuan_kerja', ['Pengurus', 'Bidang Pendidikan']);
+                })->whereDoesntHave('position', function ($pq) {
+                    $pq->whereIn('satuan_kerja', ['Pengurus', 'Bidang Pendidikan'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
+                       ->orWhereRaw('LOWER(name) LIKE ?', ['%kepala bidang%']);
+                });
+            });
+
             if ($user && ! $this->accessScope->isAboveTu($user)) {
                 $userEmpId = Employee::where('user_id', $user->id)->value('id');
                 $query->where(function ($q) use ($userEmpId, $user) {
@@ -175,6 +228,37 @@ class AttendanceController extends Controller
             $query->where('tipe_presensi', (string) $request->query('tipe_presensi'));
         }
 
+        if ($request->filled('staff_category') || $request->filled('kategori_staf')) {
+            $cat = (string) ($request->query('staff_category') ?? $request->query('kategori_staf'));
+            if ($cat !== 'all') {
+                $query->whereHas('employee.position', function ($pq) use ($cat) {
+                    if ($cat === 'guru') {
+                        $pq->where(function ($q) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%guru%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%pengajar%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%pendidik%']);
+                        });
+                    } elseif ($cat === 'wali_kelas') {
+                        $pq->whereRaw('LOWER(name) LIKE ?', ['%wali%']);
+                    } elseif ($cat === 'tu_staf') {
+                        $pq->where(function ($q) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%tu%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%tata usaha%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%staf%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%admin%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%']);
+                        });
+                    } elseif ($cat === 'musyrif') {
+                        $pq->where(function ($q) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%musyrif%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%asrama%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%pembimbing%']);
+                        });
+                    }
+                });
+            }
+        }
+
         $date = $this->applyPeriodFilter($query, $request);
 
         $total     = (clone $query)->count();
@@ -191,6 +275,7 @@ class AttendanceController extends Controller
             'status' => 'success',
             'data' => [
                 'tanggal' => $date,
+                'total' => $total,
                 'total_presensi' => $total,
                 'hadir' => $hadir,
                 'dinas_luar' => $dinasLuar,
@@ -402,7 +487,46 @@ class AttendanceController extends Controller
         $user = $request->user();
         $query = Attendance::with(['student', 'employee', 'schoolClass']);
 
-        // ── Security guard: jika client minta data pegawai tertentu,
+        // ── 1. Unit Scoping: Batasi ketat hanya pada unit pendidikan yang diakses (Kepala Sekolah) ──
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if ($request->filled('unit_pendidikan_id')) {
+                $requestedUnit = (string) $request->query('unit_pendidikan_id');
+                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where(function ($q) use ($requestedUnit) {
+                    $q->where('unit_pendidikan_id', $requestedUnit)
+                      ->orWhereHas('employee', fn ($eq) => $eq->where('unit_id', $requestedUnit))
+                      ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $requestedUnit))
+                      ->orWhereHas('schoolClass', fn ($cq) => $cq->where('unit_pendidikan_id', $requestedUnit));
+                });
+            } elseif ($unitIds->isNotEmpty()) {
+                $userEmployeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+                $query->where(function ($q) use ($unitIds, $userEmployeeId, $user) {
+                    $q->whereIn('unit_pendidikan_id', $unitIds)
+                        ->orWhereHas('student', fn ($sq) => $sq->whereIn('unit_id', $unitIds))
+                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds))
+                        ->orWhereHas('employee', fn ($eq) => $eq->whereIn('unit_id', $unitIds));
+                    if ($userEmployeeId) {
+                        $q->orWhere('employee_id', $userEmployeeId);
+                    }
+                    if ($user?->id) {
+                        $q->orWhere('employee_id', $user->id);
+                    }
+                });
+            } else {
+                $query->whereRaw('1 = 0');
+            }
+        } elseif ($request->filled('unit_pendidikan_id')) {
+            $requestedUnit = (string) $request->query('unit_pendidikan_id');
+            $query->where(function ($q) use ($requestedUnit) {
+                $q->where('unit_pendidikan_id', $requestedUnit)
+                  ->orWhereHas('employee', fn ($eq) => $eq->where('unit_id', $requestedUnit))
+                  ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $requestedUnit))
+                  ->orWhereHas('schoolClass', fn ($cq) => $cq->where('unit_pendidikan_id', $requestedUnit));
+            });
+        }
+
+        // ── 2. Security guard: jika client minta data pegawai tertentu,
         //    non-AboveTu hanya boleh melihat miliknya sendiri ──
         if ($request->filled('employee_id') || $request->query('tipe_presensi') === Attendance::TIPE_PEGAWAI) {
             if ($user && ! $this->accessScope->isAboveTu($user)) {
@@ -426,31 +550,6 @@ class AttendanceController extends Controller
                     }
                 });
             }
-        } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
-            $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
-            if ($request->filled('unit_pendidikan_id')) {
-                $requestedUnit = (string) $request->query('unit_pendidikan_id');
-                $this->accessScope->assertEducationUnitAccess($user, $requestedUnit);
-                $query->where('unit_pendidikan_id', $requestedUnit);
-            } elseif ($unitIds->isNotEmpty()) {
-                $userEmployeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
-                $query->where(function ($q) use ($unitIds, $userEmployeeId, $user) {
-                    $q->whereIn('unit_pendidikan_id', $unitIds)
-                        ->orWhereHas('student', fn ($sq) => $sq->whereIn('unit_id', $unitIds))
-                        ->orWhereHas('schoolClass', fn ($cq) => $cq->whereIn('unit_pendidikan_id', $unitIds))
-                        ->orWhereHas('employee', fn ($eq) => $eq->whereIn('unit_id', $unitIds));
-                    if ($userEmployeeId) {
-                        $q->orWhere('employee_id', $userEmployeeId);
-                    }
-                    if ($user?->id) {
-                        $q->orWhere('employee_id', $user->id);
-                    }
-                });
-            } else {
-                $query->whereRaw('1 = 0');
-            }
-        } elseif ($request->filled('unit_pendidikan_id')) {
-            $query->where('unit_pendidikan_id', (string) $request->query('unit_pendidikan_id'));
         }
 
         // Filter tipe_presensi (Pegawai / Siswa)
@@ -464,6 +563,37 @@ class AttendanceController extends Controller
 
         if ($request->filled('class_id')) {
             $query->where('class_id', (string) $request->query('class_id'));
+        }
+
+        if ($request->filled('staff_category') || $request->filled('kategori_staf')) {
+            $cat = (string) ($request->query('staff_category') ?? $request->query('kategori_staf'));
+            if ($cat !== 'all') {
+                $query->whereHas('employee.position', function ($pq) use ($cat) {
+                    if ($cat === 'guru') {
+                        $pq->where(function ($q) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%guru%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%pengajar%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%pendidik%']);
+                        });
+                    } elseif ($cat === 'wali_kelas') {
+                        $pq->whereRaw('LOWER(name) LIKE ?', ['%wali%']);
+                    } elseif ($cat === 'tu_staf') {
+                        $pq->where(function ($q) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%tu%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%tata usaha%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%staf%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%admin%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%']);
+                        });
+                    } elseif ($cat === 'musyrif') {
+                        $pq->where(function ($q) {
+                            $q->whereRaw('LOWER(name) LIKE ?', ['%musyrif%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%asrama%'])
+                              ->orWhereRaw('LOWER(name) LIKE ?', ['%pembimbing%']);
+                        });
+                    }
+                });
+            }
         }
 
         // Period filter
@@ -491,12 +621,17 @@ class AttendanceController extends Controller
     /**
      * Detail presensi.
      */
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         $attendance = Attendance::with(['student', 'employee', 'schoolClass', 'educationUnit'])->find($id);
 
         if (! $attendance) {
             return response()->json(['status' => 'error', 'message' => 'Presensi tidak ditemukan.'], 404);
+        }
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $this->assertAttendanceAccess($user, $attendance);
         }
 
         return response()->json(['status' => 'success', 'data' => $attendance]);
@@ -521,6 +656,11 @@ class AttendanceController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Presensi tidak ditemukan.'], 404);
         }
 
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $this->assertAttendanceAccess($user, $attendance);
+        }
+
         $validated = $request->validate([
             'status' => 'nullable|string',
             'keterangan' => 'nullable|string',
@@ -540,7 +680,7 @@ class AttendanceController extends Controller
     /**
      * Delete presensi.
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
         $attendance = Attendance::find($id);
 
@@ -548,9 +688,30 @@ class AttendanceController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Presensi tidak ditemukan.'], 404);
         }
 
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $this->assertAttendanceAccess($user, $attendance);
+        }
+
         $attendance->delete();
 
         return response()->json(['status' => 'success', 'message' => 'Presensi berhasil dihapus.']);
+    }
+
+    /**
+     * Pastikan record presensi berada dalam unit wewenang akun
+     */
+    private function assertAttendanceAccess(User $user, Attendance $attendance): void
+    {
+        $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+        $targetUnit = $attendance->unit_pendidikan_id
+            ?? $attendance->student?->unit_id
+            ?? $attendance->employee?->unit_id
+            ?? $attendance->schoolClass?->unit_pendidikan_id;
+
+        if ($targetUnit && ! $unitIds->contains($targetUnit)) {
+            abort(403, 'Akses data presensi di luar unit wewenang Anda tidak diizinkan.');
+        }
     }
 
     /**
@@ -573,30 +734,48 @@ class AttendanceController extends Controller
         $period = (string) $request->query('period');
         $dateLabel = now()->toDateString();
 
+        // 1. Jika start_date dan end_date eksplisit dikirim (rentang pekan, bulan, semester, tahun)
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $start = (string) $request->query('start_date');
+            $end = (string) $request->query('end_date');
+            $query->whereBetween('attendance_date', [$start, $end]);
+            return "$start s/d $end";
+        }
+
         if ($period === 'daily' || $period === 'harian') {
-            $date = (string) ($request->query('date') ?? now()->toDateString());
+            $date = (string) ($request->query('date') ?? $request->query('attendance_date') ?? now()->toDateString());
             $query->whereDate('attendance_date', $date);
             $dateLabel = $date;
         } elseif ($period === 'weekly' || $period === 'mingguan') {
-            $start = now()->startOfWeek()->toDateString();
-            $end = now()->endOfWeek()->toDateString();
+            if ($request->filled('date') || $request->filled('attendance_date')) {
+                $refDate = \Carbon\Carbon::parse((string) ($request->query('date') ?? $request->query('attendance_date')));
+                $start = $refDate->copy()->startOfWeek()->toDateString();
+                $end = $refDate->copy()->endOfWeek()->toDateString();
+            } else {
+                $start = now()->startOfWeek()->toDateString();
+                $end = now()->endOfWeek()->toDateString();
+            }
             $query->whereBetween('attendance_date', [$start, $end]);
             $dateLabel = "$start s/d $end";
         } elseif ($period === 'monthly' || $period === 'bulanan') {
             $month = (int) ($request->query('month') ?? now()->month);
-            $query->where('month', $month);
-            if ($request->filled('year')) {
-                $query->whereYear('attendance_date', (int) $request->query('year'));
-            } else {
-                $query->whereYear('attendance_date', now()->year);
-            }
-            $dateLabel = 'Bulan ' . $month;
+            $year = $request->filled('year') ? (int) $request->query('year') : now()->year;
+            $query->where(function ($sub) use ($month) {
+                $sub->where('month', $month)
+                    ->orWhereMonth('attendance_date', $month);
+            });
+            $query->whereYear('attendance_date', $year);
+            $dateLabel = 'Bulan ' . $month . '/' . $year;
         } elseif ($period === 'semester') {
             $semId = $request->query('semester_id') ?? Semester::where('is_active', true)->value('id');
             if ($semId) {
                 $query->where('semester_id', $semId);
                 $semName = Semester::where('id', $semId)->value('name');
                 $dateLabel = $semName ? "Semester $semName" : 'Semester Aktif';
+            } elseif ($request->filled('year')) {
+                $year = (int) $request->query('year');
+                $query->whereYear('attendance_date', $year);
+                $dateLabel = "Semester TA $year";
             }
         } elseif ($period === 'yearly' || $period === 'tahunan') {
             $ayId = $request->query('academic_year_id') ?? AcademicYear::where('is_active', true)->value('id');
@@ -604,10 +783,14 @@ class AttendanceController extends Controller
                 $query->where('academic_year_id', $ayId);
                 $ayName = AcademicYear::where('id', $ayId)->value('name');
                 $dateLabel = $ayName ? "Tahun Ajaran $ayName" : 'Tahun Ajaran Aktif';
+            } elseif ($request->filled('year')) {
+                $year = (int) $request->query('year');
+                $query->whereYear('attendance_date', $year);
+                $dateLabel = "Tahun $year";
             }
         } else {
-            if ($request->filled('date')) {
-                $date = (string) $request->query('date');
+            if ($request->filled('date') || $request->filled('attendance_date')) {
+                $date = (string) ($request->query('date') ?? $request->query('attendance_date'));
                 $query->whereDate('attendance_date', $date);
                 $dateLabel = $date;
             } elseif ($request->filled('start_date') || $request->filled('end_date')) {
@@ -626,7 +809,10 @@ class AttendanceController extends Controller
         }
 
         if ($request->filled('month') && ! in_array($period, ['monthly', 'bulanan'], true)) {
-            $query->where('month', (int) $request->query('month'));
+            $query->where(function ($sub) use ($request) {
+                $sub->where('month', (int) $request->query('month'))
+                    ->orWhereMonth('attendance_date', (int) $request->query('month'));
+            });
         }
 
         if ($request->filled('academic_year_id') && ! in_array($period, ['yearly', 'tahunan'], true)) {
