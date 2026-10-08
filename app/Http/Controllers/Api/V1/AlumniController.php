@@ -36,7 +36,18 @@ class AlumniController extends Controller
 
         // Scope data real-time ke unit_id pengguna (kecuali Super Admin / Yayasan / Admin)
         if (! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty()) {
-            $query->whereIn('unit_id', $accessibleUnitIds);
+            if ($request->filled('unit_id') && ! in_array(strtolower((string) $request->query('unit_id')), ['all', 'semua', ''], true)) {
+                $requestedUnit = (string) $request->query('unit_id');
+                $accessScopeService->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where('unit_id', $requestedUnit);
+            } else {
+                $query->whereIn('unit_id', $accessibleUnitIds);
+            }
+        } elseif ($request->filled('unit_id') && ! in_array(strtolower((string) $request->query('unit_id')), ['all', 'semua', ''], true)) {
+            $unitId = (string) $request->query('unit_id');
+            if (\Illuminate\Support\Str::isUuid($unitId)) {
+                $query->where('unit_id', $unitId);
+            }
         }
 
         // Search Filter (Nama, NIS, NISN, Tujuan Kelulusan, PTN/PTS, Pekerjaan)
@@ -118,7 +129,18 @@ class AlumniController extends Controller
 
         $studentQuery = Student::query();
         if (! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty()) {
-            $studentQuery->whereIn('unit_id', $accessibleUnitIds);
+            if ($request->filled('unit_id') && ! in_array(strtolower((string) $request->query('unit_id')), ['all', 'semua', ''], true)) {
+                $requestedUnit = (string) $request->query('unit_id');
+                $accessScopeService->assertEducationUnitAccess($user, $requestedUnit);
+                $studentQuery->where('unit_id', $requestedUnit);
+            } else {
+                $studentQuery->whereIn('unit_id', $accessibleUnitIds);
+            }
+        } elseif ($request->filled('unit_id') && ! in_array(strtolower((string) $request->query('unit_id')), ['all', 'semua', ''], true)) {
+            $unitId = (string) $request->query('unit_id');
+            if (\Illuminate\Support\Str::isUuid($unitId)) {
+                $studentQuery->where('unit_id', $unitId);
+            }
         }
 
         $totalAlumni = (clone $studentQuery)->where(function ($q) {
@@ -140,7 +162,11 @@ class AlumniController extends Controller
         })->count();
 
         $totalSiswa = (clone $studentQuery)->count();
-        $totalPrestasi = RekapPrestasiSiswa::count();
+        $totalPrestasi = RekapPrestasiSiswa::query()
+            ->when(! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty(), function ($q) use ($accessibleUnitIds) {
+                $q->whereHas('siswa', fn ($sq) => $sq->whereIn('unit_id', $accessibleUnitIds));
+            })
+            ->count();
         $siswaLulusTahunIni = (clone $studentQuery)->where('is_active', false)
             ->whereYear('updated_at', now()->year)
             ->count();
@@ -161,7 +187,13 @@ class AlumniController extends Controller
                 'lulus_tahun_ini' => $siswaLulusTahunIni,
                 'lanjut_studi' => $lanjutStudi,
                 'persentase_kelulusan' => $totalSiswa > 0 ? round(($totalAlumni / $totalSiswa) * 100, 1) : 100,
-                'rekap_prestasi' => RekapPrestasiSiswa::latest('tanggal_prestasi')->limit(10)->get(),
+                'rekap_prestasi' => RekapPrestasiSiswa::query()
+                    ->when(! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty(), function ($q) use ($accessibleUnitIds) {
+                        $q->whereHas('siswa', fn ($sq) => $sq->whereIn('unit_id', $accessibleUnitIds));
+                    })
+                    ->latest('tanggal_prestasi')
+                    ->limit(10)
+                    ->get(),
             ],
         ]);
     }
@@ -171,6 +203,9 @@ class AlumniController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
+
         $request->validate([
             'full_name' => 'required|string|max:255',
             'unit_id' => 'required|exists:education_units,id',
@@ -182,6 +217,10 @@ class AlumniController extends Controller
             'pekerjaan' => 'nullable|string|max:255',
             'catatan' => 'nullable|string',
         ]);
+
+        if (! $accessScopeService->hasGlobalScope($user)) {
+            $accessScopeService->assertEducationUnitAccess($user, (string) $request->input('unit_id'));
+        }
 
         $metadata = [
             'is_alumni' => true,
@@ -216,7 +255,17 @@ class AlumniController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
         $student = Student::findOrFail($id);
+
+        if (! $accessScopeService->hasGlobalScope($user)) {
+            $accessibleUnitIds = $accessScopeService->accessibleEducationUnits($user)->pluck('id');
+            abort_unless($student->unit_id && $accessibleUnitIds->contains($student->unit_id), 403, 'Akses data alumni di luar unit pendidikan Anda tidak diizinkan.');
+            if ($request->has('unit_id') && $request->input('unit_id')) {
+                $accessScopeService->assertEducationUnitAccess($user, (string) $request->input('unit_id'));
+            }
+        }
 
         if ($request->has('full_name') && $request->input('full_name')) {
             $student->full_name = $request->input('full_name');
@@ -268,6 +317,9 @@ class AlumniController extends Controller
      */
     public function pindahUnit(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
+
         $request->validate([
             'target_unit_id' => 'required|exists:education_units,id',
             'kelas_id' => 'nullable|exists:kelas,id',
@@ -275,6 +327,12 @@ class AlumniController extends Controller
         ]);
 
         $student = Student::findOrFail($id);
+
+        if (! $accessScopeService->hasGlobalScope($user)) {
+            $accessibleUnitIds = $accessScopeService->accessibleEducationUnits($user)->pluck('id');
+            abort_unless($student->unit_id && $accessibleUnitIds->contains($student->unit_id), 403, 'Akses mutasi keluar unit asal di luar wewenang Anda ditolak.');
+        }
+
         $oldUnitId = $student->unit_id;
         $newUnitId = $request->input('target_unit_id');
 
@@ -307,7 +365,14 @@ class AlumniController extends Controller
      */
     public function pindahKeluar(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
         $student = Student::findOrFail($id);
+
+        if (! $accessScopeService->hasGlobalScope($user)) {
+            $accessibleUnitIds = $accessScopeService->accessibleEducationUnits($user)->pluck('id');
+            abort_unless($student->unit_id && $accessibleUnitIds->contains($student->unit_id), 403, 'Akses proses mutasi keluar di luar wewenang unit Anda ditolak.');
+        }
 
         $metadata = is_array($student->metadata) ? $student->metadata : (json_decode($student->metadata, true) ?: []);
         $metadata['mutasi_type'] = 'keluar';
@@ -337,9 +402,17 @@ class AlumniController extends Controller
     /**
      * Hapus data alumni dari unit
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
         $student = Student::findOrFail($id);
+
+        if (! $accessScopeService->hasGlobalScope($user)) {
+            $accessibleUnitIds = $accessScopeService->accessibleEducationUnits($user)->pluck('id');
+            abort_unless($student->unit_id && $accessibleUnitIds->contains($student->unit_id), 403, 'Akses hapus alumni di luar wewenang unit Anda ditolak.');
+        }
+
         $student->delete();
 
         return response()->json([
@@ -367,7 +440,18 @@ class AlumniController extends Controller
             });
 
         if (! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty()) {
-            $query->whereIn('unit_id', $accessibleUnitIds);
+            if ($request->filled('unit_id') && ! in_array(strtolower((string) $request->query('unit_id')), ['all', 'semua', ''], true)) {
+                $requestedUnit = (string) $request->query('unit_id');
+                $accessScopeService->assertEducationUnitAccess($user, $requestedUnit);
+                $query->where('unit_id', $requestedUnit);
+            } else {
+                $query->whereIn('unit_id', $accessibleUnitIds);
+            }
+        } elseif ($request->filled('unit_id') && ! in_array(strtolower((string) $request->query('unit_id')), ['all', 'semua', ''], true)) {
+            $unitId = (string) $request->query('unit_id');
+            if (\Illuminate\Support\Str::isUuid($unitId)) {
+                $query->where('unit_id', $unitId);
+            }
         }
 
         if ($request->filled('search')) {
@@ -416,6 +500,12 @@ class AlumniController extends Controller
 
     public function import(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $accessScopeService = app(AccessScopeService::class);
+        $isGlobal = $accessScopeService->hasGlobalScope($user);
+        $accessibleUnitIds = $accessScopeService->accessibleEducationUnits($user)->pluck('id');
+        $defaultUnitId = $accessibleUnitIds->first();
+
         $rows = $request->input('data', []);
         if (! is_array($rows) || empty($rows)) {
             return response()->json([
@@ -447,6 +537,11 @@ class AlumniController extends Controller
 
             try {
                 if ($student) {
+                    if (! $isGlobal && $student->unit_id && ! $accessibleUnitIds->contains($student->unit_id)) {
+                        $gagal++;
+                        $errors[] = "Baris {$rowNum}: NIS {$nis} terdaftar di unit lain di luar wewenang Anda.";
+                        continue;
+                    }
                     $meta = is_array($student->metadata) ? $student->metadata : (json_decode($student->metadata, true) ?: []);
                     $meta['is_alumni'] = true;
                     $meta['status_alumni'] = 'alumni';
@@ -458,10 +553,15 @@ class AlumniController extends Controller
                     $student->save();
                     $berhasil++;
                 } else {
+                    $rowUnitId = $row['unit_id'] ?? $defaultUnitId;
+                    if (! $isGlobal && ! $accessibleUnitIds->contains($rowUnitId)) {
+                        $rowUnitId = $defaultUnitId;
+                    }
                     Student::query()->create([
                         'nis' => $nis,
                         'full_name' => $nama,
                         'gender' => in_array(strtolower($row['gender'] ?? 'L'), ['female', 'p', 'perempuan']) ? 'female' : 'male',
+                        'unit_id' => $rowUnitId,
                         'is_active' => false,
                         'metadata' => [
                             'is_alumni' => true,
