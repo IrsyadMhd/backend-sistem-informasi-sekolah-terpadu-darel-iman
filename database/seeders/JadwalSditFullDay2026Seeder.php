@@ -66,7 +66,7 @@ class JadwalSditFullDay2026Seeder extends Seeder
                 'nama_kelas' => 'Kelas 1 Makkah (Full Day)',
                 'tingkat' => '1',
                 'jenjang' => 'SDIT',
-                'kapasitas' => 28,
+                'kapasitas' => 30,
                 'ruangan' => 'Ruang Kelas 1A (Gedung Utama Lt. 1)',
                 'status' => 'Aktif',
             ]);
