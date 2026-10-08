@@ -27,6 +27,37 @@ class EmployeeTeaching extends Model
         'metadata' => 'array',
     ];
 
+    protected $appends = [
+        'mapel',
+        'kelas',
+        'tahun',
+        'semester',
+    ];
+
+    public function getMapelAttribute(): ?string
+    {
+        return $this->subject?->name
+            ?? $this->subject?->nama_mapel
+            ?? data_get($this->metadata, 'mapel');
+    }
+
+    public function getKelasAttribute(): ?string
+    {
+        return $this->classroom?->name
+            ?? $this->kelasRel?->nama_kelas
+            ?? data_get($this->metadata, 'kelas');
+    }
+
+    public function getTahunAttribute(): ?string
+    {
+        return data_get($this->metadata, 'tahun');
+    }
+
+    public function getSemesterAttribute(): ?string
+    {
+        return data_get($this->metadata, 'semester');
+    }
+
     public function employee()
     {
         return $this->belongsTo(Employee::class, 'employee_id');
@@ -35,6 +66,11 @@ class EmployeeTeaching extends Model
     public function classroom()
     {
         return $this->belongsTo(SchoolClass::class, 'classroom_id');
+    }
+
+    public function kelasRel()
+    {
+        return $this->belongsTo(Kelas::class, 'classroom_id');
     }
 
     public function subject()
