@@ -399,6 +399,7 @@ class RolePermissionSeeder extends Seeder
                 'employee.delete', 'employee.export', 'employee.import',
                 'unit.view', 'unit.view_all',
                 'sistem.hak_akses', 'sistem.master_data',
+                'academic.schedule.view',
                 'permission.manage', 'role.manage',
             ],
             'Kepala Sekolah' => [
@@ -659,9 +660,19 @@ class RolePermissionSeeder extends Seeder
                 $globalPersonnelPermissions,
             )));
         }
+        $principalMasterPermissions = [
+            'sistem.master_data',
+            'employee.view', 'employee.view_all', 'employee.create', 'employee.update', 'employee.delete', 'employee.export', 'employee.import',
+            'student.view', 'student.view_all', 'student.create', 'student.update', 'student.delete', 'student.export', 'student.import',
+            'master.view', 'master.create', 'master.update', 'master.delete',
+            'kesiswaan.data_lengkap_siswa', 'kesiswaan.kelas_rombel',
+            'academic.schedule.create', 'academic.schedule.update', 'academic.schedule.delete',
+            'employee.position.manage',
+        ];
         foreach (['Kepala Sekolah', 'kepala_sekolah', 'kepsek'] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap['Kepala Sekolah'] ?? [], [
-                ...$readAll, 'mutabaah.supervisor.view', 'mutabaah.parent.monitor', 'report.academic.view', 'report.student.view',
+                ...$readAll, ...$principalMasterPermissions, 'mutabaah.supervisor.view', 'mutabaah.parent.monitor', 'report.academic.view', 'report.student.view',
+                'teacher.tahfizh.view', 'teacher.mutabaah.view', 'mutabaah.daily.view', 'dashboard.guru-tahfizh.view', 'report.tahfizh.view', 'mutabaah.report.view', 'mutabaah.recap.view',
             ])));
         }
         foreach (['Waka Kurikulum', 'waka_kurikulum'] as $roleName) {
