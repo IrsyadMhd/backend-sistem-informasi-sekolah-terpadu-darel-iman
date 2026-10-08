@@ -21,18 +21,20 @@ class StudentMutationController extends Controller
      */
     private function scopeForUser(User $user): array
     {
+        $accessScope = app(\App\Services\AccessScopeService::class);
         $employee = Employee::query()
             ->with(['position:id,name,scope_akses', 'unit:id,name'])
             ->where('user_id', $user->id)
             ->first();
 
-        $canAccessAllUnits = $user->can('student.view_all')
+        $canAccessAllUnits = $accessScope->hasGlobalScope($user)
             || $user->can('foundation.student.view')
             || $user->can('report.cross_unit.view')
             || $employee?->position?->scope_akses === 'semua_unit'
             || str_contains(strtolower((string) $employee?->position?->name), 'yayasan');
 
         $unitId = $employee?->unit_id
+            ?? $accessScope->accessibleEducationUnits($user)->value('id')
             ?? data_get($user->metadata, 'unit_id')
             ?? data_get($user->metadata, 'unit_pendidikan_id');
 
@@ -45,7 +47,7 @@ class StudentMutationController extends Controller
     public function index(Request $request): JsonResponse
     {
         [$canAccessAllUnits, $userUnitId] = $this->scopeForUser($request->user());
-        $requestedUnitId = $request->query('unit_id');
+        $requestedUnitId = $request->query('unit_id') ?? $request->query('education_unit_id') ?? $request->query('unit_pendidikan_id');
 
         $query = StudentMutation::query()
             ->with([
@@ -61,11 +63,12 @@ class StudentMutationController extends Controller
 
         if (! $canAccessAllUnits) {
             abort_unless($userUnitId, 403, 'Akun Anda tidak memiliki cakupan unit pendidikan.');
+            abort_if($requestedUnitId && $requestedUnitId !== $userUnitId, 403, 'Akses data lintas unit tidak diizinkan.');
             $query->where(function ($q) use ($userUnitId) {
                 $q->where('unit_asal_id', $userUnitId)
                   ->orWhere('unit_tujuan_id', $userUnitId);
             });
-        } elseif (! empty($requestedUnitId)) {
+        } elseif (! empty($requestedUnitId) && ! in_array(strtolower((string) $requestedUnitId), ['all', 'semua'], true)) {
             $query->where(function ($q) use ($requestedUnitId) {
                 $q->where('unit_asal_id', $requestedUnitId)
                   ->orWhere('unit_tujuan_id', $requestedUnitId);
