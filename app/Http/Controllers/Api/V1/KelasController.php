@@ -346,25 +346,21 @@ class KelasController extends Controller
         if ($isUuid) {
             $legacyClass = \App\Models\SchoolClass::find($id);
             if ($legacyClass) {
-                $matchedKelas = Kelas::where('nama_kelas', $legacyClass->name)
-                    ->orWhere('kode_kelas', $legacyClass->code ?? $legacyClass->name)
-                    ->first();
+                $matchedKelas = (clone $query)->where(function ($mq) use ($legacyClass) {
+                    $mq->where('nama_kelas', $legacyClass->name)
+                       ->orWhere('kode_kelas', $legacyClass->code ?? $legacyClass->name);
+                })->first();
                 if ($matchedKelas) {
                     return $matchedKelas;
                 }
-                $fallback = new Kelas();
-                $fallback->id = $legacyClass->id;
-                $fallback->nama_kelas = $legacyClass->name;
-                $fallback->kode_kelas = $legacyClass->code ?? $legacyClass->name;
-                return $fallback;
+            }
+
+            if (Kelas::where('id', $id)->exists() || \App\Models\SchoolClass::where('id', $id)->exists()) {
+                abort(Response::HTTP_FORBIDDEN, 'Akses data kelas di luar unit wewenang Anda ditolak.');
             }
         }
 
-        if (! $isUuid) {
-            abort(Response::HTTP_NOT_FOUND, 'Data kelas tidak ditemukan.');
-        }
-
-        return $query->whereKey($id)->firstOrFail();
+        abort(Response::HTTP_NOT_FOUND, 'Data kelas tidak ditemukan.');
     }
 
     private function accessibleRombelIds(Request $request, bool $withTrashed = false): array
