@@ -20,7 +20,7 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // Roles/permissions, core logins (SuperAdmin & Admin), navigation & system defaults are safe bootstrap data.
+        // Roles/permissions, core logins (SuperAdmin & Admin), navigation, system defaults & Islamic reference masters are safe bootstrap data.
         $this->call([
             RolePermissionSeeder::class,
             AttendancePermissionSeeder::class,
@@ -28,7 +28,10 @@ class DatabaseSeeder extends Seeder
             StudentCardSettingsSeeder::class,
             CoreAdminUserSeeder::class,
             AppNavigationSeeder::class,
+            MasterJenisUnitPendidikanSeeder::class,
             TransportationModeSeeder::class,
+            QuranSurahSeeder::class,
+            DoaSeeder::class,
         ]);
 
         // All records below are development/simulation fixtures.
@@ -76,8 +79,6 @@ class DatabaseSeeder extends Seeder
             WorshipAttendanceSeeder::class,
             MutabaahEnterpriseSeeder::class,
             MutabaahProgramAndRuleSeeder::class,
-            QuranSurahSeeder::class,
-            DoaSeeder::class,
             PrayerScheduleSeeder::class,
         ]);
 
