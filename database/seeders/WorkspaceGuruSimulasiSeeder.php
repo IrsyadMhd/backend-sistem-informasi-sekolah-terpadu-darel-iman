@@ -10,6 +10,7 @@ use App\Models\Semester;
 use App\Models\Student;
 use App\Models\StudentNote;
 use App\Models\Subject;
+use App\Models\TahfizhDailyLog;
 use App\Models\TahfizhRecord;
 use App\Models\Teacher;
 use App\Models\User;
@@ -390,6 +391,32 @@ class WorkspaceGuruSimulasiSeeder extends Seeder
                             'type'         => $r % 2 === 0 ? 'Ziyadah' : 'Murojaah',
                         ]),
                     ]);
+
+                    TahfizhDailyLog::query()->firstOrCreate(
+                        [
+                            'student_id'  => $student->id,
+                            'record_date' => $depositDate,
+                            'hafalan_surah_name' => $surah['nama'],
+                        ],
+                        [
+                            'class_id'             => $kelasId,
+                            'teacher_id'           => $teacher->id,
+                            'day_name'             => Carbon::parse($depositDate)->locale('id')->isoFormat('dddd'),
+                            'hafalan_surah_number' => $surah['nomor'],
+                            'hafalan_ayah_start'   => $ayahStart,
+                            'hafalan_ayah_end'     => $ayahEnd,
+                            'hafalan_baris'        => $ayahEnd - $ayahStart + 1,
+                            'murajaah_lembar'      => $r % 2 !== 0 ? 1.0 : 0.0,
+                            'status'               => 'verified',
+                            'metadata'             => [
+                                'juz'        => $surah['juz'],
+                                'type'       => $r % 2 === 0 ? 'Ziyadah' : 'Murojaah',
+                                'tajwid'     => 'Baik',
+                                'makhraj'    => 'Baik',
+                                'kelancaran' => 'Sangat Lancar',
+                            ],
+                        ]
+                    );
                     $totalRecords++;
                 }
             }
