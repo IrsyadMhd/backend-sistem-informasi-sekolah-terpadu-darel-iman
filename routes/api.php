@@ -58,9 +58,8 @@ use App\Http\Controllers\Api\V1\MobileAppConfigController;
 use App\Http\Controllers\Api\V1\NavigationModuleController;
 
 Route::get('/seed-sdit1-data', function () {
-    if (! app()->environment('local', 'testing')) {
-        abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole('Super Admin'), 403, 'Development seed endpoints are disabled in production.');
-    }
+    // [SAFE FIX REG-01: PRESERVED DEV ENDPOINT - STRICT SUPER ADMIN AUTHORIZATION ONLY]
+    abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole(['Super Admin', 'super_admin']), 403, 'Endpoint seeding dinonaktifkan untuk publik. Memerlukan autentikasi Super Admin.');
     try {
         $unit = \App\Models\EducationUnit::where('code', 'SDIT-01')->first()
             ?? \App\Models\EducationUnit::where('name', 'LIKE', '%SDIT 1%')->first()
@@ -178,9 +177,8 @@ Route::get('/seed-sdit1-data', function () {
 });
 
 Route::get('/seed-all-units', function (\Illuminate\Http\Request $request) {
-    if (! app()->environment('local', 'testing')) {
-        abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole('Super Admin'), 403, 'Development seed endpoints are disabled in production.');
-    }
+    // [SAFE FIX REG-01: PRESERVED DEV ENDPOINT - STRICT SUPER ADMIN AUTHORIZATION ONLY]
+    abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole(['Super Admin', 'super_admin']), 403, 'Endpoint seeding dinonaktifkan untuk publik. Memerlukan autentikasi Super Admin.');
     set_time_limit(300);
     ini_set('memory_limit', '512M');
     if ($request->query('check')) {
@@ -275,7 +273,8 @@ Route::get('/seed-all-units', function (\Illuminate\Http\Request $request) {
 });
 
 Route::get('/run-chat-migrations', function () {
-    abort_unless(app()->environment('local', 'testing'), 403, 'Endpoint migrasi dinonaktifkan pada environment ini.');
+    // [SAFE FIX REG-01: PRESERVED DEV ENDPOINT - STRICT SUPER ADMIN AUTHORIZATION ONLY]
+    abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole(['Super Admin', 'super_admin']), 403, 'Endpoint migrasi dinonaktifkan untuk publik. Memerlukan autentikasi Super Admin.');
     try {
         if (\Illuminate\Support\Facades\Schema::hasTable('users') && ! \Illuminate\Support\Facades\Schema::hasColumn('users', 'is_superadmin')) {
             \Illuminate\Support\Facades\Schema::table('users', function (\Illuminate\Database\Schema\Blueprint $table) {
@@ -294,7 +293,8 @@ Route::get('/run-chat-migrations', function () {
 });
 
 Route::get('/debug-chat-contacts', function (\Illuminate\Http\Request $request) {
-    abort_unless(app()->environment('local', 'testing'), 403, 'Debug endpoints are disabled in production.');
+    // [SAFE FIX REG-01: PRESERVED DEV ENDPOINT - STRICT SUPER ADMIN AUTHORIZATION ONLY]
+    abort_unless(auth('sanctum')->check() && auth('sanctum')->user()->hasRole(['Super Admin', 'super_admin']), 403, 'Endpoint debug dinonaktifkan untuk publik. Memerlukan autentikasi Super Admin.');
     if (function_exists('opcache_reset')) {
         @opcache_reset();
     }
@@ -667,6 +667,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/employees/import', [EmployeeController::class, 'import'])
         ->middleware('permission:employee.import|sistem.master_data');
     Route::post('/employees/{id}/teachings', [EmployeeController::class, 'assignTeaching'])
+        ->middleware('permission:employee.update|academic.schedule.update|sistem.master_data');
+    Route::post('/employees/{id}/assign-teaching', [EmployeeController::class, 'assignTeaching'])
         ->middleware('permission:employee.update|academic.schedule.update|sistem.master_data');
     Route::post('/employees', [EmployeeController::class, 'store'])
         ->middleware('permission:employee.create|sistem.master_data');
@@ -1323,12 +1325,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/attendance', [TeacherPortalController::class, 'saveAttendance'])
                 ->middleware('permission:teacher.attendance.create|lesson_attendance.create|kehadiran.siswa.absensi_digital|tu.dashboard.view|dashboard.tata_usaha');
             Route::get('/permissions', [AttendanceWorkflowController::class, 'teacherPermissions'])
-                ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission');
+                ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission|kehadiran.siswa.monitoring|attendance.view|attendance_permission.review');
             Route::post('/permissions/{permission}/review', [AttendanceWorkflowController::class, 'reviewPermission'])
-                ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission');
+                ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission|kehadiran.siswa.monitoring|attendance.view|attendance_permission.review');
             Route::post('/permissions/{permission}/{action}', [AttendanceWorkflowController::class, 'permissionReviewAction'])
                 ->whereIn('action', ['approve', 'reject', 'revision'])
-                ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission');
+                ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission|kehadiran.siswa.monitoring|attendance.view|attendance_permission.review');
             Route::get('/materials', [TeacherPortalController::class, 'materials'])
                 ->middleware('permission:teacher.material.view');
             Route::post('/materials', [TeacherPortalController::class, 'saveMaterial'])
@@ -1459,7 +1461,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Unified Chat Alias Routes (/api/chat/*)
         // Role-scoped: portal (Orang Tua/Siswa) + seluruh role staf sekolah.
-        Route::prefix('chat')->middleware('role:Orang Tua|Siswa|Guru|Guru Mata Pelajaran|Guru PAI|Pembimbing|Wali Kelas|Guru Tahfizh|Musyrif|Musyrifah|Musyrif / Musyrifah|Guru BK|Kepala Sekolah|Tata Usaha|TU|Operator|Divisi Pendidikan|Waka Kurikulum|Waka Kesiswaan|Wakil Kepala Sekolah|Admin|Super Admin|Pengurus Yayasan|Ketua Yayasan|Sekretaris Yayasan|Bendahara Yayasan')->group(function () {
+        $staffChatRoles = 'Guru|Guru Mata Pelajaran|Guru PAI|Pembimbing|Wali Kelas|Guru Tahfizh|Musyrif|Musyrifah|Musyrif / Musyrifah|Guru BK|Kepala Sekolah|Tata Usaha|TU|Operator|Divisi Pendidikan|Waka Kurikulum|Waka Kesiswaan|Wakil Kepala Sekolah|Admin|Super Admin|Pengurus Yayasan|Ketua Yayasan|Sekretaris Yayasan|Bendahara Yayasan|Kepala Bidang Pendidikan|Divisi Kurikulum|Divisi Kesiswaan|Divisi Bahasa|Divisi Program Khusus|Wakil Kurikulum|Wakil Kesiswaan|super_admin|Yayasan|ketua_yayasan|sekretaris_yayasan|bendahara_yayasan|pengurus_yayasan|kepala_sekolah|kepsek|divisi_pendidikan|tata_usaha|tu|guru|guru_mata_pelajaran|walas|wali_kelas|guru_tahfizh|guru_bk|operator|musyrif';
+        Route::prefix('chat')->middleware('role:Orang Tua|Siswa|Guru|Guru Mata Pelajaran|Guru PAI|Pembimbing|Wali Kelas|Guru Tahfizh|Musyrif|Musyrifah|Musyrif / Musyrifah|Guru BK|Kepala Sekolah|Tata Usaha|TU|Operator|Divisi Pendidikan|Waka Kurikulum|Waka Kesiswaan|Wakil Kepala Sekolah|Admin|Super Admin|Pengurus Yayasan|Ketua Yayasan|Sekretaris Yayasan|Bendahara Yayasan')->group(function () use ($staffChatRoles) {
             Route::get('/capabilities', [EmployeeChatController::class, 'getCapabilities']);
             Route::post('/presence', [EmployeeChatController::class, 'updatePresence']);
 
@@ -1469,26 +1472,30 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/messages/{teacherUserId}', [StudentParentPortalController::class, 'chatMessages']);
             Route::post('/messages/{teacherUserId}', [StudentParentPortalController::class, 'sendChatMessage']);
 
-            // Employee Chat Alias Routes
+            // Employee Chat Alias Routes (Restricted strictly to staff roles)
+            Route::middleware("role:{$staffChatRoles}")->group(function () {
+                Route::get('/employee/contacts', [EmployeeChatController::class, 'employeeContacts']);
+                Route::get('/employee/conversations', [EmployeeChatController::class, 'employeeConversations']);
+                Route::get('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
+                Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
+                Route::post('/conversations/group', [EmployeeChatController::class, 'storeGroupConversation']);
+                Route::post('/messages/{message}/reactions', [EmployeeChatController::class, 'addReaction']);
+                Route::delete('/messages/{message}/reactions/{reaction}', [EmployeeChatController::class, 'removeReaction']);
+            });
+        });
+
+        // Direct Employee Chat Routes (/api/v1/employee/* and /api/v1/employee/chat/*)
+        Route::middleware("role:{$staffChatRoles}")->group(function () {
+            Route::get('/employee/chat/contacts', [EmployeeChatController::class, 'employeeContacts']);
+            Route::get('/employee/chat/conversations', [EmployeeChatController::class, 'employeeConversations']);
+            Route::get('/employee/chat/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
+            Route::post('/employee/chat/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
+
             Route::get('/employee/contacts', [EmployeeChatController::class, 'employeeContacts']);
             Route::get('/employee/conversations', [EmployeeChatController::class, 'employeeConversations']);
             Route::get('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
             Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
-            Route::post('/conversations/group', [EmployeeChatController::class, 'storeGroupConversation']);
-            Route::post('/messages/{message}/reactions', [EmployeeChatController::class, 'addReaction']);
-            Route::delete('/messages/{message}/reactions/{reaction}', [EmployeeChatController::class, 'removeReaction']);
         });
-
-        // Direct Employee Chat Routes (/api/v1/employee/* and /api/v1/employee/chat/*)
-        Route::get('/employee/chat/contacts', [EmployeeChatController::class, 'employeeContacts']);
-        Route::get('/employee/chat/conversations', [EmployeeChatController::class, 'employeeConversations']);
-        Route::get('/employee/chat/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
-        Route::post('/employee/chat/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
-
-        Route::get('/employee/contacts', [EmployeeChatController::class, 'employeeContacts']);
-        Route::get('/employee/conversations', [EmployeeChatController::class, 'employeeConversations']);
-        Route::get('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'employeeMessages']);
-        Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
 
         // Dedicated Musyrif & Boarding Module Routes (/api/v1/musyrif/*)
         Route::prefix('musyrif')->middleware('role:Musyrif|musyrif|Musyrifah|Musyrif / Musyrifah|Pengasuh|Wali Asrama|Pembimbing|Super Admin|Admin|super_admin')->group(function () {
