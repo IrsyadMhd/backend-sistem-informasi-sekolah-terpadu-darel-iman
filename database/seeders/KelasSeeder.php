@@ -66,8 +66,8 @@ class KelasSeeder extends Seeder
         // Sampel data kelas per jenjang unit
         $sampleClasses = [
             'SDIT' => [
-                ['tingkat' => '1', 'kode' => 'SD-1A', 'nama' => 'Kelas 1 Abu Bakar', 'ruangan' => 'Gedung A R-101', 'kapasitas' => 28],
-                ['tingkat' => '1', 'kode' => 'SD-1B', 'nama' => 'Kelas 1 Umar', 'ruangan' => 'Gedung A R-102', 'kapasitas' => 28],
+                ['tingkat' => '1', 'kode' => 'SD-1A', 'nama' => 'Kelas 1 Abu Bakar', 'ruangan' => 'Gedung A R-101', 'kapasitas' => 30],
+                ['tingkat' => '1', 'kode' => 'SD-1B', 'nama' => 'Kelas 1 Umar', 'ruangan' => 'Gedung A R-102', 'kapasitas' => 30],
                 ['tingkat' => '2', 'kode' => 'SD-2A', 'nama' => 'Kelas 2 Utsman', 'ruangan' => 'Gedung A R-201', 'kapasitas' => 30],
                 ['tingkat' => '3', 'kode' => 'SD-3A', 'nama' => 'Kelas 3 Ali', 'ruangan' => 'Gedung A R-301', 'kapasitas' => 30],
             ],
