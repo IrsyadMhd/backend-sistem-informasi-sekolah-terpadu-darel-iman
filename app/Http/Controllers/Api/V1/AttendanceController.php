@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\AcademicYear;
 use App\Models\Attendance;
+use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Semester;
 use App\Models\User;
@@ -346,6 +347,54 @@ class AttendanceController extends Controller
 
             $academicYearId = $academicYearId ?: ($activeAy?->id ?? ($user?->metadata['academic_year_id'] ?? null));
             $semesterId = $semesterId ?: ($activeSem?->id ?? ($user?->metadata['semester_id'] ?? null));
+        }
+
+        // ── Validasi Geofencing Jarak Unit Pendidikan (Maksimal 30 Meter) ──
+        if ($unitId) {
+            $educationUnit = EducationUnit::find($unitId);
+            if ($educationUnit && $educationUnit->latitude !== null && $educationUnit->longitude !== null) {
+                $userLat = $validated['latitude'] ?? null;
+                $userLng = $validated['longitude'] ?? null;
+
+                if ($userLat === null || $userLng === null) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Presensi ditolak. Koordinat GPS perangkat wajib aktif untuk memverifikasi kehadiran di lokasi ' . $educationUnit->name . '.',
+                    ], 422);
+                }
+
+                // Ketentuan ketat: radius toleransi maksimal 30 meter
+                $maxRadius = (int) ($educationUnit->radius_meter ?: 30);
+                $maxRadius = min($maxRadius, 30);
+
+                $distanceMeter = $this->calculateHaversineDistance(
+                    (float) $educationUnit->latitude,
+                    (float) $educationUnit->longitude,
+                    (float) $userLat,
+                    (float) $userLng
+                );
+
+                if ($distanceMeter > $maxRadius) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => sprintf(
+                            'Presensi ditolak. Anda berada di luar radius lokasi %s (Jarak Anda: %d meter, maksimal toleransi: %d meter). Mohon lakukan presensi langsung di area sekolah.',
+                            $educationUnit->name,
+                            (int) round($distanceMeter),
+                            $maxRadius
+                        ),
+                        'data' => [
+                            'unit_name' => $educationUnit->name,
+                            'distance_meter' => round($distanceMeter, 1),
+                            'max_radius_meter' => $maxRadius,
+                            'unit_latitude' => (float) $educationUnit->latitude,
+                            'unit_longitude' => (float) $educationUnit->longitude,
+                            'user_latitude' => (float) $userLat,
+                            'user_longitude' => (float) $userLng,
+                        ],
+                    ], 422);
+                }
+            }
         }
 
         $attachmentPath = null;
@@ -824,5 +873,24 @@ class AttendanceController extends Controller
         }
 
         return $dateLabel;
+    }
+
+    /**
+     * Hitung jarak dua titik koordinat dalam satuan meter (Formula Haversine).
+     */
+    protected function calculateHaversineDistance(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $earthRadius = 6371000; // Radius bumi dalam meter
+
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+
+        $a = sin($dLat / 2) * sin($dLat / 2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($dLon / 2) * sin($dLon / 2);
+
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return $earthRadius * $c;
     }
 }
