@@ -29,13 +29,21 @@ class MutabaahDailyService
 
     public function assignments(User $user, string $date): Collection
     {
-        $employeeId = Employee::query()->where('user_id', $user->id)->value('id');
-        abort_unless($employeeId || $user->hasRole('Super Admin'), 403, 'Akun tidak terhubung dengan data pembimbing.');
+        $employee = Employee::query()->where('user_id', $user->id)->first();
+        $employeeId = $employee?->id;
+        $unitId = $user->education_unit_id ?: $employee?->unit_id ?: $employee?->education_unit_id;
+
+        $isSupervisor = $user->hasRole(['Super Admin', 'Kepala Sekolah', 'Tata Usaha'])
+            || $user->can('mutabaah.report.view')
+            || $user->can('mutabaah.recap.view');
+
+        abort_unless($employeeId || $isSupervisor, 403, 'Akun tidak terhubung dengan data pembimbing.');
 
         return MutabaahSupervisorAssignment::query()
             ->with(['employee:id,nama_lengkap', 'educationUnit:id,name', 'kelas:id,name,level', 'rombel:id,nama_kelas', 'template.items.agendaItem.category'])
             ->active()->byDate($date)
-            ->when(! $user->hasRole('Super Admin'), fn (Builder $q) => $q->where('employee_id', $employeeId))
+            ->when(! $user->hasRole('Super Admin') && ! $isSupervisor, fn (Builder $q) => $q->where('employee_id', $employeeId))
+            ->when($isSupervisor && ! $user->hasRole('Super Admin') && $unitId, fn (Builder $q) => $q->where('education_unit_id', $unitId))
             ->orderByDesc('is_primary')->get();
     }
 
@@ -51,10 +59,10 @@ class MutabaahDailyService
 
         return [
             'date' => $date,
-            'assignments' => $assignments->map(fn ($item) => $this->assignmentData($item)),
+            'assignments' => $assignments->map(fn ($item) => $this->assignmentData($item, $user)),
             'selected_assignment_id' => $assignment?->id,
             'template' => $template ? $this->templateData($template, $assignment) : null,
-            'can_reopen' => $user->hasRole('Super Admin') || $user->can('mutabaah.daily.reopen'),
+            'can_reopen' => ($user->hasRole('Super Admin') || $user->can('mutabaah.daily.reopen')) && ! $user->hasRole('Kepala Sekolah'),
         ];
     }
 
@@ -152,6 +160,8 @@ class MutabaahDailyService
 
     public function saveCell(User $user, array $data, Request $request): MutabaahDailyHeader
     {
+        abort_if($user->hasRole('Kepala Sekolah'), 403, 'Akses Kepala Sekolah hanya untuk monitoring dan rekapitulasi data.');
+
         return DB::transaction(function () use ($user, $data) {
             $assignment = $this->ownedAssignment($user, $data['supervisor_assignment_id'], $data['activity_date']);
             abort_unless($assignment->can_input || $assignment->can_edit, 403, 'Assignment tidak memiliki hak input.');
@@ -220,6 +230,8 @@ class MutabaahDailyService
 
     public function finalize(User $user, array $data): int
     {
+        abort_if($user->hasRole('Kepala Sekolah'), 403, 'Akses Kepala Sekolah hanya untuk monitoring dan rekapitulasi data.');
+
         return DB::transaction(function () use ($user, $data) {
             $assignment = $this->ownedAssignment($user, $data['supervisor_assignment_id'], $data['activity_date']);
             abort_unless($assignment->can_finalize, 403, 'Assignment tidak memiliki hak finalisasi.');
@@ -303,17 +315,22 @@ class MutabaahDailyService
         );
     }
 
-    private function assignmentData($item): array
+    private function assignmentData($item, ?User $user = null): array
     {
+        $isPrincipal = $user && $user->hasRole('Kepala Sekolah');
+
         return ['id' => $item->id, 'type' => $item->supervisor_type->value, 'unit_id' => $item->education_unit_id,
             'unit_name' => $item->educationUnit?->name, 'kelas_id' => $item->kelas_id, 'kelas_name' => $item->kelas?->name,
             'rombel_id' => $item->rombel_id, 'rombel_name' => $item->rombel?->nama_kelas,
             'dormitory_id' => $item->dormitory_id, 'room_id' => $item->room_id, 'mentoring_group' => $item->mentoring_group,
-            'can_input' => $item->can_input, 'can_finalize' => $item->can_finalize];
+            'can_input' => $isPrincipal ? false : (bool) $item->can_input,
+            'can_finalize' => $isPrincipal ? false : (bool) $item->can_finalize];
     }
 
     public function verifyHomeItems(User $user, array $data): int
     {
+        abort_if($user->hasRole('Kepala Sekolah'), 403, 'Akses Kepala Sekolah hanya untuk monitoring dan rekapitulasi data.');
+
         return DB::transaction(function () use ($user, $data) {
             $assignment = $this->ownedAssignment($user, $data['supervisor_assignment_id'], $data['activity_date']);
             $headers = MutabaahDailyHeader::query()

@@ -4,8 +4,12 @@ namespace App\Services;
 
 use App\Models\Employee;
 use App\Models\EmployeeTeaching;
+use App\Models\Kelas;
 use App\Models\Position;
+use App\Models\SchoolClass;
+use App\Models\Subject;
 use App\Repositories\Contracts\EmployeeRepositoryInterface;
+use Illuminate\Support\Facades\DB;
 
 class EmployeeService
 {
@@ -24,6 +28,88 @@ class EmployeeService
             $query->where('unit_id', $filters['unit_id']);
         } elseif (array_key_exists('allowed_unit_ids', $filters) && is_array($filters['allowed_unit_ids'])) {
             $query->whereIn('unit_id', $filters['allowed_unit_ids']);
+        }
+
+        if (! empty($filters['exclude_restricted_roles'])) {
+            $query->whereDoesntHave('position', function ($q) {
+                $q->whereIn('level_jabatan', [1, 2, 7])
+                    ->orWhere('satuan_kerja', 'Pengurus')
+                    ->orWhere('satuan_kerja', 'Bidang Pendidikan')
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%pembina%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%pengawas%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%superadmin%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%super admin%'])
+                    ->orWhereRaw('LOWER(name) LIKE ?', ['%administrator%']);
+            });
+            $query->whereDoesntHave('user.roles', function ($q) {
+                $q->whereIn('name', [
+                    'Super Admin',
+                    'super_admin',
+                    'superadmin',
+                    'Admin',
+                    'admin',
+                    'administrator',
+                    'Operator',
+                    'operator',
+                    'operator_sekolah',
+                    'Pengurus Yayasan',
+                    'pengurus_yayasan',
+                    'Yayasan',
+                    'yayasan',
+                    'Ketua Yayasan',
+                    'ketua_yayasan',
+                    'Sekretaris Yayasan',
+                    'sekretaris_yayasan',
+                    'Bendahara Yayasan',
+                    'bendahara_yayasan',
+                    'Divisi Pendidikan',
+                    'divisi_pendidikan',
+                    'Kepala Bidang Pendidikan',
+                    'kepala_bidang_pendidikan',
+                ]);
+            });
+            $query->whereDoesntHave('role', function ($q) {
+                $q->whereIn('name', [
+                    'Super Admin',
+                    'super_admin',
+                    'superadmin',
+                    'Admin',
+                    'admin',
+                    'administrator',
+                    'Operator',
+                    'operator',
+                    'operator_sekolah',
+                    'Pengurus Yayasan',
+                    'pengurus_yayasan',
+                    'Yayasan',
+                    'yayasan',
+                    'Ketua Yayasan',
+                    'ketua_yayasan',
+                    'Sekretaris Yayasan',
+                    'sekretaris_yayasan',
+                    'Bendahara Yayasan',
+                    'bendahara_yayasan',
+                    'Divisi Pendidikan',
+                    'divisi_pendidikan',
+                    'Kepala Bidang Pendidikan',
+                    'kepala_bidang_pendidikan',
+                ]);
+            });
+            $query->where(function ($q) {
+                $q->whereNull('nama_lengkap')
+                  ->orWhere(function ($sq) {
+                      $sq->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%yayasan%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%divisi pendidikan%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%bidang pendidikan%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%superadmin%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%super admin%'])
+                         ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%operator%']);
+                  });
+            });
         }
 
         $totalPegawai = (clone $query)->count();
@@ -114,11 +200,17 @@ class EmployeeService
         $topTeacherHours = (int) ($topTeacherData?->total_jam ?? 0);
 
         $avgHoursPerGuru = $totalGuru > 0 ? round($totalScheduleCount / $totalGuru, 1) : 0;
+        $totalTendik = max(0, $totalPegawai - $totalGuru);
 
         return [
             'total_pegawai' => $totalPegawai,
+            'total_employees' => $totalPegawai,
             'total_aktif' => $totalAktif,
+            'total_active' => $totalAktif,
             'total_guru' => $totalGuru,
+            'total_teachers' => $totalGuru,
+            'total_tendik' => $totalTendik,
+            'total_staff' => $totalTendik,
             'total_tu_operator' => $totalTUOperator,
             'by_unit' => $byUnit,
             'by_jabatan' => $byJabatan,
@@ -173,22 +265,81 @@ class EmployeeService
 
     public function assignTeaching(string $employeeId, array $teachingsData)
     {
-        EmployeeTeaching::where('employee_id', $employeeId)->delete();
+        return DB::transaction(function () use ($employeeId, $teachingsData) {
+            EmployeeTeaching::where('employee_id', $employeeId)->delete();
 
-        $created = [];
-        foreach ($teachingsData as $item) {
-            $created[] = EmployeeTeaching::create([
-                'employee_id' => $employeeId,
-                'classroom_id' => $item['classroom_id'] ?? null,
-                'subject_id' => $item['subject_id'] ?? null,
-                'academic_year_id' => $item['academic_year_id'] ?? null,
-                'semester_id' => $item['semester_id'] ?? null,
-                'aktif' => $item['aktif'] ?? true,
-                'metadata' => $item['metadata'] ?? null,
-            ]);
-        }
+            $created = [];
+            $seen = [];
+            foreach ($teachingsData as $item) {
+                if (! is_array($item)) {
+                    continue;
+                }
 
-        return $created;
+                $classroomId = $item['classroom_id'] ?? null;
+                $subjectId = $item['subject_id'] ?? null;
+                $metadata = is_array($item['metadata'] ?? null) ? $item['metadata'] : [];
+
+                // Extract string labels if present
+                $mapelName = $item['mapel'] ?? $metadata['mapel'] ?? null;
+                $kelasName = $item['kelas'] ?? $metadata['kelas'] ?? null;
+                $tahunName = $item['tahun'] ?? $metadata['tahun'] ?? null;
+                $semesterName = $item['semester'] ?? $metadata['semester'] ?? null;
+
+                if ($mapelName) {
+                    $metadata['mapel'] = $mapelName;
+                }
+                if ($kelasName) {
+                    $metadata['kelas'] = $kelasName;
+                }
+                if ($tahunName) {
+                    $metadata['tahun'] = $tahunName;
+                }
+                if ($semesterName) {
+                    $metadata['semester'] = $semesterName;
+                }
+
+                // Resolve subject_id by name if null
+                if (! $subjectId && $mapelName) {
+                    $matchedSubject = Subject::where('name', $mapelName)
+                        ->orWhere('nama_mapel', $mapelName)
+                        ->first();
+                    if ($matchedSubject) {
+                        $subjectId = $matchedSubject->id;
+                    }
+                }
+
+                // Resolve classroom_id by name if null
+                if (! $classroomId && $kelasName) {
+                    $matchedClass = SchoolClass::where('name', $kelasName)->first()
+                        ?? Kelas::where('nama_kelas', $kelasName)->first();
+                    if ($matchedClass) {
+                        $classroomId = $matchedClass->id;
+                    }
+                }
+
+                $dedupKey = ($classroomId ?? $kelasName ?? '') . '|'
+                    . ($subjectId ?? $mapelName ?? '') . '|'
+                    . ($item['academic_year_id'] ?? $tahunName ?? '') . '|'
+                    . ($item['semester_id'] ?? $semesterName ?? '');
+
+                if ($dedupKey !== '|||' && isset($seen[$dedupKey])) {
+                    continue;
+                }
+                $seen[$dedupKey] = true;
+
+                $created[] = EmployeeTeaching::create([
+                    'employee_id' => $employeeId,
+                    'classroom_id' => $classroomId,
+                    'subject_id' => $subjectId,
+                    'academic_year_id' => $item['academic_year_id'] ?? null,
+                    'semester_id' => $item['semester_id'] ?? null,
+                    'aktif' => $item['aktif'] ?? true,
+                    'metadata' => ! empty($metadata) ? $metadata : null,
+                ]);
+            }
+
+            return $created;
+        });
     }
 
     public function getPositions()

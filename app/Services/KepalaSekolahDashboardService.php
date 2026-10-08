@@ -59,10 +59,90 @@ class KepalaSekolahDashboardService
             });
         }
 
+        $like = DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
         $employeeQuery = Employee::query();
         if ($targetUnitId && $unit) {
             $employeeQuery->where('unit_id', $targetUnitId);
         }
+        $employeeQuery->whereDoesntHave('position', function ($q) {
+            $q->whereIn('level_jabatan', [1, 2, 7])
+                ->orWhere('satuan_kerja', 'Pengurus')
+                ->orWhere('satuan_kerja', 'Bidang Pendidikan')
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%pembina%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%pengawas%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%superadmin%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%super admin%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%administrator%']);
+        });
+        $employeeQuery->whereDoesntHave('user.roles', function ($q) {
+            $q->whereIn('name', [
+                'Super Admin',
+                'super_admin',
+                'superadmin',
+                'Admin',
+                'admin',
+                'administrator',
+                'Operator',
+                'operator',
+                'operator_sekolah',
+                'Pengurus Yayasan',
+                'pengurus_yayasan',
+                'Yayasan',
+                'yayasan',
+                'Ketua Yayasan',
+                'ketua_yayasan',
+                'Sekretaris Yayasan',
+                'sekretaris_yayasan',
+                'Bendahara Yayasan',
+                'bendahara_yayasan',
+                'Divisi Pendidikan',
+                'divisi_pendidikan',
+                'Kepala Bidang Pendidikan',
+                'kepala_bidang_pendidikan',
+            ]);
+        });
+        $employeeQuery->whereDoesntHave('role', function ($q) {
+            $q->whereIn('name', [
+                'Super Admin',
+                'super_admin',
+                'superadmin',
+                'Admin',
+                'admin',
+                'administrator',
+                'Operator',
+                'operator',
+                'operator_sekolah',
+                'Pengurus Yayasan',
+                'pengurus_yayasan',
+                'Yayasan',
+                'yayasan',
+                'Ketua Yayasan',
+                'ketua_yayasan',
+                'Sekretaris Yayasan',
+                'sekretaris_yayasan',
+                'Bendahara Yayasan',
+                'bendahara_yayasan',
+                'Divisi Pendidikan',
+                'divisi_pendidikan',
+                'Kepala Bidang Pendidikan',
+                'kepala_bidang_pendidikan',
+            ]);
+        });
+        $employeeQuery->where(function ($q) {
+            $q->whereNull('nama_lengkap')
+              ->orWhere(function ($sq) {
+                  $sq->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%yayasan%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%divisi pendidikan%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%bidang pendidikan%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%superadmin%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%super admin%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%operator%']);
+              });
+        });
 
         $classQuery = Kelas::query();
         if ($targetUnitId && $unit) {
@@ -85,6 +165,7 @@ class KepalaSekolahDashboardService
         })->count();
 
         $totalPegawai = (clone $employeeQuery)->count();
+        $totalTendik = max(0, $totalPegawai - $totalGuru);
 
         $totalKelas = (clone $classQuery)->count();
 
@@ -119,7 +200,7 @@ class KepalaSekolahDashboardService
             : null;
         $latestActiveDate = max($latestGate, $latestLms);
 
-        $attDateToUse = ! empty($filters['date']) ? $filters['date'] : (! empty($filters['attendance_date']) ? $filters['attendance_date'] : $today);
+        $attDateToUse = ! empty($filters['date']) ? $filters['date'] : (! empty($filters['attendance_date']) ? $filters['attendance_date'] : ($latestActiveDate ?: $today));
 
         if ($studentIds->isNotEmpty()) {
             $gateMap = Schema::hasTable('attendances')
@@ -169,12 +250,25 @@ class KepalaSekolahDashboardService
             }
         }
 
-        // Tahfizh setoran hari ini
+        // Tahfizh setoran hari ini / aktif
         $setoranTahfizhHariIni = 0;
-        if (Schema::hasTable('tahfizh_records')) {
+        $studentIds = (clone $studentQuery)->pluck('id');
+        if (Schema::hasTable('tahfizh_daily_logs')) {
+            $tQuery = DB::table('tahfizh_daily_logs')
+                ->whereDate('record_date', $attDateToUse);
+            if ($studentIds->isNotEmpty()) {
+                $tQuery->whereIn('student_id', $studentIds);
+            }
+            $setoranTahfizhHariIni = $tQuery->count();
+            if ($setoranTahfizhHariIni === 0 && empty($filters['date']) && empty($filters['attendance_date']) && $studentIds->isNotEmpty()) {
+                $latestTDate = DB::table('tahfizh_daily_logs')->whereIn('student_id', $studentIds)->max('record_date');
+                if ($latestTDate) {
+                    $setoranTahfizhHariIni = DB::table('tahfizh_daily_logs')->whereIn('student_id', $studentIds)->whereDate('record_date', $latestTDate)->count();
+                }
+            }
+        } elseif (Schema::hasTable('tahfizh_records')) {
             $tQuery = DB::table('tahfizh_records')
-                ->whereDate('record_date', $today);
-            $studentIds = (clone $studentQuery)->pluck('id');
+                ->whereDate('record_date', $attDateToUse);
             if ($studentIds->isNotEmpty()) {
                 $tQuery->whereIn('student_id', $studentIds);
             }
@@ -193,6 +287,7 @@ class KepalaSekolahDashboardService
         $kpis = [
             'total_siswa' => ['total' => $totalSiswa, 'growth' => 0],
             'total_guru' => ['total' => $totalGuru, 'growth' => 0],
+            'total_tendik' => ['total' => $totalTendik, 'growth' => 0],
             'total_pegawai' => ['total' => $totalPegawai, 'growth' => 0],
             'total_kelas' => ['total' => $totalKelas, 'growth' => 0],
             'total_rombel' => ['total' => $totalRombel, 'growth' => 0],
@@ -393,7 +488,7 @@ class KepalaSekolahDashboardService
         $onlineLogs = [];
 
         if (Schema::hasTable('employees')) {
-            $empQuery = Employee::query();
+            $empQuery = (clone $employeeQuery);
 
             if (Schema::hasColumn('employees', 'status')) {
                 $empQuery->where(function ($q) {
@@ -404,10 +499,6 @@ class KepalaSekolahDashboardService
                 $empQuery->where(function ($q) {
                     $q->where('is_active', true)->orWhereNull('is_active');
                 });
-            }
-
-            if (! empty($targetUnitId)) {
-                $empQuery->where('unit_id', $targetUnitId);
             }
 
             $empList = $empQuery->with(['user', 'position', 'educationUnit'])->get();
@@ -1091,6 +1182,38 @@ class KepalaSekolahDashboardService
                 ->all();
         }
 
+        $tableTendik = [];
+        if (Schema::hasTable('employees')) {
+            $tableTendik = (clone $employeeQuery)
+                ->where(function ($q) use ($like) {
+                    $q->whereDoesntHave('teacher')
+                      ->whereDoesntHave('teachings')
+                      ->where('status_pegawai', 'NOT ' . $like, '%Guru%')
+                      ->whereDoesntHave('position', function ($p) use ($like) {
+                          $p->where('name', $like, '%Guru%')
+                            ->orWhere('name', $like, '%Pendidik%');
+                      });
+                })
+                ->with(['position'])
+                ->orderBy('nama_lengkap')
+                ->limit(100)
+                ->get()
+                ->map(function ($emp) {
+                    $name = $emp->nama_lengkap ?? $emp->name ?? 'Tendik';
+                    $nik = $emp->nik ? 'NIK. ' . $emp->nik : ($emp->niy ? 'NIY. ' . $emp->niy : ($emp->nuptk ? 'NUPTK. ' . $emp->nuptk : 'ID: -'));
+                    $pos = $emp->position?->name ?? $emp->status_pegawai ?? 'Tenaga Kependidikan / Administrasi';
+                    return [
+                        'id' => (string) $emp->id,
+                        'name' => $name,
+                        'id_num' => $nik,
+                        'extra' => $pos,
+                        'status' => $emp->status ?? 'Aktif',
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
         $tablePegawai = [];
         if (Schema::hasTable('employees')) {
             $tablePegawai = (clone $employeeQuery)
@@ -1197,11 +1320,13 @@ class KepalaSekolahDashboardService
                 'rekap_prestasi' => $rekapPrestasi,
                 'total_siswa' => $tableSiswa,
                 'total_guru' => $tableGuru,
+                'total_tendik' => $tableTendik,
                 'total_pegawai' => $tablePegawai,
                 'total_kelas' => $tableKelas,
             ],
             'students_list' => $tableSiswa,
             'teachers_list' => $tableGuru,
+            'tendik_list' => $tableTendik,
             'staff_list' => $tablePegawai,
             'rombel_list' => $tableKelas,
             'alerts' => [],

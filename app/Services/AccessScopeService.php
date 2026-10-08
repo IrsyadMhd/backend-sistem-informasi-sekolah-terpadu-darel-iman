@@ -527,7 +527,7 @@ class AccessScopeService
     public function assertEducationUnitAccess(User $user, string $unitId): void
     {
         abort_unless(
-            $this->accessibleEducationUnits($user)->whereKey($unitId)->exists(),
+            \Illuminate\Support\Str::isUuid($unitId) && $this->accessibleEducationUnits($user)->whereKey($unitId)->exists(),
             403,
             'Unit pendidikan tidak berada dalam cakupan akun.'
         );

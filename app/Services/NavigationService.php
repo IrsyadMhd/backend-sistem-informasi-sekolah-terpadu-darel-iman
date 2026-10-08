@@ -106,6 +106,7 @@ class NavigationService
         if ($isSuperAdminOrAdmin) {
             return match ($menu->id) {
                 'dash-super-admin',
+                'dash-tahfizh',
                 'dash-monitoring',
                 'dash-pemantauan' => true,
                 default => false,
@@ -131,7 +132,7 @@ class NavigationService
                 'tata usaha', 'tu', 'operator',
             ]),
             'dash-tahfizh' => $this->hasAnyNormalizedRole($roleNames, [
-                'guru tahfizh',
+                'guru tahfizh', 'super admin', 'admin',
             ]),
             'portal-guru-workspace' => $this->hasAnyNormalizedRole($roleNames, [
                 'guru', 'guru mata pelajaran', 'guru pai', 'guru bk', 'wali kelas', 'pembimbing',

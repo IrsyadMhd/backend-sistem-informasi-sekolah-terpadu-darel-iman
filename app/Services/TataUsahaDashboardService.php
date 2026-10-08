@@ -34,6 +34,18 @@ class TataUsahaDashboardService
         $totalSiswa = (clone $activeStudentQuery)->count();
         $totalPegawai = (clone $employeeQuery)->count();
 
+        $like = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ILIKE' : 'LIKE';
+        $totalGuru = (clone $employeeQuery)->where(function ($q) use ($like) {
+            $q->whereHas('teacher')
+              ->orWhereHas('teachings')
+              ->orWhere('status_pegawai', $like, '%Guru%')
+              ->orWhereHas('position', function ($p) use ($like) {
+                  $p->where('name', $like, '%Guru%')
+                    ->orWhere('name', $like, '%Pendidik%');
+              });
+        })->count();
+        $totalTendik = max(0, $totalPegawai - $totalGuru);
+
         $siswaGender = $this->countGender((clone $activeStudentQuery)->pluck('gender'));
         $pegawaiGender = $this->countGender((clone $employeeQuery)->pluck('jenis_kelamin'));
 
@@ -59,6 +71,14 @@ class TataUsahaDashboardService
                 'total' => $totalPegawai,
                 'laki_laki' => $pegawaiGender['laki_laki'],
                 'perempuan' => $pegawaiGender['perempuan'],
+                'growth' => 0,
+            ],
+            'total_guru' => [
+                'total' => $totalGuru,
+                'growth' => 0,
+            ],
+            'total_tendik' => [
+                'total' => $totalTendik,
                 'growth' => 0,
             ],
             'siswa_incomplete' => ['total' => $siswaIncomplete, 'growth' => 0],
@@ -199,6 +219,86 @@ class TataUsahaDashboardService
         } elseif (! $isGlobal) {
             $query->whereRaw('1 = 0');
         }
+
+        $query->whereDoesntHave('position', function ($q) {
+            $q->whereIn('level_jabatan', [1, 2, 7])
+                ->orWhere('satuan_kerja', 'Pengurus')
+                ->orWhere('satuan_kerja', 'Bidang Pendidikan')
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%pembina%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%pengawas%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%superadmin%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%super admin%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%administrator%']);
+        });
+        $query->whereDoesntHave('user.roles', function ($q) {
+            $q->whereIn('name', [
+                'Super Admin',
+                'super_admin',
+                'superadmin',
+                'Admin',
+                'admin',
+                'administrator',
+                'Operator',
+                'operator',
+                'operator_sekolah',
+                'Pengurus Yayasan',
+                'pengurus_yayasan',
+                'Yayasan',
+                'yayasan',
+                'Ketua Yayasan',
+                'ketua_yayasan',
+                'Sekretaris Yayasan',
+                'sekretaris_yayasan',
+                'Bendahara Yayasan',
+                'bendahara_yayasan',
+                'Divisi Pendidikan',
+                'divisi_pendidikan',
+                'Kepala Bidang Pendidikan',
+                'kepala_bidang_pendidikan',
+            ]);
+        });
+        $query->whereDoesntHave('role', function ($q) {
+            $q->whereIn('name', [
+                'Super Admin',
+                'super_admin',
+                'superadmin',
+                'Admin',
+                'admin',
+                'administrator',
+                'Operator',
+                'operator',
+                'operator_sekolah',
+                'Pengurus Yayasan',
+                'pengurus_yayasan',
+                'Yayasan',
+                'yayasan',
+                'Ketua Yayasan',
+                'ketua_yayasan',
+                'Sekretaris Yayasan',
+                'sekretaris_yayasan',
+                'Bendahara Yayasan',
+                'bendahara_yayasan',
+                'Divisi Pendidikan',
+                'divisi_pendidikan',
+                'Kepala Bidang Pendidikan',
+                'kepala_bidang_pendidikan',
+            ]);
+        });
+        $query->where(function ($q) {
+            $q->whereNull('nama_lengkap')
+              ->orWhere(function ($sq) {
+                  $sq->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%yayasan%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%divisi pendidikan%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%bidang pendidikan%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%superadmin%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%super admin%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%operator%']);
+              });
+        });
 
         return $query;
     }

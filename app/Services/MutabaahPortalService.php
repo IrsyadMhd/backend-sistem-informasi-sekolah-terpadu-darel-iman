@@ -30,13 +30,22 @@ class MutabaahPortalService
                 ]);
         }
 
-        // Fallback untuk Kepala Sekolah / Admin / Teacher / Musyrif / TU: tampilkan seluruh santri aktif dari database
+        // Fallback untuk Kepala Sekolah / Admin / Teacher / Musyrif / TU: tampilkan santri aktif berdasar scope unit
+        $accessScope = app(\App\Services\AccessScopeService::class);
         $query = Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])
             ->where(function ($q) {
                 $q->where('is_active', true)->orWhereNull('is_active');
             });
 
-        if (! empty($filters['unit_id'])) {
+        if (! $accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
+            if (! empty($filters['unit_id'])) {
+                $accessScope->assertEducationUnitAccess($user, (string) $filters['unit_id']);
+                $query->where('unit_id', $filters['unit_id']);
+            } else {
+                $query->whereIn('unit_id', $allowedUnitIds);
+            }
+        } elseif (! empty($filters['unit_id'])) {
             $unitId = $filters['unit_id'];
             $query->where('unit_id', $unitId);
         }
@@ -73,8 +82,14 @@ class MutabaahPortalService
             return $this->parentStudents($parent)->with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])->findOrFail($studentId);
         }
 
-        // Fallback untuk Admin / Teacher / TU: cari santri langsung berdasarkan ID
-        return Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])->findOrFail($studentId);
+        // Fallback untuk Admin / Teacher / TU: cari santri dan pastikan unit-scoping
+        $student = Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])->findOrFail($studentId);
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        if (! $accessScope->hasGlobalScope($user)) {
+            $accessScope->assertEducationUnitAccess($user, (string) $student->unit_id);
+        }
+
+        return $student;
     }
 
     public function ownStudent(User $user): Student
