@@ -32,13 +32,24 @@ class GateAttendanceController extends Controller
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->query('class_id'));
         }
-        if ($request->filled('date')) {
+        if ($request->filled('date_from') && $request->filled('date_to')) {
+            $query->whereBetween('attendance_date', [$request->query('date_from'), $request->query('date_to')]);
+        } elseif ($request->filled('date')) {
             $query->whereDate('attendance_date', $request->query('date'));
         } else {
             $query->whereDate('attendance_date', today());
         }
         if ($request->filled('status')) {
-            $query->where('status', strtoupper($request->query('status')));
+            $statusVal = strtoupper($request->query('status'));
+            if ($statusVal === 'HADIR') {
+                $query->whereIn('status', ['HADIR', 'HADIR_DALAM_TOLERANSI', 'TEPAT_WAKTU']);
+            } elseif ($statusVal === 'ALPHA' || $statusVal === 'ALPA') {
+                $query->whereIn('status', ['ALPHA', 'ALPA']);
+            } elseif ($statusVal === 'IZIN') {
+                $query->whereIn('status', ['IZIN', 'SAKIT']);
+            } else {
+                $query->where('status', $statusVal);
+            }
         }
         if ($request->filled('search')) {
             $search = '%'.$request->query('search').'%';
@@ -123,23 +134,42 @@ class GateAttendanceController extends Controller
      */
     public function stats(Request $request): JsonResponse
     {
-        $date = $request->query('date', today()->toDateString());
         $this->assertRequestedUnitScope($request);
         $unitId = $this->resolveUserUnitScope($request);
 
-        $query = Attendance::whereDate('attendance_date', $date);
+        $query = Attendance::query();
+        if ($request->filled('date_from') && $request->filled('date_to')) {
+            $query->whereBetween('attendance_date', [$request->query('date_from'), $request->query('date_to')]);
+            $dateDisplay = $request->query('date_from').' s/d '.$request->query('date_to');
+        } elseif ($request->filled('date')) {
+            $query->whereDate('attendance_date', $request->query('date'));
+            $dateDisplay = $request->query('date');
+        } else {
+            $query->whereDate('attendance_date', today());
+            $dateDisplay = today()->toDateString();
+        }
+
         if ($unitId) {
-            $query->where('unit_pendidikan_id', $unitId);
+            $query->where(function ($q) use ($unitId) {
+                $q->where('unit_pendidikan_id', $unitId)
+                    ->orWhereHas('student', fn ($sq) => $sq->where('unit_id', $unitId));
+            });
+        }
+        if ($request->filled('class_id')) {
+            $query->where('class_id', $request->query('class_id'));
         }
 
         $totalScanned = (clone $query)->count();
-        $hadir = (clone $query)->whereIn('status', ['HADIR', 'HADIR_DALAM_TOLERANSI'])->count();
+        $hadir = (clone $query)->whereIn('status', ['HADIR', 'HADIR_DALAM_TOLERANSI', 'TEPAT_WAKTU'])->count();
         $terlambat = (clone $query)->where('status', 'TERLAMBAT')->count();
         $izin = (clone $query)->where('status', 'IZIN')->count();
         $sakit = (clone $query)->where('status', 'SAKIT')->count();
         $belumHadir = (clone $query)->where('status', 'BELUM_HADIR')->count();
-        $alpha = (clone $query)->where('status', 'ALPHA')->count();
+        $alpha = (clone $query)->whereIn('status', ['ALPHA', 'ALPA'])->count();
         $checkedOut = (clone $query)->whereNotNull('check_out_time')->count();
+        $classifiedCount = $hadir + $terlambat + $izin + $sakit + $belumHadir + $alpha;
+        $lainnya = max(0, $totalScanned - $classifiedCount);
+        $persentaseKehadiran = $totalScanned > 0 ? round(($hadir / $totalScanned) * 100, 1) : 0;
 
         // Calculate total active students in unit
         $studentQuery = Student::query()->where('is_active', true);
@@ -149,21 +179,30 @@ class GateAttendanceController extends Controller
                     ->orWhereHas('kelas', fn ($class) => $class->where('unit_pendidikan_id', $unitId));
             });
         }
+        if ($request->filled('class_id')) {
+            $studentQuery->where('kelas_id', $request->query('class_id'));
+        }
         $totalStudents = $studentQuery->count();
 
         return response()->json([
             'status' => 'success',
             'data' => [
-                'tanggal' => $date,
+                'tanggal' => $dateDisplay,
                 'total_siswa' => $totalStudents,
                 'total_scanned' => $totalScanned,
+                'total_data' => $totalScanned,
                 'hadir' => $hadir,
+                'tepat_waktu' => $hadir,
                 'terlambat' => $terlambat,
                 'izin' => $izin,
                 'sakit' => $sakit,
                 'belum_hadir' => $belumHadir,
                 'alpha' => $alpha,
+                'alpa' => $alpha,
+                'lainnya' => $lainnya,
+                'tidak_terklasifikasi' => $lainnya,
                 'sudah_pulang' => $checkedOut,
+                'persentase_kehadiran' => $persentaseKehadiran,
             ],
         ]);
     }
