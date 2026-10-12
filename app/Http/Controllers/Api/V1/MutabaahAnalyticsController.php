@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Exports\MutabaahCrudExport;
 use App\Http\Controllers\Controller;
+use App\Services\AccessScopeService;
 use App\Services\MutabaahAnalyticsService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -12,7 +13,10 @@ use Maatwebsite\Excel\Facades\Excel;
 
 class MutabaahAnalyticsController extends Controller
 {
-    public function __construct(private MutabaahAnalyticsService $service) {}
+    public function __construct(
+        private MutabaahAnalyticsService $service,
+        private readonly AccessScopeService $accessScope
+    ) {}
 
     public function dashboard(Request $request): JsonResponse
     {
@@ -50,11 +54,7 @@ class MutabaahAnalyticsController extends Controller
     private function authorizePermission(Request $request, string $permission): void
     {
         $user = $request->user();
-        $hasRoleAccess = $user->hasRole([
-            'Super Admin', 'Admin', 'Yayasan', 'Kepala Sekolah', 'Divisi Pendidikan',
-            'Waka Kesiswaan', 'Waka Kurikulum', 'Tata Usaha', 'TU', 'Operator',
-            'Wali Kelas', 'Guru', 'Musyrif', 'Musyrifah', 'Pembimbing', 'Pengurus Yayasan',
-        ]);
+        $hasRoleAccess = $this->accessScope->isStaffOrTeacher($user);
 
         abort_unless($hasRoleAccess || $user->can($permission), 403);
     }
