@@ -191,6 +191,7 @@ class MobileAppConfigController extends Controller
         $system = array_replace_recursive($defaults['system'], $config['system'] ?? []);
 
         $siteSetting = SiteSetting::current();
+        $system['mapbox_token'] = $siteSetting->mapbox_token;
         $fallbackLogoUrl = $siteSetting->logo_url
             ? $request->getSchemeAndHttpHost().$siteSetting->logo_url
             : null;
@@ -217,6 +218,7 @@ class MobileAppConfigController extends Controller
             'role_home_layouts' => $roleHomeLayouts,
             'features' => $features,
             'system' => $system,
+            'mapbox_token' => $siteSetting->mapbox_token,
             'updated_at' => $setting->updated_at?->toIso8601String(),
         ];
     }
