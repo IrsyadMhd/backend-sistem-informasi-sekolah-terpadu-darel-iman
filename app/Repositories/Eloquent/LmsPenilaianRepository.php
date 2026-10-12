@@ -313,6 +313,8 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
         $rataNilaiAkhir = (clone $query)->whereNotNull('final_score')->avg('final_score') ?? 0;
         $rataAssignment = (clone $query)->whereNotNull('score_assignment')->avg('score_assignment') ?? 0;
         $rataCbt = (clone $query)->whereNotNull('score_quiz')->avg('score_quiz') ?? 0;
+        $rataMidterm = (clone $query)->whereNotNull('score_midterm')->avg('score_midterm') ?? 0;
+        $rataFinal = (clone $query)->whereNotNull('score_final')->avg('score_final') ?? 0;
 
         $gradeDistribution = [
             'A' => (clone $query)->where('grade_letter', 'A')->count(),
@@ -329,6 +331,8 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
             'rata_nilai_akhir' => round($rataNilaiAkhir, 2),
             'rata_assignment' => round($rataAssignment, 2),
             'rata_cbt' => round($rataCbt, 2),
+            'rata_midterm' => round($rataMidterm, 2),
+            'rata_final' => round($rataFinal, 2),
             'grade_distribution' => $gradeDistribution,
         ];
     }
