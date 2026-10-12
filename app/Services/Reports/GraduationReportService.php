@@ -180,8 +180,7 @@ class GraduationReportService
             'tahun_masuk' => $s->tahun_masuk ?? '-',
             'tahun_lulus' => $meta['tahun_lulus'] ?? date('Y'),
             'status_kelulusan' => $meta['status_kelulusan'] ?? 'Lulus',
-            'tanggal_penetapan' => isset($meta['tanggal_kelulusan']) ? Carbon::parse($meta['tanggal_kelulusan'])->format('d F Y') : $s->updated_at->format('d F Y'),
-            'nomor_ijazah' => $meta['nomor_ijazah'] ?? ('DN-03/D-S/26/' . rand(10000, 99999)),
+            'nomor_ijazah' => $meta['nomor_ijazah'] ?? ($s->nis ? ('DN-03/D-S/' . date('y') . '/' . str_pad(substr(preg_replace('/[^0-9]/', '', (string) $s->nis), -5), 5, '0', STR_PAD_LEFT)) : '-'),
             'nilai_akhir_ringkas' => [
                 'rata_rata_rapor' => $meta['nilai_rata_rapor'] ?? '88.50',
                 'nilai_ujian_sekolah' => $meta['nilai_ujian_sekolah'] ?? '90.20',

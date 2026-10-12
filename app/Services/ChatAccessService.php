@@ -35,7 +35,12 @@ class ChatAccessService
             ->where('user_id', $user->id)
             ->first();
 
-        $userUnitId = $employee?->unit_id ?? $user->unit_id ?? null;
+        $accessibleUnitIds = app(\App\Services\AccessScopeService::class)->accessibleEducationUnits($user)->pluck('id');
+        $userUnitId = $employee?->unit_id
+            ?? $user->unit_id
+            ?? $accessibleUnitIds->first()
+            ?? data_get($user->metadata, 'education_unit_id')
+            ?? data_get($user->metadata, 'unit_id');
         $empPosition = $employee?->position?->name ?? '';
         $empRole = $employee?->role?->name ?? '';
 
@@ -125,8 +130,9 @@ class ChatAccessService
                 'category' => 'school_principal',
                 'can_view_all_units' => false,
                 'user_unit_id' => $userUnitId,
+                'user_unit_ids' => $accessibleUnitIds->toArray(),
                 'cross_unit_categories' => ['foundation', 'education_division'],
-                'allowed_categories' => ['foundation', 'education_division', 'employee', 'teacher'],
+                'allowed_categories' => ['foundation', 'education_division', 'employee', 'teacher', 'parent'],
             ];
         }
 

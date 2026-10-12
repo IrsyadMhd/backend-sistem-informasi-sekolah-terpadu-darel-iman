@@ -123,6 +123,39 @@ class AccessScopeService
         return $this->hasAnyRole($user, self::UNIT_ACCESS_MANAGER_ROLES);
     }
 
+    /**
+     * Apakah user memiliki role supervisor/pimpinan (Super Admin, Yayasan, Kepsek, Divisi, TU)?
+     */
+    public function isSupervisor(User $user): bool
+    {
+        return $this->hasGlobalScope($user)
+            || $this->isAboveTu($user)
+            || $this->canManageUnitAccess($user);
+    }
+
+    /**
+     * Apakah user adalah pengajar/pembimbing/wali kelas?
+     */
+    public function isTeacher(User $user): bool
+    {
+        return $this->hasAnyRole($user, [
+            'Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran',
+            'Wali Kelas', 'wali_kelas', 'wali-kelas',
+            'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah',
+            'Pembimbing', 'pembimbing',
+        ]);
+    }
+
+    /**
+     * Apakah user adalah staf sekolah, pimpinan, atau guru?
+     */
+    public function isStaffOrTeacher(User $user): bool
+    {
+        return $this->isSupervisor($user)
+            || $this->isTeacher($user)
+            || $this->hasAnyRole($user, ['Operator', 'operator', 'Admin', 'admin']);
+    }
+
     public function canManageAccess(User $user): bool
     {
         return $this->canManageGlobalAccess($user) || $this->canManageUnitAccess($user);

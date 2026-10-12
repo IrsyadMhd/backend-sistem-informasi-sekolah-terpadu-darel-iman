@@ -41,8 +41,9 @@ class KepalaSekolahDashboardService
         $targetUnitId = $unit ? $unit->id : null;
 
         // Context
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         // 1. KPIs scoped to Principal's unit
         $studentQuery = Student::query()
@@ -380,7 +381,7 @@ class KepalaSekolahDashboardService
                     }
                 }
 
-                $rate = $totalSiswaCount > 0 ? round(($hadir / $totalSiswaCount) * 100, 1) : 0;
+                $rate = $totalSiswaCount > 0 ? round(($hadir / $totalSiswaCount) * 100, 1) : null;
 
                 return [
                     'date' => $dStr,
@@ -389,6 +390,7 @@ class KepalaSekolahDashboardService
                     'hadir' => $hadir,
                     'terlambat' => $terlambat,
                     'alpha' => $alpha,
+                    'total' => $totalSiswaCount,
                     'rate' => $rate,
                 ];
             })->values()->toArray();
@@ -399,27 +401,6 @@ class KepalaSekolahDashboardService
         $attendanceTrend = $isPesantren ? $pesantrenTrend : $fulldayTrend;
 
         // 3. Tables & Alerts
-        if (PengumumanSekolah::count() === 0) {
-            try {
-                PengumumanSekolah::create([
-                    'judul_pengumuman' => 'Edaran Pelaksanaan Evaluasi Pembelajaran & Mutabaah Yaumiyah',
-                    'isi_pengumuman' => 'Diberitahukan kepada seluruh Kepala Sekolah, Wali Kelas, dan Guru Pengajar untuk melengkapi rekapitulasi nilai evaluasi pembelajaran serta mutabaah hafalan Al-Qur’an siswa.',
-                    'target_peran' => ['Kepala Sekolah', 'Guru', 'Wali Kelas'],
-                    'prioritas' => 'tinggi',
-                    'status_aktif' => true,
-                ]);
-                PengumumanSekolah::create([
-                    'judul_pengumuman' => 'Pengumuman Rapat Koordinasi Ortu & Syukuran Prestasi Santri',
-                    'isi_pengumuman' => 'Undangan rapat koordinasi pengurus yayasan dan komite sekolah bersama orang tua murid dalam rangka penyerahan apresiasi kelulusan ujian Tahfizh Al-Qur’an.',
-                    'target_peran' => ['Orang Tua', 'Kepala Sekolah'],
-                    'prioritas' => 'sedang',
-                    'status_aktif' => true,
-                ]);
-            } catch (\Throwable $e) {
-                // Ignore silent seeder error
-            }
-        }
-
         $recentAnnouncements = PengumumanSekolah::query()
             ->where('status_aktif', true)
             ->latest()

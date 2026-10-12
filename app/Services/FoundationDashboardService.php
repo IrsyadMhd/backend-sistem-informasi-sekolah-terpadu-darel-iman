@@ -253,23 +253,40 @@ class FoundationDashboardService
         unset($pItem);
 
         // 5. Attendance & Academic Monitoring
-        //    `attendance_scan_logs` memakai `result_status` (bukan `status`)
-        //    dan hanya merekam pemindai siswa (tidak ada `role_type`).
         $todayScans = \App\Models\AttendanceScanLog::whereDate('scanned_at', now())->count();
         $todayLateScans = \App\Models\AttendanceScanLog::whereDate('scanned_at', now())->where('result_status', 'late')->count();
         $todayAbsentScans = \App\Models\AttendanceScanLog::whereDate('scanned_at', now())->whereIn('result_status', ['absent', 'alpa'])->count();
 
-        $teacherAttendancePct = 100; // scan_logs tidak mencatat kehadiran guru
-        $studentAttendancePct = $totalSiswaAktif > 0 ? min(100, round(($totalSiswaAktif - $todayAbsentScans) / $totalSiswaAktif * 100)) : 100;
+        // Kehadiran Guru: bersumber dari TeachingAttendance hari ini jika ada sesi terdaftar
+        $teacherSessionsTotal = \App\Models\TeachingAttendance::whereDate('attendance_date', now())->count();
+        $teacherSessionsPresent = \App\Models\TeachingAttendance::whereDate('attendance_date', now())
+            ->whereIn('status', ['present', 'hadir', 'late', 'terlambat'])->count();
+        $teacherAttendancePct = $teacherSessionsTotal > 0
+            ? round(($teacherSessionsPresent / $teacherSessionsTotal) * 100)
+            : null;
+
+        $studentAttendancePct = $totalSiswaAktif > 0
+            ? max(0, min(100, round(($totalSiswaAktif - $todayAbsentScans) / $totalSiswaAktif * 100)))
+            : null;
+
+        $totalGrades = \App\Models\StudentGrade::count();
+        $todayTahfizhLogs = \App\Models\TahfizhDailyLog::whereDate('record_date', now())->count();
+        $todayMutabaahHeaders = \App\Models\MutabaahDailyHeader::whereDate('activity_date', now())->count();
 
         $monitoringAkademik = [
             'kehadiran_guru' => $teacherAttendancePct,
             'kehadiran_siswa' => $studentAttendancePct,
-            'input_nilai' => \App\Models\StudentGrade::count() > 0 ? 100 : 0,
-            'input_tahfiz' => \App\Models\TahfizhDailyLog::count() > 0 ? 100 : 0,
-            'input_mutabaah' => \App\Models\MutabaahDailyHeader::count() > 0 ? 100 : 0,
+            'input_nilai' => $totalSiswaAktif > 0 ? min(100, round(($totalGrades / $totalSiswaAktif) * 100)) : null,
+            'input_tahfiz' => $totalSiswaAktif > 0 ? min(100, round(($todayTahfizhLogs / $totalSiswaAktif) * 100)) : null,
+            'input_mutabaah' => $totalSiswaAktif > 0 ? min(100, round(($todayMutabaahHeaders / $totalSiswaAktif) * 100)) : null,
             'terlambat_hari_ini' => $todayLateScans,
             'tidak_hadir_hari_ini' => $todayAbsentScans,
+            'total_siswa_aktif' => $totalSiswaAktif,
+            'teacher_sessions_total' => $teacherSessionsTotal,
+            'teacher_sessions_present' => $teacherSessionsPresent,
+            'total_grades' => $totalGrades,
+            'today_tahfizh_logs' => $todayTahfizhLogs,
+            'today_mutabaah_headers' => $todayMutabaahHeaders,
         ];
 
         // 6. Monitoring Ibadah — single aggregate query per category (avoid duplicate COUNTs)
@@ -382,6 +399,7 @@ class FoundationDashboardService
     {
         $categories = ['Shalat', 'Tilawah', 'Murajaah'];
         $result     = [];
+        $startOfMonth = now()->startOfMonth()->toDateTimeString();
 
         // Kategori mutabaah diambil via relasi detail -> agenda_item -> mutabaah_categories.
         // `mutabaah_daily_details` tidak punya kolom `category_name`/`is_completed`;
@@ -390,6 +408,7 @@ class FoundationDashboardService
             ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
             ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
             ->whereIn('c.name', $categories)
+            ->where('d.created_at', '>=', $startOfMonth)
             ->selectRaw("c.name as category_name,
                 COUNT(*) as total,
                 SUM(CASE WHEN d.status_value IN ('good','less') THEN 1 ELSE 0 END) as completed")
@@ -401,15 +420,20 @@ class FoundationDashboardService
             $row                 = $rows->get($cat);
             $total               = (int) ($row->total ?? 0);
             $completed           = (int) ($row->completed ?? 0);
-            $result[strtolower($cat)] = $total > 0 ? round($completed / $total * 100) : 0;
+            $catKey              = strtolower($cat);
+            $result[$catKey]     = $total > 0 ? round($completed / $total * 100) : null;
+            $result[$catKey . '_detail'] = ['completed' => $completed, 'total' => $total];
         }
 
-        // Mutabaah header verified ratio
+        // Mutabaah header verified ratio (bulan berjalan)
         $mRow = DB::table('mutabaah_daily_headers')
-            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN status = \'verified\' THEN 1 ELSE 0 END) as verified')
+            ->where('activity_date', '>=', now()->startOfMonth()->toDateString())
+            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN status IN (\'verified\', \'finalized\') THEN 1 ELSE 0 END) as verified')
             ->first();
         $mTotal = (int) ($mRow->total ?? 0);
-        $result['mutabaah'] = $mTotal > 0 ? round(((int) ($mRow->verified ?? 0)) / $mTotal * 100) : 0;
+        $mVerified = (int) ($mRow->verified ?? 0);
+        $result['mutabaah'] = $mTotal > 0 ? round($mVerified / $mTotal * 100) : null;
+        $result['mutabaah_detail'] = ['completed' => $mVerified, 'total' => $mTotal];
 
         return $result;
     }

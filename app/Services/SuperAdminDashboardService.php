@@ -27,13 +27,14 @@ class SuperAdminDashboardService
         $semesterId = !empty($filters['semester_id']) && $filters['semester_id'] !== 'semua' ? $filters['semester_id'] : null;
 
         // 1. Context Information (Dynamic from DB)
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
         $activeAcademicYear = $academicYearId
             ? AcademicYear::find($academicYearId)
-            : (AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first());
+            : $academicPeriodService->getActiveYear();
 
         $activeSemester = $semesterId
             ? Semester::find($semesterId)
-            : (Semester::where('is_active', true)->first() ?? Semester::latest()->first());
+            : $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         $availableUnits = EducationUnit::select('id', 'name', 'code', 'is_active')
             ->orderBy('name')

@@ -106,7 +106,7 @@ class MutabaahPortalService
             ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
             ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
             ->where('d.daily_header_id', $header->id)->orderBy('ti.sort_order')
-            ->get(['d.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes', 'd.input_source', 'd.input_location', 'd.verification_status', 'a.code as agenda_code', 'a.name', 'a.input_type', 'c.name as category'])
+            ->get(['d.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes', 'd.input_source', 'd.input_location', 'd.verification_status', 'a.code as agenda_code', 'a.name', 'a.input_type', 'c.name as category', 'c.code as category_code', 'c.id as category_id'])
             : collect();
 
         // Jika belum ada header atau details kosong, inisialisasi otomatis dari template aktif
@@ -212,7 +212,7 @@ class MutabaahPortalService
                         ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
                         ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
                         ->where('d.daily_header_id', $header->id)->orderBy('ti.sort_order')
-                        ->get(['d.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes', 'd.input_source', 'd.input_location', 'd.verification_status', 'a.code as agenda_code', 'a.name', 'a.input_type', 'c.name as category']);
+                        ->get(['d.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes', 'd.input_source', 'd.input_location', 'd.verification_status', 'a.code as agenda_code', 'a.name', 'a.input_type', 'c.name as category', 'c.code as category_code', 'c.id as category_id']);
                 }
             }
         }

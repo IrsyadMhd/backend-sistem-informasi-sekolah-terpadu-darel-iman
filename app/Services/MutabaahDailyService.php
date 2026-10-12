@@ -25,7 +25,10 @@ use Illuminate\Support\Str;
 
 class MutabaahDailyService
 {
-    public function __construct(private readonly MutabaahAssessmentService $assessment) {}
+    public function __construct(
+        private readonly MutabaahAssessmentService $assessment,
+        private readonly AccessScopeService $accessScope
+    ) {}
 
     public function assignments(User $user, string $date): Collection
     {
@@ -33,7 +36,7 @@ class MutabaahDailyService
         $employeeId = $employee?->id;
         $unitId = $user->education_unit_id ?: $employee?->unit_id ?: $employee?->education_unit_id;
 
-        $isSupervisor = $user->hasRole(['Super Admin', 'Kepala Sekolah', 'Tata Usaha'])
+        $isSupervisor = $this->accessScope->isSupervisor($user)
             || $user->can('mutabaah.report.view')
             || $user->can('mutabaah.recap.view');
 
@@ -42,8 +45,8 @@ class MutabaahDailyService
         return MutabaahSupervisorAssignment::query()
             ->with(['employee:id,nama_lengkap', 'educationUnit:id,name', 'kelas:id,name,level', 'rombel:id,nama_kelas', 'template.items.agendaItem.category'])
             ->active()->byDate($date)
-            ->when(! $user->hasRole('Super Admin') && ! $isSupervisor, fn (Builder $q) => $q->where('employee_id', $employeeId))
-            ->when($isSupervisor && ! $user->hasRole('Super Admin') && $unitId, fn (Builder $q) => $q->where('education_unit_id', $unitId))
+            ->when(! $this->accessScope->hasGlobalScope($user) && ! $isSupervisor, fn (Builder $q) => $q->where('employee_id', $employeeId))
+            ->when($isSupervisor && ! $this->accessScope->hasGlobalScope($user) && $unitId, fn (Builder $q) => $q->where('education_unit_id', $unitId))
             ->orderByDesc('is_primary')->get();
     }
 
@@ -382,6 +385,8 @@ class MutabaahDailyService
                     'agenda_item_id' => $item->agenda_item_id,
                     'name' => $item->agendaItem?->name,
                     'category' => $item->agendaItem?->category?->name ?? 'Mutabaah Yaumiyyah',
+                    'category_code' => $item->agendaItem?->category?->code ?? null,
+                    'category_id' => $item->agendaItem?->category?->id ?? null,
                     'input_type' => $item->agendaItem?->input_type?->value,
                     'weight' => $item->weight,
                     'required' => $item->is_required,

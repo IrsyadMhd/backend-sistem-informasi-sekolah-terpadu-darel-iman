@@ -17,8 +17,9 @@ class GuruBkDashboardService
 
     public function getDashboardOverview($user, array $filters = []): array
     {
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         $isGlobal = $this->accessScope->hasGlobalScope($user);
 

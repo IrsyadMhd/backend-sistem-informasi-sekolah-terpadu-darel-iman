@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AppMenu;
 use App\Models\AppModule;
 use App\Models\User;
+use App\Support\RoleName;
 
 class NavigationService
 {
@@ -91,14 +92,11 @@ class NavigationService
     }
 
     /**
-     * Role-based scoping for dashboard module items.
+     * Role and permission based scoping for dashboard module items.
      */
     protected function canAccessDashboardMenuFallback(User $user, AppMenu $menu): bool
     {
-        $roleNames = $user->getRoleNames()->map(fn ($r) => strtolower(trim($r)))->all();
-        $isSuperAdminOrAdmin = in_array('super admin', $roleNames, true)
-            || in_array('superadmin', $roleNames, true)
-            || in_array('admin', $roleNames, true)
+        $isSuperAdminOrAdmin = RoleName::userHasAny($user, ['super admin', 'superadmin', 'super_admin', 'admin'])
             || (bool) ($user->is_superadmin ?? false);
 
         // 1. Super Admin & Admin View:
@@ -113,40 +111,50 @@ class NavigationService
             };
         }
 
-        // 2. Dedicated Single/Operational Roles:
+        // 2. Evaluate explicit required permissions first for non-superadmin users
+        $requiredPermissions = (array) $menu->required_permissions;
+        if (! empty($requiredPermissions)) {
+            foreach ($requiredPermissions as $permission) {
+                if ($user->can($permission)) {
+                    return true;
+                }
+            }
+        }
+
+        // 3. Dedicated Single/Operational Roles (standard role-based fallback):
         return match ($menu->id) {
             'dash-super-admin' => false,
-            'dash-yayasan', 'dash-profil-yayasan' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-yayasan', 'dash-profil-yayasan' => RoleName::userHasAny($user, [
                 'yayasan', 'ketua yayasan', 'pengurus yayasan', 'sekretaris yayasan', 'bendahara yayasan',
             ]),
-            'dash-kepsek' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-kepsek' => RoleName::userHasAny($user, [
                 'kepala sekolah', 'kepsek',
             ]),
-            'dash-divisi' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-divisi' => RoleName::userHasAny($user, [
                 'divisi pendidikan', 'kepala bidang pendidikan', 'divisi kurikulum', 'divisi kesiswaan', 'divisi bahasa', 'divisi program khusus',
             ]),
-            'dash-waka-kurikulum' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-waka-kurikulum' => RoleName::userHasAny($user, [
                 'waka kurikulum', 'wakil kurikulum', 'wakil kepala sekolah',
             ]),
-            'dash-tu' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-tu' => RoleName::userHasAny($user, [
                 'tata usaha', 'tu', 'operator',
             ]),
-            'dash-tahfizh' => $this->hasAnyNormalizedRole($roleNames, [
-                'guru tahfizh', 'super admin', 'admin',
+            'dash-tahfizh' => RoleName::userHasAny($user, [
+                'guru tahfizh', 'super admin', 'admin', 'kepala sekolah', 'kepsek',
             ]),
-            'portal-guru-workspace' => $this->hasAnyNormalizedRole($roleNames, [
+            'portal-guru-workspace' => RoleName::userHasAny($user, [
                 'guru', 'guru mata pelajaran', 'guru pai', 'guru bk', 'wali kelas', 'pembimbing',
             ]),
-            'portal-musyrif-workspace' => $this->hasAnyNormalizedRole($roleNames, [
+            'portal-musyrif-workspace' => RoleName::userHasAny($user, [
                 'musyrif', 'musyrifah', 'musyrif / musyrifah', 'pengasuh', 'wali asrama', 'pembimbing asrama',
             ]),
-            'dash-monitoring' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-monitoring' => RoleName::userHasAny($user, [
                 'kepala sekolah', 'kepsek', 'divisi pendidikan', 'kepala bidang pendidikan', 'yayasan', 'ketua yayasan',
             ]),
-            'dash-pemantauan' => $this->hasAnyNormalizedRole($roleNames, [
+            'dash-pemantauan' => RoleName::userHasAny($user, [
                 'divisi pendidikan', 'kepala bidang pendidikan', 'kepala sekolah', 'kepsek',
             ]),
-            'portal-sivitas' => $this->hasAnyNormalizedRole($roleNames, [
+            'portal-sivitas' => RoleName::userHasAny($user, [
                 'orang tua', 'orangtua', 'wali murid', 'parent', 'siswa', 'student',
             ]),
             default => false,
@@ -158,12 +166,6 @@ class NavigationService
      */
     protected function hasAnyNormalizedRole(array $userRoles, array $allowedRoles): bool
     {
-        foreach ($allowedRoles as $allowed) {
-            if (in_array(strtolower(trim($allowed)), $userRoles, true)) {
-                return true;
-            }
-        }
-
-        return false;
+        return RoleName::matchesAny($userRoles, $allowedRoles);
     }
 }

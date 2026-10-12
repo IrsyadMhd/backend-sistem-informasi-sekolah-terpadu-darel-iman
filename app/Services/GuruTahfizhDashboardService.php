@@ -20,8 +20,9 @@ class GuruTahfizhDashboardService
         $teacherId = $teacher?->id;
         $employeeId = $employee?->id;
 
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         // 1. Scoped Students assigned to Tahfizh Mentor
         $assignedStudentIds = [];

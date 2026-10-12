@@ -48,8 +48,9 @@ class WaliKelasDashboardService
         $selectedClass = $selectedClassId ? $homeroomClasses->firstWhere('id', $selectedClassId) : $homeroomClasses->first();
         $targetClassId = $selectedClass?->id;
 
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         $studentQuery = Student::query();
         if ($targetClassId) {

@@ -43,8 +43,13 @@ class KelasService
     public function simpan(array $data): Kelas
     {
         if (empty($data['kode_kelas'])) {
-            $jenjangCode = preg_replace('/[^A-Za-z0-9]/', '', $data['jenjang'] ?? 'KLS');
-            $data['kode_kelas'] = 'KLS-'.strtoupper($jenjangCode).'-'.rand(100, 999);
+            $codeGenerator = app(\App\Services\CodeGeneratorService::class);
+            $data['kode_kelas'] = $codeGenerator->generate(
+                'class_code',
+                $data['unit_pendidikan_id'] ?? null,
+                $data['tahun_ajaran_id'] ?? null,
+                ['jenjang' => $data['jenjang'] ?? 'KLS']
+            );
         }
 
         return $this->kelasRepository->buat($data);
@@ -219,8 +224,9 @@ class KelasService
         $gagal = 0;
         $errors = [];
 
-        $tahunDefault = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $semesterDefault = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriod = app(\App\Services\AcademicPeriodService::class);
+        $tahunDefault = $academicPeriod->getActiveYear();
+        $semesterDefault = $academicPeriod->getActiveSemester($tahunDefault?->id);
 
         foreach ($rows as $index => $row) {
             try {

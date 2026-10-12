@@ -247,7 +247,7 @@ class EmployeeService
     public function create(array $data)
     {
         if (empty($data['niy'])) {
-            $data['niy'] = 'NIY-'.date('Ym').str_pad(rand(1, 999), 3, '0', STR_PAD_LEFT);
+            $data['niy'] = \App\Services\CodeGeneratorService::generate('employee_niy', $data['unit_id'] ?? null);
         }
 
         return $this->employeeRepository->create($data);

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\MasterKurikulum;
 use App\Repositories\Contracts\MasterKurikulumRepositoryInterface;
+use App\Services\CodeGeneratorService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -97,7 +98,7 @@ class MasterKurikulumService
                     $kode = trim($row['kode_kurikulum'] ?? '');
                     if (empty($kode)) {
                         $jenjang = strtoupper($row['jenjang'] ?? 'SIT');
-                        $kode = 'KUR-'.$jenjang.'-'.rand(100, 999);
+                        $kode = CodeGeneratorService::generate('curriculum_code', $unitId, $tahunId, ['extra' => $jenjang]);
                     }
 
                     $nama = trim($row['nama_kurikulum'] ?? '');

@@ -13,8 +13,9 @@ class OperatorDashboardService
 {
     public function getDashboardOverview($user, array $filters = []): array
     {
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         // Operator melekat pada unit via data Employee; bila ada unit, scope data ke unit tsb.
         $employee = Employee::where('user_id', $user->id)->first();

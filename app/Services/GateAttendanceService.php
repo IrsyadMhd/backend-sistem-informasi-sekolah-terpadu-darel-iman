@@ -453,9 +453,9 @@ class GateAttendanceService
             $parsed = is_string($globalSetting->setting_value) ? json_decode($globalSetting->setting_value, true) : $globalSetting->setting_value;
             if (is_array($parsed)) {
                 return array_merge([
-                    'jam_masuk' => '07:00',
-                    'toleransi_menit' => 15,
-                    'jam_pulang' => '16:00',
+                    'jam_masuk' => '07:15',
+                    'toleransi_menit' => 10,
+                    'jam_pulang' => '14:15',
                     'jam_cutoff_alpha' => '12:00',
                 ], $parsed);
             }
@@ -513,10 +513,27 @@ class GateAttendanceService
                 $unit->save();
             }
         } else {
-            SiteSetting::updateOrCreate(
-                ['key' => 'gate_schedule_default'],
-                ['value' => $config, 'group' => 'attendance']
-            );
+            $existing = \Illuminate\Support\Facades\DB::table('school_settings')
+                ->where('setting_key', 'gate_schedule_default')
+                ->first();
+
+            if ($existing) {
+                \Illuminate\Support\Facades\DB::table('school_settings')
+                    ->where('setting_key', 'gate_schedule_default')
+                    ->update([
+                        'setting_value' => json_encode($config),
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                \Illuminate\Support\Facades\DB::table('school_settings')->insert([
+                    'id' => (string) \Illuminate\Support\Str::uuid(),
+                    'setting_key' => 'gate_schedule_default',
+                    'setting_value' => json_encode($config),
+                    'description' => 'Default Gate Attendance Schedule',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
         }
 
         return [

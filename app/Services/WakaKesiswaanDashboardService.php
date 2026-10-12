@@ -17,8 +17,9 @@ class WakaKesiswaanDashboardService
         $employee = Employee::where('user_id', $user->id)->first();
         $unitId = $employee ? $employee->unit_id : null;
 
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         $studentQuery = Student::query();
         if ($unitId) {

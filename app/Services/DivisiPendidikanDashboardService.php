@@ -26,8 +26,9 @@ class DivisiPendidikanDashboardService
         $units = $unitQuery->get();
         $unitIds = $units->pluck('id')->toArray();
 
-        $activeAcademicYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::latest()->first();
-        $activeSemester = Semester::where('is_active', true)->first() ?? Semester::latest()->first();
+        $academicPeriodService = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriodService->getActiveYear();
+        $activeSemester = $academicPeriodService->getActiveSemester($activeAcademicYear?->id);
 
         // Multi-unit aggregates for Division
         $totalUnitsMonitored = count($unitIds);

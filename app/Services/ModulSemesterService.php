@@ -170,9 +170,12 @@ class ModulSemesterService
 
     public function generateKodeModul(array $data): string
     {
-        $prefix = 'MDS';
-        $rand = strtoupper(Str::random(5));
+        $codeGenerator = app(\App\Services\CodeGeneratorService::class);
 
-        return "{$prefix}-".date('Ym')."-{$rand}";
+        return $codeGenerator->generate(
+            'modul_code',
+            $data['unit_pendidikan_id'] ?? null,
+            $data['tahun_ajaran_id'] ?? null
+        );
     }
 }

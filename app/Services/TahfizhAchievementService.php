@@ -21,7 +21,12 @@ class TahfizhAchievementService
             ->where(function ($query) {
                 $query->whereIn('status', ['approved', 'verified', 'finalized'])
                     ->orWhereNotNull('signature_teacher');
-            })->orderBy('record_date')->get();
+            })
+            ->where(function ($query) {
+                $query->whereNull('metadata->type')
+                    ->orWhereNotIn(DB::raw("LOWER(COALESCE(metadata->>'type', ''))"), ['murajaah', 'murojaah']);
+            })
+            ->orderBy('record_date')->get();
 
         DB::transaction(function () use ($student, $logs) {
             foreach ($logs as $log) {
