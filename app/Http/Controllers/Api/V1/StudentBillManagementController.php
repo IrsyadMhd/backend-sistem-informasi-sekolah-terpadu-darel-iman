@@ -9,6 +9,7 @@ use App\Models\FeeCategory;
 use App\Models\Kelas;
 use App\Models\Student;
 use App\Models\StudentBill;
+use App\Services\AccessScopeService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,6 +18,54 @@ use Illuminate\Support\Str;
 
 class StudentBillManagementController extends Controller
 {
+    /**
+     * Dapatkan ID unit pendidikan yang boleh diakses pengguna saat ini.
+     * Mengembalikan null jika pengguna memiliki global scope (Super Admin, Yayasan, dll).
+     * Mengembalikan array ID unit yang sah jika pengguna unit (TU, Kepsek, dll).
+     * Mengembalikan array kosong [] jika pengguna tidak memiliki unit yang sah.
+     */
+    protected function getAccessibleUnitIds(Request $request): ?array
+    {
+        $user = $request->user();
+        if (! $user) {
+            return [];
+        }
+
+        $accessScope = app(AccessScopeService::class);
+        if ($accessScope->hasGlobalScope($user)) {
+            return null; // Global access
+        }
+
+        return $accessScope->accessibleEducationUnits($user)
+            ->pluck('id')
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Verifikasi hak akses terhadap tagihan siswa tertentu.
+     */
+    protected function authorizeBillAccess(Request $request, StudentBill $bill): ?JsonResponse
+    {
+        $allowedUnitIds = $this->getAccessibleUnitIds($request);
+        if ($allowedUnitIds === null) {
+            return null; // Global access
+        }
+
+        $student = $bill->student;
+        $studentUnitId = $student?->unit_id ?? $student?->kelas?->unit_pendidikan_id;
+
+        if (empty($allowedUnitIds) || ! $studentUnitId || ! in_array($studentUnitId, $allowedUnitIds, false)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda tidak memiliki hak akses pada tagihan unit pendidikan ini.',
+            ], 403);
+        }
+
+        return null;
+    }
+
     /**
      * Menampilkan daftar tagihan siswa dengan filter dan pencarian.
      */
@@ -31,8 +80,39 @@ class StudentBillManagementController extends Controller
                 'payments',
             ]);
 
-        // Filter Unit Pendidikan
-        if ($request->filled('unit_id')) {
+        // Pembatasan Akses Unit Pendidikan (AccessScopeService)
+        $allowedUnitIds = $this->getAccessibleUnitIds($request);
+        if ($allowedUnitIds !== null) {
+            if (empty($allowedUnitIds)) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'current_page' => 1,
+                        'data' => [],
+                        'total' => 0,
+                    ],
+                ]);
+            }
+
+            if ($request->filled('unit_id')) {
+                $requestedUnitId = $request->input('unit_id');
+                if (! in_array($requestedUnitId, $allowedUnitIds, false)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Anda tidak memiliki hak akses pada unit pendidikan ini.',
+                    ], 403);
+                }
+                $query->whereHas('student', function ($q) use ($requestedUnitId) {
+                    $q->where('unit_id', $requestedUnitId)
+                        ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $requestedUnitId));
+                });
+            } else {
+                $query->whereHas('student', function ($q) use ($allowedUnitIds) {
+                    $q->whereIn('unit_id', $allowedUnitIds)
+                        ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $allowedUnitIds));
+                });
+            }
+        } elseif ($request->filled('unit_id')) {
             $unitId = $request->input('unit_id');
             $query->whereHas('student', function ($q) use ($unitId) {
                 $q->where('unit_id', $unitId)
@@ -96,7 +176,42 @@ class StudentBillManagementController extends Controller
     {
         $query = StudentBill::query();
 
-        if ($request->filled('unit_id')) {
+        // Pembatasan Akses Unit Pendidikan (AccessScopeService)
+        $allowedUnitIds = $this->getAccessibleUnitIds($request);
+        if ($allowedUnitIds !== null) {
+            if (empty($allowedUnitIds)) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'total_bills' => 0,
+                        'total_nominal' => 0.0,
+                        'paid_nominal' => 0.0,
+                        'unpaid_nominal' => 0.0,
+                        'overdue_count' => 0,
+                        'collection_rate' => 0,
+                    ],
+                ]);
+            }
+
+            if ($request->filled('unit_id')) {
+                $requestedUnitId = $request->input('unit_id');
+                if (! in_array($requestedUnitId, $allowedUnitIds, false)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Anda tidak memiliki hak akses pada unit pendidikan ini.',
+                    ], 403);
+                }
+                $query->whereHas('student', function ($q) use ($requestedUnitId) {
+                    $q->where('unit_id', $requestedUnitId)
+                        ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $requestedUnitId));
+                });
+            } else {
+                $query->whereHas('student', function ($q) use ($allowedUnitIds) {
+                    $q->whereIn('unit_id', $allowedUnitIds)
+                        ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $allowedUnitIds));
+                });
+            }
+        } elseif ($request->filled('unit_id')) {
             $unitId = $request->input('unit_id');
             $query->whereHas('student', function ($q) use ($unitId) {
                 $q->where('unit_id', $unitId)
@@ -145,9 +260,28 @@ class StudentBillManagementController extends Controller
             'class_id' => 'required_if:mode,bulk_class|nullable|uuid|exists:tbl_kelas,id',
         ]);
 
+        $allowedUnitIds = $this->getAccessibleUnitIds($request);
+        if ($allowedUnitIds !== null && empty($allowedUnitIds)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Anda tidak memiliki hak akses unit pendidikan untuk menerbitkan tagihan.',
+            ], 403);
+        }
+
         $academicYearId = $validated['academic_year_id'] ?? AcademicYear::query()->where('is_active', true)->value('id');
 
         if ($validated['mode'] === 'single') {
+            $student = Student::with('kelas')->findOrFail($validated['student_id']);
+            if ($allowedUnitIds !== null) {
+                $studentUnitId = $student->unit_id ?? $student->kelas?->unit_pendidikan_id;
+                if (! $studentUnitId || ! in_array($studentUnitId, $allowedUnitIds, false)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Anda tidak memiliki hak akses untuk menerbitkan tagihan bagi siswa di unit ini.',
+                    ], 403);
+                }
+            }
+
             $bill = StudentBill::create([
                 'student_id' => $validated['student_id'],
                 'fee_category_id' => $validated['fee_category_id'],
@@ -170,6 +304,16 @@ class StudentBillManagementController extends Controller
         }
 
         // Mode Bulk per Rombel / Kelas
+        $class = Kelas::findOrFail($validated['class_id']);
+        if ($allowedUnitIds !== null) {
+            if (! $class->unit_pendidikan_id || ! in_array($class->unit_pendidikan_id, $allowedUnitIds, false)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Anda tidak memiliki hak akses untuk menerbitkan tagihan bagi kelas di unit ini.',
+                ], 403);
+            }
+        }
+
         $students = Student::query()->where('kelas_id', $validated['class_id'])->get();
         if ($students->isEmpty()) {
             return response()->json([
@@ -217,11 +361,15 @@ class StudentBillManagementController extends Controller
     /**
      * Menampilkan rincian satu tagihan beserta histori pelunasan.
      */
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         $bill = StudentBill::query()
             ->with(['student.kelas.unitPendidikan', 'feeCategory', 'academicYear', 'payments'])
             ->findOrFail($id);
+
+        if ($denied = $this->authorizeBillAccess($request, $bill)) {
+            return $denied;
+        }
 
         return response()->json([
             'success' => true,
@@ -234,7 +382,11 @@ class StudentBillManagementController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $bill = StudentBill::findOrFail($id);
+        $bill = StudentBill::with('student.kelas')->findOrFail($id);
+
+        if ($denied = $this->authorizeBillAccess($request, $bill)) {
+            return $denied;
+        }
 
         $validated = $request->validate([
             'title' => 'sometimes|string|max:255',
@@ -256,9 +408,14 @@ class StudentBillManagementController extends Controller
     /**
      * Menghapus tagihan (Soft Delete).
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
-        $bill = StudentBill::findOrFail($id);
+        $bill = StudentBill::with('student.kelas')->findOrFail($id);
+
+        if ($denied = $this->authorizeBillAccess($request, $bill)) {
+            return $denied;
+        }
+
         $bill->delete();
 
         return response()->json([
@@ -272,7 +429,11 @@ class StudentBillManagementController extends Controller
      */
     public function recordPayment(Request $request, string $id): JsonResponse
     {
-        $bill = StudentBill::findOrFail($id);
+        $bill = StudentBill::with('student.kelas')->findOrFail($id);
+
+        if ($denied = $this->authorizeBillAccess($request, $bill)) {
+            return $denied;
+        }
 
         $validated = $request->validate([
             'paid_amount' => 'required|numeric|min:1',

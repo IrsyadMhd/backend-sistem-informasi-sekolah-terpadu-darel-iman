@@ -294,8 +294,10 @@ class StudentParentPortalController extends Controller
             ], 404);
         }
 
-        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first();
-        $activeSemester = Semester::query()->where('is_active', true)->first();
+        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first()
+            ?? AcademicYear::query()->latest('start_date')->first();
+        $activeSemester = Semester::query()->where('is_active', true)->first()
+            ?? ($activeAcademicYear ? Semester::query()->where('academic_year_id', $activeAcademicYear->id)->first() : null);
 
         $todayDay = Str::lower(now()->locale('id')->isoFormat('dddd'));
 
@@ -378,7 +380,10 @@ class StudentParentPortalController extends Controller
             'juz' => data_get($latestTahfizhMeta, 'juz') ?? ($latestTahfizh->calculated_juz ?? 30),
             'status' => $latestTahfizh->status ?? 'lancar',
             'score' => data_get($latestTahfizhMeta, 'skor') ?? 80,
-            'quality' => data_get($latestTahfizhMeta, 'tajwid') ?? ($latestTahfizh->status ?? 'Mumtaz'),
+            'quality' => data_get($latestTahfizhMeta, 'tajwid') ?? ($latestTahfizh->tajwid_label ?? ($latestTahfizh->status ?? 'Mumtaz')),
+            'kelancaran' => $latestTahfizh->kelancaran_label ?? (data_get($latestTahfizhMeta, 'kelancaran') ?? 'Lancar'),
+            'tajwid' => $latestTahfizh->tajwid_label ?? data_get($latestTahfizhMeta, 'tajwid'),
+            'makhraj' => $latestTahfizh->makhraj_label ?? data_get($latestTahfizhMeta, 'makhraj'),
             'record_date' => $latestTahfizh->record_date,
             'teacher_name' => $latestTahfizh->teacher_name ?? $latestTahfizh->employee?->nama_lengkap ?? 'Guru Tahfizh',
         ] : null;
@@ -460,8 +465,8 @@ class StudentParentPortalController extends Controller
                 'student' => $student,
                 'parent_summary' => $parentSummary,
                 'academic_context' => [
-                    'academic_year' => $activeAcademicYear?->name ?? '2025/2026',
-                    'semester' => $activeSemester?->name ?? 'Ganjil',
+                    'academic_year' => $activeAcademicYear?->name ?? 'Belum Diatur',
+                    'semester' => $activeSemester?->name ?? ($activeAcademicYear ? 'Semester 1' : 'Belum Diatur'),
                     'date' => now()->translatedFormat('l, d F Y'),
                 ],
                 'attendance_today' => $attendanceToday?->status_label ?? 'Belum Diinput',
@@ -1021,7 +1026,7 @@ class StudentParentPortalController extends Controller
                     'class' => $student->classroom?->name ?? $student->kelas?->name ?? '',
                 ],
                 'academic_year' => [
-                    'name' => $activeYear?->name ?? '2025/2026',
+                    'name' => $activeYear?->name ?? 'Belum Diatur',
                     'start_date' => $activeYear?->start_date,
                     'end_date' => $activeYear?->end_date,
                 ],
@@ -1442,13 +1447,16 @@ class StudentParentPortalController extends Controller
 
             $avgScore = $grades->avg('final_score');
             $highestScore = $grades->max('final_score');
-            $passed = $grades->filter(fn ($g) => $g->final_score >= ($g->subject?->kkm ?? 75))->count();
+            $passed = $grades->filter(function ($g) {
+                $kkm = $g->subject?->kkm;
+                return $kkm !== null && $g->final_score !== null ? $g->final_score >= $kkm : true;
+            })->count();
             $remedial = $grades->count() - $passed;
 
             $items = $grades->map(function (StudentGrade $grade) {
-                $kkm = $grade->subject?->kkm ?? 75;
+                $kkm = $grade->subject?->kkm;
                 $score = $grade->final_score;
-                $isPassed = $score !== null ? $score >= $kkm : null;
+                $isPassed = ($score !== null && $kkm !== null) ? $score >= $kkm : null;
                 return [
                     'id' => $grade->id,
                     'subject' => [
@@ -1656,17 +1664,31 @@ class StudentParentPortalController extends Controller
             $logArr['unit_name'] = $resolvedUnitName;
             $logArr['unit_level'] = $normalizedLevel;
 
-            // Predikat / Nilai
-            $predikatVal = 'Lancar';
-            if ($log->status === 'pending_approval') {
+            // Predikat / Nilai & Evaluasi Kualitas Jujur
+            $explicitNilai = data_get($metaArr, 'nilai') ?: data_get($metaArr, 'predikat');
+            $kelancaranVal = data_get($metaArr, 'kelancaran')
+                ?: ($log->kelancaran_label && !in_array(strtolower($log->kelancaran_label), ['terverifikasi', 'menunggu evaluasi', 'approved', 'verified', 'submitted']) ? $log->kelancaran_label : null);
+            $tajwidVal = data_get($metaArr, 'tajwid') ?: $log->tajwid_label;
+            $makhrajVal = data_get($metaArr, 'makhraj') ?: $log->makhraj_label;
+
+            // Kualitas evaluasi jujur (tanpa mengarang predikat dan memisahkan status approval)
+            $qualityEvaluation = $explicitNilai ?: ($kelancaranVal ?: ($tajwidVal ?: ($makhrajVal ?: null)));
+
+            if ($qualityEvaluation) {
+                $predikatVal = $qualityEvaluation;
+            } elseif ($log->status === 'pending_approval') {
                 $predikatVal = 'Menunggu Verifikasi';
-            } elseif ($log->metadata && isset($log->metadata['nilai'])) {
-                $predikatVal = $log->metadata['nilai'];
-            } elseif ($log->status === 'approved' || $log->signature_teacher) {
-                $predikatVal = 'Mutqin';
+            } elseif ($log->status === 'approved' || $log->status === 'verified') {
+                $predikatVal = 'Terverifikasi';
+            } else {
+                $predikatVal = $log->status ? ucfirst(str_replace('_', ' ', (string) $log->status)) : null;
             }
+
             $logArr['nilai'] = $predikatVal;
             $logArr['predikat'] = $predikatVal;
+            $logArr['kelancaran'] = $log->kelancaran_label ?? data_get($metaArr, 'kelancaran');
+            $logArr['tajwid'] = $log->tajwid_label ?? data_get($metaArr, 'tajwid');
+            $logArr['makhraj'] = $log->makhraj_label ?? data_get($metaArr, 'makhraj');
             $logArr['metadata'] = $log->metadata;
             $logArr['teacher'] = [
                 'id' => $log->teacher?->id,
@@ -3491,12 +3513,14 @@ class StudentParentPortalController extends Controller
         ]);
 
         $teacherName = $user ? ($user->name ?? $user->full_name ?? 'Ustadz / Guru Tahfizh') : 'Ustadz / Guru Tahfizh';
-        $nilai = $validated['nilai'] ?? 'Mutqin';
+        $nilai = $validated['nilai'] ?? null;
 
         $meta = is_array($log->metadata) ? $log->metadata : [];
         $meta['approved_at'] = now()->toIso8601String();
         $meta['approved_by'] = $teacherName;
-        $meta['nilai'] = $nilai;
+        if ($nilai !== null) {
+            $meta['nilai'] = $nilai;
+        }
 
         $log->update([
             'status' => 'approved',

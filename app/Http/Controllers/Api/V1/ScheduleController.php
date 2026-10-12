@@ -632,8 +632,8 @@ class ScheduleController extends Controller
             $query->whereHas('kelas', fn (Builder $kelasQuery) => $kelasQuery->whereIn('unit_pendidikan_id', $unitIds));
         }
 
-        // Guru hanya bisa melihat jadwal mengajar mereka sendiri
-        if ($this->isGuruRole($user)) {
+        // Guru hanya bisa melihat jadwal mengajar mereka sendiri (jika bukan admin/yayasan)
+        if (! $this->canAccessAllUnits($user) && $this->isGuruRole($user)) {
             $employee = Employee::query()->where('user_id', $user->id)->first();
             if ($employee) {
                 $query->where('employee_id', $employee->id);

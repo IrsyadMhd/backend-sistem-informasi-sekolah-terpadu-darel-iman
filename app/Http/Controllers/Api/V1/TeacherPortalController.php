@@ -112,16 +112,20 @@ class TeacherPortalController extends Controller
 
     private function ensureAcademicYear(?string $requestedId = null): AcademicYear
     {
-        $academicYear = AcademicYear::query()->where('is_active', true)->first();
+        $academicYear = AcademicYear::query()->where('is_active', true)->first()
+            ?? AcademicYear::query()->latest('start_date')->first();
         if ($academicYear) {
             return $academicYear;
         }
 
+        $currentYear = (int) now()->format('Y');
+        $academicName = sprintf('%d/%d', $currentYear, $currentYear + 1);
+
         return AcademicYear::query()->create([
             'id' => $requestedId ?: (string) Str::uuid(),
-            'name' => '2025/2026',
-            'start_date' => now()->subYear()->startOfYear()->toDateString(),
-            'end_date' => now()->subYear()->endOfYear()->toDateString(),
+            'name' => $academicName,
+            'start_date' => now()->startOfYear()->toDateString(),
+            'end_date' => now()->endOfYear()->toDateString(),
             'is_active' => true,
         ]);
     }
@@ -278,8 +282,10 @@ class TeacherPortalController extends Controller
         $teacher = $this->getTeacherContext($request);
         $employee = Employee::query()->where('user_id', $user?->id)->first();
 
-        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first();
-        $activeSemester = Semester::query()->where('is_active', true)->first();
+        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first()
+            ?? AcademicYear::query()->latest('start_date')->first();
+        $activeSemester = Semester::query()->where('is_active', true)->first()
+            ?? ($activeAcademicYear ? Semester::query()->where('academic_year_id', $activeAcademicYear->id)->first() : null);
         $educationUnit = $teacher?->educationUnit ?? $employee?->unit;
 
         $todayDayNum = now()->dayOfWeekIso;
@@ -370,8 +376,8 @@ class TeacherPortalController extends Controller
                     'education_unit_data' => $educationUnit,
                 ],
                 'academic_context' => [
-                    'academic_year' => $activeAcademicYear?->name ?? '2025/2026',
-                    'semester' => $activeSemester?->name ?? 'Ganjil',
+                    'academic_year' => $activeAcademicYear?->name ?? 'Belum Diatur',
+                    'semester' => $activeSemester?->name ?? ($activeAcademicYear ? 'Semester 1' : 'Belum Diatur'),
                     'date' => now()->translatedFormat('l, d F Y'),
                 ],
                 'kpi' => [
@@ -561,22 +567,36 @@ class TeacherPortalController extends Controller
 
     public function students(Request $request): JsonResponse
     {
+        $user = $request->user();
         $classId = $request->query('class_id') ?? $request->query('kelas_id');
-        $classIds = $this->accessScope->accessibleRombels($request->user())->pluck('id');
+        $classIds = $this->accessScope->accessibleRombels($user)->pluck('id');
 
         if ($classId && $classId !== 'all') {
-            abort_unless($classIds->contains($classId), 403, 'Rombel berada di luar scope guru.');
+            abort_unless($classIds->contains($classId), 403, 'Rombel berada di luar scope.');
         }
 
-        $students = $this->accessScope->accessibleStudents($request->user())
-            ->with(['kelas.unitPendidikan', 'educationUnit', 'parent', 'parentsPivot'])
-            ->where(function ($query) use ($classIds) {
+        $isElevated = $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'Admin', 'admin',
+            'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Wakil Kepala Sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Pengurus Yayasan',
+            'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU', 'Operator', 'operator'
+        ]);
+
+        $studentsQuery = $this->accessScope->accessibleStudents($user)
+            ->with(['kelas.unitPendidikan', 'educationUnit', 'parent.user', 'parentsPivot.user']);
+
+        if ($classId && $classId !== 'all') {
+            $studentsQuery->byClass($classId);
+        } elseif (! $isElevated && $classIds->isNotEmpty()) {
+            $studentsQuery->where(function ($query) use ($classIds) {
                 $query->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds);
-            })
-            ->when($classId && $classId !== 'all', fn ($q) => $q->byClass($classId))
+            });
+        }
+
+        $students = $studentsQuery
             ->active()
             ->orderBy('full_name')
-            ->paginate($request->query('per_page', 50));
+            ->paginate((int) $request->query('per_page', 100));
 
         $today = $request->date('date') ?: now();
         $studentIds = $students->getCollection()->pluck('id');
@@ -1002,11 +1022,32 @@ class TeacherPortalController extends Controller
 
         $teacher = $this->getTeacherContext($request);
         $employee = Employee::query()->where('user_id', $request->user()?->id)->first();
+        if (! $teacher && ! $employee && ($request->user()?->hasRole('Guru') || $this->isSuperAdmin($request))) {
+            $unit = $this->ensureEducationUnit();
+            $employee = Employee::query()->create([
+                'user_id' => $request->user()->id,
+                'niy' => 'NIY-'.substr((string) Str::uuid(), 0, 8),
+                'unit_id' => $unit->id,
+                'nama_lengkap' => $request->user()->name,
+                'email' => $request->user()->email,
+                'status_pegawai' => 'Tetap',
+                'status' => 'Aktif',
+                'status_aktivitas' => 'Aktif',
+            ]);
+            $teacher = Teacher::query()->create([
+                'user_id' => $request->user()->id,
+                'employee_id' => $employee->id,
+                'employee_number' => 'EMP-'.substr((string) $employee->id, 0, 8),
+                'full_name' => $request->user()->name,
+                'email' => $request->user()->email,
+                'education_unit_id' => $unit->id,
+            ]);
+        }
         abort_unless($teacher || $employee || $this->isSuperAdmin($request), 403, 'Akun belum terhubung dengan data guru.');
 
         if (! $schedule) {
-            $kelas = Kelas::find($classId);
-            $subject = Subject::find($subjectId);
+            $kelas = Kelas::find($classId) ?: $this->ensureKelas($classId);
+            $subject = Subject::find($subjectId) ?: $this->ensureSubject($subjectId);
             if ($kelas && $subject) {
                 $activeYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::first();
                 $activeSemester = Semester::where('is_active', true)->first() ?? Semester::first();
@@ -1017,7 +1058,7 @@ class TeacherPortalController extends Controller
                         'employee_id' => $employee?->id,
                     ],
                     [
-                        'class_id' => $kelas->id,
+                        'class_id' => null,
                         'academic_year_id' => $activeYear?->id,
                         'semester_id' => $activeSemester?->id,
                         'teacher_id' => $teacher?->id,
@@ -1467,14 +1508,14 @@ class TeacherPortalController extends Controller
         $studentId = $request->query('student_id');
         $classId = $request->query('class_id');
         $user = $request->user();
-        $isSupervisor = $user?->hasRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'Super Admin', 'super_admin', 'Tata Usaha', 'tu', 'tata_usaha']) || $user?->can('tahfizh.monitoring_target');
+        $isSupervisor = $user ? $this->accessScope->isSupervisor($user) : false;
         $teacher = $this->getTeacherContext($request);
         $classIds = $this->teacherClassIds($request, $teacher);
         if ($classId && ! $isSupervisor) {
             abort_unless($classIds->contains($classId), 403, 'Rombel berada di luar scope pembimbing.');
         }
 
-        $logs = TahfizhDailyLog::query()
+        $query = TahfizhDailyLog::query()
             ->with(['student', 'teacher', 'classModel'])
             ->whereIn('student_id', $this->accessScope->accessibleStudents($request->user())->select('id'))
             ->when($studentId, fn ($q) => $q->where('student_id', $studentId))
@@ -1483,12 +1524,68 @@ class TeacherPortalController extends Controller
                     $sub->where('class_id', $classId)
                         ->orWhereHas('student', function ($sq) use ($classId) {
                             $sq->where('kelas_id', $classId)
-                               ->orWhere('class_id', $classId);
+                                ->orWhere('class_id', $classId);
                         });
                 });
-            })
-            ->when($teacher && ! $isSupervisor, fn ($q) => $q->where('teacher_id', $teacher->id))
-            ->orderBy('record_date', 'desc')
+            });
+
+        if ($request->filled('teacher_id')) {
+            $tId = (string) $request->query('teacher_id');
+            $query->where(function ($q) use ($tId) {
+                $q->where('teacher_id', $tId)->orWhere('employee_id', $tId);
+            });
+        } elseif ($request->boolean('my_logs_only') && $teacher) {
+            $query->where('teacher_id', $teacher->id);
+        }
+
+        if ($request->filled('type')) {
+            $type = (string) $request->query('type');
+            if (in_array(strtolower($type), ['murajaah', 'murojaah'])) {
+                $query->where(function ($q) {
+                    $q->where(function ($sq) {
+                        $sq->where('metadata->type', 'Murajaah')
+                           ->orWhere('metadata->type', 'Murojaah');
+                    })->orWhere(function ($sq) {
+                        $sq->whereNull('metadata->type')
+                           ->whereNull('hafalan_surah_number')
+                           ->where(function ($mq) {
+                               $mq->where('murajaah_lembar', '>', 0)
+                                  ->orWhereNotNull('murajaah_text');
+                           });
+                    });
+                });
+            } elseif (strtolower($type) === 'ziyadah') {
+                $query->where(function ($q) {
+                    $q->where('metadata->type', 'Ziyadah')
+                      ->orWhere(function ($sq) {
+                          $sq->whereNull('metadata->type')->whereNotNull('hafalan_surah_number');
+                      });
+                });
+            } else {
+                $query->where('metadata->type', $type);
+            }
+        }
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('record_date', '>=', (string) $request->query('start_date'));
+        }
+        if ($request->filled('end_date')) {
+            $query->whereDate('record_date', '<=', (string) $request->query('end_date'));
+        }
+        if ($request->filled('date')) {
+            $query->whereDate('record_date', (string) $request->query('date'));
+        }
+
+        if ($request->filled('search')) {
+            $search = (string) $request->query('search');
+            $query->whereHas('student', function ($q) use ($search) {
+                $q->where('full_name', 'like', "%{$search}%")
+                  ->orWhere('nis', 'like', "%{$search}%");
+            });
+        }
+
+        $logs = $query->orderByDesc('record_date')
+            ->orderByDesc('created_at')
             ->paginate($request->query('per_page', 200));
 
         return response()->json([
@@ -1500,16 +1597,18 @@ class TeacherPortalController extends Controller
     public function saveTahfizh(Request $request): JsonResponse
     {
         $validated = $request->validate([
+            'id' => 'nullable|uuid',
             'student_id' => 'required|uuid',
             'class_id' => 'nullable|uuid',
-            'type' => 'required|string|in:Ziyadah,Murajaah,Tasmi,Ujian',
-            'juz' => 'required|integer|min:1|max:30',
+            'record_date' => 'nullable|date',
+            'type' => 'required|string|in:Ziyadah,Murajaah,Murojaah,Tasmi,Ujian',
+            'juz' => 'nullable|integer|min:1|max:30',
             'surah_number' => 'required|integer|exists:quran_surahs,nomor',
             'ayat_start' => 'required|integer|min:1',
             'ayat_end' => 'required|integer|gte:ayat_start',
-            'kelancaran' => 'required|string',
-            'tajwid' => 'required|string',
-            'makhraj' => 'required|string',
+            'kelancaran' => 'nullable|string|max:100',
+            'tajwid' => 'nullable|string|max:100',
+            'makhraj' => 'nullable|string|max:100',
             'notes_teacher' => 'nullable|string',
         ]);
 
@@ -1524,32 +1623,73 @@ class TeacherPortalController extends Controller
         if ($validated['ayat_end'] > $surah->jumlah_ayat) {
             return response()->json([
                 'success' => false,
-                'message' => "Nomor ayat melebihi jumlah ayat Surah {$surah->nama_latin}.",
+                'message' => "Nomor ayat melebihi jumlah ayat Surah {$surah->nama_latin} ({$surah->jumlah_ayat} ayat).",
             ], 422);
         }
 
-        $log = TahfizhDailyLog::updateOrCreate(
-            ['student_id' => $validated['student_id'], 'record_date' => now()->toDateString()],
-            [
-                'class_id' => $targetClassId,
-                'teacher_id' => $teacher?->id ?? $employee?->id,
-                'day_name' => now()->locale('id')->isoFormat('dddd'),
-                'hafalan_surah_number' => $surah->nomor,
-                'hafalan_surah_name' => $surah->nama_latin,
-                'hafalan_ayah_start' => $validated['ayat_start'],
-                'hafalan_ayah_end' => $validated['ayat_end'],
-                'hafalan_baris' => $validated['ayat_end'] - $validated['ayat_start'] + 1,
-                'notes_teacher' => $validated['notes_teacher'] ?? null,
-                'status' => 'verified',
-                'metadata' => [
-                    'type' => $validated['type'],
-                    'juz' => $validated['juz'],
-                    'kelancaran' => $validated['kelancaran'],
-                    'tajwid' => $validated['tajwid'],
-                    'makhraj' => $validated['makhraj'],
-                ],
-            ]
-        );
+        $normType = $validated['type'] === 'Murojaah' ? 'Murajaah' : $validated['type'];
+        $recordDate = $validated['record_date'] ?? now()->toDateString();
+        $dayName = Carbon::parse($recordDate)->locale('id')->isoFormat('dddd');
+
+        $isMurajaah = $normType === 'Murajaah';
+        $hafalanBaris = $isMurajaah ? 0 : ($validated['ayat_end'] - $validated['ayat_start'] + 1);
+        $murajaahLembar = $isMurajaah ? max(1, round(($validated['ayat_end'] - $validated['ayat_start'] + 1) / 15, 1)) : 0;
+        $murajaahText = $isMurajaah ? "Surah {$surah->nama_latin} ({$validated['ayat_start']}–{$validated['ayat_end']})" : null;
+
+        $juz = !empty($validated['juz'])
+            ? (int) $validated['juz']
+            : (TahfizhDailyLog::getJuzFromSurahAndAyah($validated['surah_number'], $validated['ayat_start']) ?? 1);
+
+        $existingLog = null;
+        if (!empty($validated['id'])) {
+            $existingLog = TahfizhDailyLog::where('id', $validated['id'])
+                ->where('student_id', $validated['student_id'])
+                ->firstOrFail();
+        }
+
+        $metadata = $existingLog && is_array($existingLog->metadata) ? $existingLog->metadata : [];
+        $metadata['type'] = $normType;
+        $metadata['juz'] = $juz;
+        if (!empty($validated['kelancaran'])) {
+            $metadata['kelancaran'] = (string) $validated['kelancaran'];
+        }
+        if (!empty($validated['tajwid'])) {
+            $metadata['tajwid'] = (string) $validated['tajwid'];
+        }
+        if (!empty($validated['makhraj'])) {
+            $metadata['makhraj'] = (string) $validated['makhraj'];
+        }
+
+        $saveData = [
+            'student_id' => $validated['student_id'],
+            'class_id' => $targetClassId,
+            'teacher_id' => $teacher?->id ?? $employee?->id,
+            'record_date' => $recordDate,
+            'day_name' => $dayName,
+            'hafalan_surah_number' => $surah->nomor,
+            'hafalan_surah_name' => $surah->nama_latin,
+            'hafalan_ayah_start' => $validated['ayat_start'],
+            'hafalan_ayah_end' => $validated['ayat_end'],
+            'hafalan_baris' => $hafalanBaris,
+            'murajaah_lembar' => $murajaahLembar,
+            'murajaah_text' => $murajaahText,
+            'notes_teacher' => array_key_exists('notes_teacher', $validated) ? $validated['notes_teacher'] : ($existingLog?->notes_teacher ?? null),
+            'signature_teacher' => $teacher?->full_name ?? $employee?->nama_lengkap ?? $request->user()->name,
+            'status' => 'verified',
+            'metadata' => $metadata,
+        ];
+
+        if ($existingLog) {
+            $existingLog->update($saveData);
+            $log = $existingLog;
+        } else {
+            $log = TahfizhDailyLog::create($saveData);
+        }
+
+        // Sinkronisasi capaian per-ayat siswa
+        try {
+            app(TahfizhAchievementService::class)->synchronize($student);
+        } catch (\Throwable) {}
 
         // Realtime Broadcast to student channel
         try {
@@ -1585,7 +1725,7 @@ class TeacherPortalController extends Controller
     {
         $date = $request->query('date', now()->toDateString());
         $user = $request->user();
-        $isSupervisor = $user->hasRole(['Kepala Sekolah', 'kepala_sekolah', 'kepsek', 'Super Admin', 'super_admin', 'Tata Usaha', 'tu', 'tata_usaha'])
+        $isSupervisor = $this->accessScope->isSupervisor($user)
             || $user->can('mutabaah.supervisor.view')
             || $user->can('mutabaah.report.view');
 
@@ -1861,8 +2001,19 @@ class TeacherPortalController extends Controller
         $user = $request->user();
         if ($user && (
             RoleName::userHasAny($user, ['Super Admin', 'super_admin'])
-            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin']))
+            || (method_exists($user, 'hasAnyRole') && $user->hasAnyRole([
+                'Super Admin', 'super_admin', 'Admin', 'admin',
+                'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+                'Wakil Kepala Sekolah', 'Divisi Pendidikan', 'divisi_pendidikan',
+                'Pengurus Yayasan', 'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU',
+            ]))
         )) {
+            return true;
+        }
+
+        $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+        $studentUnitId = $student->unit_id ?? $student->kelas?->unit_pendidikan_id;
+        if ($studentUnitId && $accessibleUnitIds->contains($studentUnitId)) {
             return true;
         }
 
@@ -1935,9 +2086,12 @@ class TeacherPortalController extends Controller
 
         $isElevated = $user->hasAnyRole([
             'Super Admin', 'super_admin', 'Admin', 'admin',
-            'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'Pengurus Yayasan',
+            'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Wakil Kepala Sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Pengurus Yayasan',
             'Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu', 'Staff TU', 'Operator', 'operator'
         ]);
+
+        $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
 
         $messagesQuery = PortalMessage::query()
             ->with(['student.kelas.unitPendidikan', 'student.educationUnit', 'sender:id,name,email', 'recipient:id,name,email'])
@@ -1946,6 +2100,17 @@ class TeacherPortalController extends Controller
 
         if (! $isElevated) {
             $messagesQuery->where(fn ($q) => $q->where('sender_user_id', $user->id)->orWhere('recipient_user_id', $user->id));
+        } else {
+            $messagesQuery->where(function ($q) use ($user, $accessibleUnitIds) {
+                $q->where('sender_user_id', $user->id)
+                    ->orWhere('recipient_user_id', $user->id);
+                if ($accessibleUnitIds->isNotEmpty()) {
+                    $q->orWhereHas('student', function ($sq) use ($accessibleUnitIds) {
+                        $sq->whereIn('unit_id', $accessibleUnitIds)
+                            ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+                    });
+                }
+            });
         }
 
         $messages = $messagesQuery->get();
@@ -1959,10 +2124,21 @@ class TeacherPortalController extends Controller
             }
 
             $otherUserId = $msg->sender_user_id === $user->id ? $msg->recipient_user_id : $msg->sender_user_id;
+            if ($isElevated && $msg->sender_user_id !== $user->id && $msg->recipient_user_id !== $user->id) {
+                $parent = $student->parent ?? $student->parentsPivot?->first() ?? $student->parents?->first();
+                $pUserId = $parent?->user_id ?? $parent?->user?->id;
+                if ($pUserId && ($msg->sender_user_id === $pUserId || $msg->recipient_user_id === $pUserId)) {
+                    $otherUserId = $pUserId;
+                }
+            }
+
             $key = $student->id.'_'.$otherUserId;
 
             if (! isset($grouped[$key])) {
                 $otherUser = $msg->sender_user_id === $user->id ? $msg->recipient : $msg->sender;
+                if (! $otherUser && $otherUserId) {
+                    $otherUser = User::query()->find($otherUserId);
+                }
                 $isHomeroom = in_array($student->kelas_id, $homeroomKelasIds, true);
 
                 $unreadCount = PortalMessage::query()
@@ -1981,6 +2157,9 @@ class TeacherPortalController extends Controller
                     ?? $student->kelas?->unit_pendidikan_id
                     ?? $student->kelas?->unit_id;
 
+                $roleLabel = $isElevated ? 'Kepala Sekolah' : ($isHomeroom ? 'Wali Kelas' : 'Guru Mapel');
+                $teacherType = $isElevated ? 'kepala_sekolah' : ($isHomeroom ? 'wali_kelas' : 'guru_mapel');
+
                 $grouped[$key] = [
                     'id' => $key,
                     'student_id' => $student->id,
@@ -1990,8 +2169,8 @@ class TeacherPortalController extends Controller
                     'class_name' => $student->kelas?->nama_kelas ?? '-',
                     'unit_name' => $unitName,
                     'unit_id' => $unitId,
-                    'teacher_type' => $isHomeroom ? 'wali_kelas' : 'guru_mapel',
-                    'role_label' => $isHomeroom ? 'Wali Kelas' : 'Guru Mapel',
+                    'teacher_type' => $teacherType,
+                    'role_label' => $roleLabel,
                     'last_message' => $msg->message,
                     'last_message_at' => $msg->created_at?->toIso8601String(),
                     'unread_count' => $unreadCount,
@@ -1999,31 +2178,44 @@ class TeacherPortalController extends Controller
             }
         }
 
-        // Also populate all students under teacher's classes/homeroom so teacher can initiate conversations
+        // Also populate all students under teacher's classes/homeroom or principal's accessible units so teacher/principal can initiate conversations
         $relevantKelasIds = array_unique(array_filter(array_merge($homeroomKelasIds, $teachingKelasIds)));
         $teacherUnitId = $employee?->unit_id ?? $teacher?->employee?->unit_id;
 
         $studentsQuery = Student::query()
-            ->with(['parent.user', 'parents.user', 'kelas.unitPendidikan', 'educationUnit'])
+            ->with(['parent.user', 'parentsPivot.user', 'parents.user', 'kelas.unitPendidikan', 'educationUnit'])
             ->where('is_active', true);
 
-        if (! empty($relevantKelasIds)) {
+        if ($isElevated && $accessibleUnitIds->isNotEmpty()) {
+            $studentsQuery->where(function ($q) use ($accessibleUnitIds) {
+                $q->whereIn('unit_id', $accessibleUnitIds)
+                    ->orWhereHas('kelas', fn ($k) => $k->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        } elseif (! empty($relevantKelasIds)) {
             $studentsQuery->where(fn ($q) => $q->whereIn('kelas_id', $relevantKelasIds)->orWhereIn('class_id', $relevantKelasIds));
         } elseif ($teacherUnitId) {
             $studentsQuery->where(function ($q) use ($teacherUnitId) {
                 $q->where('unit_id', $teacherUnitId)
-                  ->orWhereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $teacherUnitId));
+                    ->orWhereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $teacherUnitId));
             });
         }
 
-        $assignedStudents = $studentsQuery->limit(80)->get();
+        $assignedStudents = $studentsQuery->limit($isElevated ? 250 : 80)->get();
 
         foreach ($assignedStudents as $student) {
-            $parent = $student->parent;
-            $parentUser = $parent?->user ?? $student->parents?->first()?->user;
+            $parent = $student->parent ?? $student->parentsPivot?->first() ?? $student->parents?->first();
+            $parentUser = $parent?->user;
 
             if (! $parentUser && $parent?->email) {
                 $parentUser = User::query()->where('email', $parent->email)->first();
+            }
+
+            if (! $parentUser && $parent?->user_id) {
+                $parentUser = User::query()->find($parent->user_id);
+            }
+
+            if (! $parentUser && $parent?->phone) {
+                $parentUser = User::query()->where('phone', $parent->phone)->first();
             }
 
             if (! $parentUser) {
@@ -2043,6 +2235,9 @@ class TeacherPortalController extends Controller
                     ?? $student->kelas?->unit_pendidikan_id
                     ?? $student->kelas?->unit_id;
 
+                $roleLabel = $isElevated ? 'Kepala Sekolah' : ($isHomeroom ? 'Wali Kelas' : 'Guru Mapel');
+                $teacherType = $isElevated ? 'kepala_sekolah' : ($isHomeroom ? 'wali_kelas' : 'guru_mapel');
+
                 $grouped[$key] = [
                     'id' => $key,
                     'student_id' => $student->id,
@@ -2052,8 +2247,8 @@ class TeacherPortalController extends Controller
                     'class_name' => $student->kelas?->nama_kelas ?? '-',
                     'unit_name' => $assignedUnitName,
                     'unit_id' => $assignedUnitId,
-                    'teacher_type' => $isHomeroom ? 'wali_kelas' : 'guru_mapel',
-                    'role_label' => $isHomeroom ? 'Wali Kelas' : 'Guru Mapel',
+                    'teacher_type' => $teacherType,
+                    'role_label' => $roleLabel,
                     'last_message' => null,
                     'last_message_at' => null,
                     'unread_count' => 0,

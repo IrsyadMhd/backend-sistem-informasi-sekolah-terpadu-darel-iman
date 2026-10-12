@@ -156,6 +156,39 @@ class StudentMutationController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        // ── Normalisasi & Deteksi Konflik Parameter Store ──
+        $targetUnitId = $request->input('target_unit_id');
+        $unitTujuanId = $request->input('unit_tujuan_id');
+
+        if ($targetUnitId !== null && $unitTujuanId !== null && (string) $targetUnitId !== (string) $unitTujuanId) {
+            return response()->json([
+                'message' => 'Konflik parameter: target_unit_id dan unit_tujuan_id memiliki nilai berbeda.',
+                'errors' => [
+                    'target_unit_id' => ['Parameter target_unit_id dan unit_tujuan_id tidak cocok.'],
+                ],
+            ], 422);
+        }
+
+        if ($targetUnitId === null && $unitTujuanId !== null) {
+            $request->merge(['target_unit_id' => $unitTujuanId]);
+        }
+
+        // Normalisasi alias jenis_mutasi legacy
+        $jenisMutasiInput = $request->input('jenis_mutasi');
+        $jenisMutasiMap = [
+            'pindah_unit' => 'pindah_unit_internal',
+            'keluar' => 'pindah_keluar',
+            'masuk' => 'pindah_masuk',
+        ];
+        if (is_string($jenisMutasiInput) && isset($jenisMutasiMap[$jenisMutasiInput])) {
+            $request->merge(['jenis_mutasi' => $jenisMutasiMap[$jenisMutasiInput]]);
+        }
+
+        // Normalisasi alasan jika hanya mengirim catatan
+        if (! $request->filled('alasan') && $request->filled('catatan')) {
+            $request->merge(['alasan' => $request->input('catatan')]);
+        }
+
         $validated = $request->validate([
             'student_id' => ['required', 'uuid', 'exists:students,id'],
             'jenis_mutasi' => ['required', 'string', 'in:pindah_unit_internal,pindah_keluar,pindah_masuk,berhenti'],
@@ -300,14 +333,32 @@ class StudentMutationController extends Controller
      */
     public function approve(Request $request, string $id): JsonResponse
     {
-        $validated = $request->validate([
-            'kelas_id' => ['required', 'uuid', 'exists:tbl_kelas,id'],
-            'catatan' => ['nullable', 'string', 'max:500'],
-        ]);
+        // ── Normalisasi & Deteksi Konflik Parameter Approve ──
+        $kelasId = $request->input('kelas_id');
+        $kelasTujuanId = $request->input('kelas_tujuan_id');
 
-        [$canAccessAllUnits, $userUnitId] = $this->scopeForUser($request->user());
+        if ($kelasId !== null && $kelasTujuanId !== null && (string) $kelasId !== (string) $kelasTujuanId) {
+            return response()->json([
+                'message' => 'Konflik parameter: kelas_id dan kelas_tujuan_id memiliki nilai berbeda.',
+                'errors' => [
+                    'kelas_id' => ['Parameter kelas_id dan kelas_tujuan_id tidak cocok.'],
+                ],
+            ], 422);
+        }
 
-        $mutation = StudentMutation::with(['student', 'unitAsal', 'unitTujuan'])->findOrFail($id);
+        if ($kelasId === null && $kelasTujuanId !== null) {
+            $request->merge(['kelas_id' => $kelasTujuanId]);
+        }
+
+        if (! $request->filled('catatan')) {
+            if ($request->filled('notes')) {
+                $request->merge(['catatan' => $request->input('notes')]);
+            } elseif ($request->filled('keterangan')) {
+                $request->merge(['catatan' => $request->input('keterangan')]);
+            }
+        }
+
+        $mutation = StudentMutation::with(['student.kelas', 'unitAsal', 'unitTujuan'])->findOrFail($id);
 
         if ($mutation->status !== 'menunggu_persetujuan') {
             return response()->json([
@@ -315,6 +366,29 @@ class StudentMutationController extends Controller
                 'message' => "Pengajuan mutasi ini tidak dapat disetujui karena statusnya sudah '{$mutation->status}'.",
             ], 422);
         }
+
+        // Fallback untuk client legacy yang tidak mengirim kelas sama sekali
+        if (! $request->filled('kelas_id')) {
+            $student = $mutation->student;
+            $fallbackClass = Kelas::where('unit_pendidikan_id', $mutation->unit_tujuan_id)
+                ->when($student?->kelas?->tingkat, function ($q, $tingkat) {
+                    $q->where('tingkat', $tingkat);
+                })
+                ->orderBy('nama_kelas')
+                ->first()
+                ?? Kelas::where('unit_pendidikan_id', $mutation->unit_tujuan_id)->orderBy('nama_kelas')->first();
+
+            if ($fallbackClass) {
+                $request->merge(['kelas_id' => $fallbackClass->id]);
+            }
+        }
+
+        $validated = $request->validate([
+            'kelas_id' => ['required', 'uuid', 'exists:tbl_kelas,id'],
+            'catatan' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        [$canAccessAllUnits, $userUnitId] = $this->scopeForUser($request->user());
 
         // Pastikan pengguna memiliki wewenang atas Unit Tujuan
         if (! $canAccessAllUnits && $userUnitId && $mutation->unit_tujuan_id !== $userUnitId) {
@@ -374,7 +448,11 @@ class StudentMutationController extends Controller
 
             $student->unit_id = $newUnitId;
             $student->kelas_id = $targetClass->id;
-            $student->class_id = $targetClass->id; // backward compat
+            if (DB::table('classes')->where('id', $targetClass->id)->exists()) {
+                $student->class_id = $targetClass->id; // backward compat
+            } else {
+                $student->class_id = null;
+            }
             $student->is_active = true;
             $student->metadata = $meta;
             $student->save();
@@ -392,6 +470,36 @@ class StudentMutationController extends Controller
      */
     public function reject(Request $request, string $id): JsonResponse
     {
+        // ── Normalisasi & Deteksi Konflik Parameter Reject ──
+        $candidates = [
+            'catatan_penolakan' => $request->input('catatan_penolakan'),
+            'alasan_penolakan' => $request->input('alasan_penolakan'),
+            'catatan' => $request->input('catatan'),
+            'alasan' => $request->input('alasan'),
+        ];
+
+        // Filter kandidat yang disediakan dan bukan string kosong
+        $nonEmptyCandidates = array_filter($candidates, function ($val) {
+            return $val !== null && trim((string) $val) !== '';
+        });
+
+        $uniqueValues = array_unique(array_values($nonEmptyCandidates));
+
+        // Deteksi konflik jika dikirim lebih dari 1 field dengan nilai berbeda
+        if (count($uniqueValues) > 1) {
+            return response()->json([
+                'message' => 'Konflik parameter: field alasan penolakan dikirim dengan nilai yang berbeda.',
+                'errors' => [
+                    'catatan_penolakan' => ['Field alasan/catatan penolakan memiliki nilai yang bertentangan.'],
+                ],
+            ], 422);
+        }
+
+        // Normalisasi ke catatan_penolakan jika alias diberikan
+        if (! $request->filled('catatan_penolakan') && count($uniqueValues) === 1) {
+            $request->merge(['catatan_penolakan' => $uniqueValues[0]]);
+        }
+
         $validated = $request->validate([
             'catatan_penolakan' => ['required', 'string', 'max:500'],
         ]);

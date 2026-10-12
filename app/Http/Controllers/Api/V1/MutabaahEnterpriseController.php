@@ -20,6 +20,7 @@ use App\Models\MutabaahTemplateItem;
 use App\Models\SchoolClass;
 use App\Models\Semester;
 use App\Models\Student;
+use App\Services\AccessScopeService;
 use App\Services\MutabaahDataScope;
 use App\Services\MutabaahEnterpriseService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -37,7 +38,11 @@ class MutabaahEnterpriseController extends Controller
         'supervisor-assignments' => ['employee_id', 'supervisor_type', 'education_unit_id', 'kelas_id', 'rombel_id', 'dormitory_id', 'room_id', 'mentoring_group', 'template_id', 'start_date', 'end_date', 'status'],
     ];
 
-    public function __construct(private readonly MutabaahEnterpriseService $service, private readonly MutabaahDataScope $dataScope) {}
+    public function __construct(
+        private readonly MutabaahEnterpriseService $service,
+        private readonly MutabaahDataScope $dataScope,
+        private readonly AccessScopeService $accessScope
+    ) {}
 
     public function index(Request $request, string $resource): JsonResponse
     {
@@ -204,11 +209,7 @@ return response()->json(['success' => true, 'message' => $this->service->bulkRes
     public function options(Request $request): JsonResponse
     {
         $user = $request->user();
-        $hasRoleAccess = $user->hasRole([
-            'Super Admin', 'Admin', 'Yayasan', 'Kepala Sekolah', 'Divisi Pendidikan',
-            'Waka Kesiswaan', 'Waka Kurikulum', 'Tata Usaha', 'TU', 'Operator',
-            'Wali Kelas', 'Guru', 'Musyrif', 'Musyrifah', 'Pembimbing', 'Pengurus Yayasan',
-        ]);
+        $hasRoleAccess = $this->accessScope->isStaffOrTeacher($user);
         $hasPermission = collect(['mutabaah.category.view', 'mutabaah.agenda.view', 'mutabaah.template.view', 'mutabaah.supervisor.view', 'mutabaah.daily.input'])->contains(fn ($permission) => $user->can($permission));
 
         abort_unless($hasRoleAccess || $hasPermission, 403);
@@ -236,7 +237,7 @@ return response()->json(['success' => true, 'message' => $this->service->bulkRes
 
     public function audit(Request $request): JsonResponse
     {
-        abort_unless($request->user()->hasRole(['Super Admin', 'Admin', 'Yayasan', 'Kepala Sekolah', 'Tata Usaha']) || $request->user()->can('mutabaah.report.view'), 403);
+        abort_unless($this->accessScope->isSupervisor($request->user()) || $request->user()->can('mutabaah.report.view'), 403);
 
         return response()->json(['data' => MutabaahActivityLog::with('user:id,name')->latest('created_at')->paginate(25)]);
     }
@@ -253,11 +254,7 @@ return response()->json(['success' => true, 'message' => $this->service->bulkRes
         };
 
         $user = $request->user();
-        $hasRoleAccess = $action === 'view' && $user->hasRole([
-            'Super Admin', 'Admin', 'Yayasan', 'Kepala Sekolah', 'Divisi Pendidikan',
-            'Waka Kesiswaan', 'Waka Kurikulum', 'Tata Usaha', 'TU', 'Operator',
-            'Wali Kelas', 'Guru', 'Musyrif', 'Musyrifah', 'Pembimbing', 'Pengurus Yayasan',
-        ]);
+        $hasRoleAccess = $action === 'view' && $this->accessScope->isStaffOrTeacher($user);
 
         abort_unless($hasRoleAccess || ($permission && ($user->hasRole('Super Admin') || $user->can($permission))), 403);
     }
