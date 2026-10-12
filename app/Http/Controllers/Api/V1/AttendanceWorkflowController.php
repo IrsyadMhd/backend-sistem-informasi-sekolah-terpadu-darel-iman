@@ -771,6 +771,7 @@ class AttendanceWorkflowController extends Controller
             'unverified' => (clone $base)->where('verification_status', '!=', 'verified')->count(),
             'open_follow_ups' => HomeroomAttendanceFollowUp::whereIn('class_id', $classIds)->whereNotIn('status', ['completed', 'closed'])->count(),
             'attendance_rate' => $attendanceCount > 0 ? round(($presentCount / $attendanceCount) * 100) : null,
+            'attendance_count' => $attendanceCount,
             'classes' => $classesData,
         ]]);
     }
