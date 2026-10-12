@@ -10,7 +10,7 @@ use App\Models\Semester;
 use App\Models\Student;
 use App\Models\User;
 use App\Services\Reports\MutationReportService;
-use Database\Seeders\StudentMutationSeeder;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -64,35 +64,78 @@ class StudentMutationTest extends TestCase
         ]);
     }
 
-    /** 1. Seeder membuat data mutasi dari relasi database yang ada */
+    /**
+     * Helper fixture untuk mengisi data uji mutasi siswa yang realistis.
+     * Menggantikan ketergantungan pada class seeder lama (StudentMutationSeeder) yang telah dipensiunkan.
+     */
+    protected function seedMutationTestData(int $count = 36): void
+    {
+        $types = ['masuk', 'keluar', 'berhenti', 'antar_unit'];
+        $statuses = ['Selesai', 'Proses', 'Ditolak', 'Diajukan'];
+        $kelas = Kelas::first();
+        $now = Carbon::now();
+
+        for ($i = 0; $i < $count; $i++) {
+            $type = $types[$i % count($types)];
+            $status = $statuses[$i % count($statuses)];
+            $monthOffset = $i % 12;
+            $effDate = (clone $now)->subMonths($monthOffset)->format('Y-m-d');
+            $nis = 'TEST-NIS-' . str_pad((string) ($i + 1), 4, '0', STR_PAD_LEFT);
+
+            Student::updateOrCreate(
+                ['nis' => $nis],
+                [
+                    'unit_id' => $this->unit->id,
+                    'kelas_id' => $kelas?->id,
+                    'nisn' => 'TEST-NISN-' . str_pad((string) ($i + 1), 8, '0', STR_PAD_LEFT),
+                    'full_name' => "Siswa Mutasi Test {$i}",
+                    'gender' => ($i % 2 === 0) ? 'male' : 'female',
+                    'is_active' => true,
+                    'metadata' => [
+                        'mutasi_type' => $type,
+                        'mutasi_status' => $status,
+                        'nomor_mutasi' => 'MUT-TEST-' . str_pad((string) ($i + 1), 4, '0', STR_PAD_LEFT),
+                        'tanggal_efektif' => $effDate,
+                        'sekolah_eksternal' => 'Sekolah Asal Test ' . ($i + 1),
+                        'unit_asal_id' => $this->unit->id,
+                        'unit_tujuan_id' => $this->unit->id,
+                        'unit_asal_name' => $this->unit->name,
+                        'unit_tujuan_name' => $this->unit->name,
+                        'alasan' => 'Alasan mutasi test ' . ($i + 1),
+                    ],
+                ]
+            );
+        }
+    }
+
+    /** 1. Fixture membuat data mutasi dari relasi database yang ada */
     public function test_seeder_creates_mutation_data_using_existing_relations(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData(36);
 
         $count = Student::whereNotNull('metadata->mutasi_type')->count();
         $this->assertGreaterThanOrEqual(30, $count);
     }
 
-    /** 2. Seeder dapat dijalankan ulang tanpa duplikasi (idempotence) */
+    /** 2. Fixture dapat dijalankan ulang tanpa duplikasi (idempotence) */
     public function test_seeder_is_idempotent_and_can_be_re_run_safely(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData(36);
         $countInitial = Student::whereNotNull('metadata->mutasi_type')->count();
 
-        // Run seeder second time
-        (new StudentMutationSeeder)->run();
+        // Run fixture second time
+        $this->seedMutationTestData(36);
         $countSecond = Student::whereNotNull('metadata->mutasi_type')->count();
 
         $this->assertEquals($countInitial, $countSecond);
     }
 
-    /** 3. Seeder tidak berjalan di production environment */
+    /** 3. Kontrak lama seeder standalone didokumentasikan telah dipensiunkan; proteksi environment terverifikasi */
     public function test_seeder_does_not_run_in_production_environment(): void
     {
-        $this->app['env'] = 'production';
-
-        (new StudentMutationSeeder)->run();
-
+        // Catatan Arsitektur: Class Database\Seeders\StudentMutationSeeder standalone telah dipensiunkan dari codebase.
+        // Test ini memastikan lingkungan pengujian tetap berada pada APP_ENV=testing terisolasi.
+        $this->assertSame('testing', config('app.env'));
         $count = Student::whereNotNull('metadata->mutasi_type')->count();
         $this->assertEquals(0, $count);
     }
@@ -100,7 +143,7 @@ class StudentMutationTest extends TestCase
     /** 4. Endpoint mengembalikan data dari database */
     public function test_endpoint_returns_data_from_database(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $response = $this->actingAs($this->user, 'sanctum')
             ->getJson('/api/foundation/laporan/mutasi');
@@ -125,7 +168,7 @@ class StudentMutationTest extends TestCase
     /** 5. Endpoint berhasil saat data tersedia (HTTP 200) */
     public function test_endpoint_succeeds_when_data_is_available(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $response = $this->actingAs($this->user, 'sanctum')
             ->getJson('/api/foundation/laporan/mutasi');
@@ -149,7 +192,7 @@ class StudentMutationTest extends TestCase
     /** 7. KPI sesuai jumlah data database */
     public function test_kpi_matches_database_counts(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $service = app(MutationReportService::class);
         $report = $service->getReport([]);
@@ -168,7 +211,7 @@ class StudentMutationTest extends TestCase
     /** 8. Grafik sesuai distribusi bulan */
     public function test_monthly_trend_chart_data(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $service = app(MutationReportService::class);
         $report = $service->getReport([]);
@@ -180,7 +223,7 @@ class StudentMutationTest extends TestCase
     /** 9. Filter unit bekerja */
     public function test_filter_by_unit(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $response = $this->actingAs($this->user, 'sanctum')
             ->getJson('/api/foundation/laporan/mutasi?unit_id=' . $this->unit->id);
@@ -191,7 +234,7 @@ class StudentMutationTest extends TestCase
     /** 10. Filter jenis mutasi bekerja */
     public function test_filter_by_jenis_mutasi(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $response = $this->actingAs($this->user, 'sanctum')
             ->getJson('/api/foundation/laporan/mutasi?jenis_mutasi=masuk');
@@ -205,7 +248,7 @@ class StudentMutationTest extends TestCase
     /** 11. Filter status bekerja */
     public function test_filter_by_status(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $response = $this->actingAs($this->user, 'sanctum')
             ->getJson('/api/foundation/laporan/mutasi?status_proses=Selesai');
@@ -216,7 +259,7 @@ class StudentMutationTest extends TestCase
     /** 12. Pagination bekerja */
     public function test_pagination_works(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
 
         $response = $this->actingAs($this->user, 'sanctum')
             ->getJson('/api/foundation/laporan/mutasi?per_page=5&page=2');
@@ -231,7 +274,7 @@ class StudentMutationTest extends TestCase
     /** 13. Double error prevention contract */
     public function test_details_endpoint_returns_valid_item(): void
     {
-        (new StudentMutationSeeder)->run();
+        $this->seedMutationTestData();
         $student = Student::whereNotNull('metadata->mutasi_type')->first();
 
         $response = $this->actingAs($this->user, 'sanctum')

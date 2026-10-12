@@ -212,6 +212,157 @@ class GateAttendanceTest extends TestCase
             ->assertJsonPath('data.total_siswa', 1);
     }
 
+    public function test_gate_stats_returns_zero_scanned_when_no_records_exist(): void
+    {
+        $unit = $this->createUnit();
+        $this->createStudent($unit);
+        $user = User::factory()->create();
+        $user->assignRole('Super Admin');
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gate-attendance/stats?unit_id='.$unit->id)
+            ->assertOk();
+
+        $response->assertJsonPath('data.total_siswa', 1)
+            ->assertJsonPath('data.total_scanned', 0)
+            ->assertJsonPath('data.total_data', 0)
+            ->assertJsonPath('data.hadir', 0)
+            ->assertJsonPath('data.terlambat', 0)
+            ->assertJsonPath('data.izin', 0)
+            ->assertJsonPath('data.alpha', 0)
+            ->assertJsonPath('data.alpa', 0)
+            ->assertJsonPath('data.persentase_kehadiran', 0);
+    }
+
+    public function test_gate_stats_filters_by_date_range_and_calculates_synonyms(): void
+    {
+        $unit = $this->createUnit();
+        $student1 = $this->createStudent($unit);
+        $student2 = $this->createStudent($unit);
+        $user = User::factory()->create();
+        $user->assignRole('Super Admin');
+
+        // Hari 1: Student 1 HADIR_DALAM_TOLERANSI, Student 2 ALPA
+        Attendance::create([
+            'id' => (string) Str::uuid(),
+            'student_id' => $student1->id,
+            'attendance_date' => '2026-10-01',
+            'status' => 'HADIR_DALAM_TOLERANSI',
+            'attendance_method' => 'QRCODE',
+        ]);
+        Attendance::create([
+            'id' => (string) Str::uuid(),
+            'student_id' => $student2->id,
+            'attendance_date' => '2026-10-01',
+            'status' => 'ALPA',
+            'attendance_method' => 'MANUAL',
+        ]);
+
+        // Hari 2 (di luar rentang query): Student 1 TERLAMBAT
+        Attendance::create([
+            'id' => (string) Str::uuid(),
+            'student_id' => $student1->id,
+            'attendance_date' => '2026-10-05',
+            'status' => 'TERLAMBAT',
+            'attendance_method' => 'RFID',
+        ]);
+
+        // Request query dengan rentang 2026-10-01 s.d 2026-10-02
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gate-attendance/stats?unit_id='.$unit->id.'&date_from=2026-10-01&date_to=2026-10-02')
+            ->assertOk();
+
+        $response->assertJsonPath('data.total_scanned', 2)
+            ->assertJsonPath('data.hadir', 1)
+            ->assertJsonPath('data.alpha', 1)
+            ->assertJsonPath('data.alpa', 1)
+            ->assertJsonPath('data.terlambat', 0);
+        $this->assertEquals(50.0, (float) $response->json('data.persentase_kehadiran'));
+    }
+
+    public function test_gate_stats_ignores_unknown_status_and_maintains_category_sum(): void
+    {
+        $unit = $this->createUnit();
+        $student = $this->createStudent($unit);
+        $user = User::factory()->create();
+        $user->assignRole('Super Admin');
+
+        $statuses = ['HADIR', 'TERLAMBAT', 'IZIN', 'SAKIT', 'ALPHA', 'INVALID_STATUS_CODE'];
+        foreach ($statuses as $st) {
+            Attendance::create([
+                'id' => (string) Str::uuid(),
+                'unit_pendidikan_id' => $unit->id,
+                'student_id' => $student->id,
+                'attendance_date' => today()->toDateString(),
+                'status' => $st,
+                'attendance_method' => 'RFID',
+            ]);
+        }
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gate-attendance/stats?unit_id='.$unit->id)
+            ->assertOk();
+
+        // 6 total log riil
+        $response->assertJsonPath('data.total_scanned', 6)
+            ->assertJsonPath('data.hadir', 1)
+            ->assertJsonPath('data.terlambat', 1)
+            ->assertJsonPath('data.izin', 1)
+            ->assertJsonPath('data.sakit', 1)
+            ->assertJsonPath('data.alpha', 1)
+            ->assertJsonPath('data.alpa', 1);
+
+        // Kehadiran: 1 dari 6 = 16.7%
+        $this->assertEquals(16.7, (float) $response->json('data.persentase_kehadiran'));
+    }
+
+    public function test_gate_stats_strictly_distinguishes_student_population_from_scanned_logs(): void
+    {
+        $unit = $this->createUnit();
+        $user = User::factory()->create();
+        $user->assignRole('Super Admin');
+
+        // Buat 10 siswa aktif
+        $students = [];
+        for ($i = 1; $i <= 10; $i++) {
+            $students[] = $this->createStudent($unit);
+        }
+
+        // Hanya 2 siswa yang scan masuk hari ini
+        Attendance::create([
+            'id' => (string) Str::uuid(),
+            'unit_pendidikan_id' => $unit->id,
+            'student_id' => $students[0]->id,
+            'attendance_date' => today()->toDateString(),
+            'status' => 'HADIR',
+            'attendance_method' => 'QRCODE',
+        ]);
+        Attendance::create([
+            'id' => (string) Str::uuid(),
+            'unit_pendidikan_id' => $unit->id,
+            'student_id' => $students[1]->id,
+            'attendance_date' => today()->toDateString(),
+            'status' => 'TERLAMBAT',
+            'attendance_method' => 'QRCODE',
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson('/api/gate-attendance/stats?unit_id='.$unit->id)
+            ->assertOk();
+
+        // total_siswa HARUS 10 (populasi master), total_scanned HARUS 2 (log aktual)
+        $response->assertJsonPath('data.total_siswa', 10)
+            ->assertJsonPath('data.total_scanned', 2)
+            ->assertJsonPath('data.total_data', 2)
+            ->assertJsonPath('data.hadir', 1)
+            ->assertJsonPath('data.terlambat', 1)
+            ->assertJsonPath('data.alpha', 0) // Dilarang phantom alpha 8 siswa!
+            ->assertJsonPath('data.alpa', 0);
+
+        // Persentase kehadiran: 1 hadir dari 2 scan log = 50.0%
+        $this->assertEquals(50.0, (float) $response->json('data.persentase_kehadiran'));
+    }
+
     public function test_student_cannot_bypass_gate_permission_with_direct_request(): void
     {
         $unit = $this->createUnit();
@@ -224,3 +375,4 @@ class GateAttendanceTest extends TestCase
             ->assertForbidden();
     }
 }
+

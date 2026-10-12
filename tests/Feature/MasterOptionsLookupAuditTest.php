@@ -235,15 +235,8 @@ class MasterOptionsLookupAuditTest extends TestCase
         );
 
         $response = $this->actingAs($unitUser)->getJson('/api/employees?unit_id=' . $unit2->id);
-
-        $response->assertStatus(200);
-        // Verify response contains only own unit or empty
-        $items = $response->json('data') ?? [];
-        foreach ($items as $item) {
-            if (isset($item['unit_id'])) {
-                $this->assertEquals($this->unit->id, $item['unit_id']);
-            }
-        }
+        // Cross-unit request must be strictly rejected with HTTP 403 Forbidden per AccessScopeService
+        $response->assertForbidden();
     }
 
     public function test_soft_deleted_options_are_not_returned(): void

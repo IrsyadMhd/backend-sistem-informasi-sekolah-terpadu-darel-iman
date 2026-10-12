@@ -13,7 +13,9 @@ class AlumniApiTest extends TestCase
 
     public function test_can_fetch_alumni_list_and_stats(): void
     {
+        $role = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'super_admin', 'guard_name' => 'web']);
         $user = User::factory()->create();
+        $user->assignRole($role);
 
         Student::create([
             'nis' => '123456789',

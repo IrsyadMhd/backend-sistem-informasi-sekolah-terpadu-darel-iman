@@ -38,14 +38,22 @@ class EmployeeAndKelasUnitScopeAccessTest extends TestCase
         Kelas::create(['unit_pendidikan_id' => $unitA->id, 'tahun_ajaran_id' => $academicYear->id, 'semester_id' => $semester->id, 'jenjang' => 'SD', 'tingkat' => '1', 'kode_kelas' => 'A-1', 'nama_kelas' => 'Kelas Unit A', 'status' => 'Aktif']);
         Kelas::create(['unit_pendidikan_id' => $unitB->id, 'tahun_ajaran_id' => $academicYear->id, 'semester_id' => $semester->id, 'jenjang' => 'SMP', 'tingkat' => '7', 'kode_kelas' => 'B-7', 'nama_kelas' => 'Kelas Unit B', 'status' => 'Aktif']);
 
+        // Foreign unit queries must be strictly rejected with HTTP 403 Forbidden
         $this->actingAs($user, 'sanctum')
             ->getJson("/api/employees?unit_id={$unitB->id}")
-            ->assertOk()
-            ->assertJsonCount(0, 'data');
+            ->assertForbidden();
 
         $this->actingAs($user, 'sanctum')
             ->getJson("/api/kelas?unit_id={$unitB->id}")
-            ->assertOk()
-            ->assertJsonPath('meta.total', 0);
+            ->assertForbidden();
+
+        // Own unit queries succeed with HTTP 200 OK
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/employees?unit_id={$unitA->id}")
+            ->assertOk();
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/kelas?unit_id={$unitA->id}")
+            ->assertOk();
     }
 }

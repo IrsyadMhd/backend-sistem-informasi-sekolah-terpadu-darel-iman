@@ -331,4 +331,79 @@ class NavigationModuleTest extends TestCase
         $saMenus = collect($saRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
         $this->assertContains('akademik-jadwal', $saMenus);
     }
+
+    public function test_role_alias_normalization_resolves_accurately(): void
+    {
+        // Role alias 'tata_usaha' vs 'Tata Usaha'
+        $tuUser = User::factory()->create();
+        $tuUser->assignRole('Tata Usaha');
+
+        $tuRes = $this->actingAs($tuUser, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $tuMenus = collect($tuRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertContains('dash-tu', $tuMenus);
+
+        // Fake / unknown role should NOT receive protected menus
+        $fakeRole = Role::create(['name' => 'Unknown Guess Role', 'guard_name' => 'web']);
+        $fakeUser = User::factory()->create();
+        $fakeUser->assignRole($fakeRole);
+
+        $fakeRes = $this->actingAs($fakeUser, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $fakeMenus = collect($fakeRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertNotContains('dash-tu', $fakeMenus);
+        $this->assertNotContains('dash-super-admin', $fakeMenus);
+        $this->assertNotContains('master-unit', $fakeMenus);
+    }
+
+    public function test_protected_endpoints_deny_unauthorized_user(): void
+    {
+        $teacher = User::factory()->create();
+        $teacher->assignRole('Guru');
+
+        // Accessing hak-akses roles/permissions endpoint as regular teacher must be rejected with 403 Forbidden
+        // Routes are under prefix('hak-akses')->middleware('permission:sistem.hak_akses|employee.role_access.manage')
+        $this->actingAs($teacher, 'sanctum')
+            ->getJson('/api/hak-akses/roles')
+            ->assertForbidden();
+
+        $this->actingAs($teacher, 'sanctum')
+            ->getJson('/api/hak-akses/permissions')
+            ->assertForbidden();
+
+        $this->actingAs($teacher, 'sanctum')
+            ->postJson('/api/hak-akses/roles', ['name' => 'Hacker Role'])
+            ->assertForbidden();
+    }
+
+    public function test_dashboard_menu_dynamically_reflects_assigned_permission(): void
+    {
+        $customStaff = Role::create(['name' => 'Staf Evaluasi Akademik', 'guard_name' => 'web']);
+        $user = User::factory()->create();
+        $user->assignRole($customStaff);
+
+        // Initially without dashboard.divisi-pendidikan.view permission
+        $resBefore = $this->actingAs($user, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $menusBefore = collect($resBefore->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertNotContains('dash-divisi', $menusBefore);
+
+        // Grant permission dynamically
+        $customStaff->givePermissionTo('dashboard.divisi-pendidikan.view');
+
+        $resAfter = $this->actingAs($user, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $menusAfter = collect($resAfter->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertContains('dash-divisi', $menusAfter);
+    }
+
+    public function test_parent_and_student_navigation_isolation(): void
+    {
+        $student = User::factory()->create();
+        $student->assignRole('Siswa');
+
+        $res = $this->actingAs($student, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $moduleIds = collect($res->json('data.modules'))->pluck('id')->all();
+
+        // Must not see administrative master-data, settings, or foundation management
+        $this->assertNotContains('master-data', $moduleIds);
+        $this->assertNotContains('pengaturan', $moduleIds);
+        $this->assertNotContains('yayasan-monitoring', $moduleIds);
+    }
 }
