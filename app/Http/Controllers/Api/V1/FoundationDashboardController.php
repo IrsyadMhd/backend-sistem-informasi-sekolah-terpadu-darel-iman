@@ -114,6 +114,35 @@ class FoundationDashboardController extends Controller
             $query->where('status', $request->query('status'));
         }
 
+        if ($request->filled('role_type')) {
+            $roleType = strtolower((string) $request->query('role_type'));
+            $operator = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            if ($roleType === 'guru' || $roleType === 'teacher') {
+                $query->where(function ($q) use ($operator) {
+                    $q->whereHas('teacher')
+                      ->orWhereHas('teachings')
+                      ->orWhere('status_pegawai', $operator, '%Guru%')
+                      ->orWhereHas('position', function ($p) use ($operator) {
+                          $p->where('name', $operator, '%Guru%')
+                            ->orWhere('name', $operator, '%Pendidik%');
+                      });
+                });
+            } elseif ($roleType === 'tendik' || $roleType === 'staff') {
+                $query->where(function ($q) use ($operator) {
+                    $q->whereDoesntHave('teacher')
+                      ->whereDoesntHave('teachings')
+                      ->where(function ($sq) use ($operator) {
+                          $sq->whereNull('status_pegawai')
+                             ->orWhere('status_pegawai', 'not ' . $operator, '%Guru%');
+                      })
+                      ->whereDoesntHave('position', function ($p) use ($operator) {
+                          $p->where('name', $operator, '%Guru%')
+                            ->orWhere('name', $operator, '%Pendidik%');
+                      });
+                });
+            }
+        }
+
         $perPage = (int) $request->query('per_page', 15);
         $employees = $query->paginate($perPage);
 
