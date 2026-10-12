@@ -218,6 +218,8 @@ class MutabaahProgramAndRuleSeeder extends Seeder
                 ]));
             }
         }
+ 
+        \App\Models\MutabaahInputRule::invalidateRuleCaches();
 
         $this->command?->info('MutabaahProgramAndRuleSeeder berhasil: Program settings & input rules terpasang untuk Fullday & Boarding.');
     }

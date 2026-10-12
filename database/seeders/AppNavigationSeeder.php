@@ -232,6 +232,15 @@ class AppNavigationSeeder extends Seeder
                         'sort_order' => 9,
                         'platform' => 'web',
                     ],
+                    [
+                        'id' => 'master-opsi-bisnis',
+                        'name' => 'Data Dinamis & Generator Kode',
+                        'path' => '/dashboard/master-opsi-bisnis',
+                        'icon' => 'Sliders',
+                        'required_permissions' => ['sistem.master_data', 'sistem.pengaturan'],
+                        'sort_order' => 10,
+                        'platform' => 'web',
+                    ],
                 ],
             ],
             [
