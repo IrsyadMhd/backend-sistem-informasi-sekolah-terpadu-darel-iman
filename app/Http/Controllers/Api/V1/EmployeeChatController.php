@@ -67,8 +67,13 @@ class EmployeeChatController extends Controller
                          ->orWhere('code', $operator, "%{$unitId}%");
                    });
             });
-        } elseif (! $isGlobalScope && $userUnitId && blank($search)) {
-            $query->where('unit_id', $userUnitId);
+        } elseif (! $isGlobalScope && blank($search)) {
+            $scopedUnitIds = ! empty($scope['user_unit_ids'])
+                ? $scope['user_unit_ids']
+                : ($userUnitId ? [$userUnitId] : []);
+            if (! empty($scopedUnitIds)) {
+                $query->whereIn('unit_id', $scopedUnitIds);
+            }
         }
 
         // Null-safe search filter
@@ -284,6 +289,65 @@ class EmployeeChatController extends Controller
                     'is_online' => $presence['is_online'],
                     'status' => $presence['status'],
                 ];
+            }
+        }
+
+        // 3. Pre-populate unit employees (tendik & guru) for Kepala Sekolah & staff so they appear in conversation inbox
+        if ($this->isEmployeeUser($user)) {
+            $scope = $this->chatAccess->resolveChatScope($user);
+            $userUnitId = $scope['user_unit_id'];
+            $accessibleUnitIds = app(\App\Services\AccessScopeService::class)->accessibleEducationUnits($user)->pluck('id');
+
+            $unitEmpQuery = Employee::query()
+                ->with(['unit:id,name', 'position:id,name', 'division:id,name', 'user:id,name,email'])
+                ->where(function ($q) use ($userId) {
+                    $q->whereNull('user_id')->orWhere('user_id', '!=', $userId);
+                });
+
+            if (! $scope['can_view_all_units']) {
+                $scopedUnitIds = ! empty($scope['user_unit_ids'])
+                    ? $scope['user_unit_ids']
+                    : ($accessibleUnitIds->isNotEmpty() ? $accessibleUnitIds->toArray() : ($userUnitId ? [$userUnitId] : []));
+
+                if (! empty($scopedUnitIds)) {
+                    $unitEmpQuery->whereIn('unit_id', $scopedUnitIds);
+                }
+            }
+
+            $unitEmployees = $unitEmpQuery->orderBy('nama_lengkap', 'asc')->limit(120)->get();
+
+            $allEmpUserIds = $unitEmployees->map(fn ($e) => (string) ($e->user_id ?: $e->id))->unique()->filter()->toArray();
+            $morePresence = $this->chatAccess->getPresenceMap($allEmpUserIds);
+
+            foreach ($unitEmployees as $uEmp) {
+                $targetUserId = (string) ($uEmp->user_id ?: $uEmp->id);
+                if (! isset($groupedDirect[$targetUserId])) {
+                    $presence = $morePresence[$targetUserId] ?? ['status' => 'offline', 'is_online' => false];
+                    $posName = $uEmp->position?->name ?? 'Tendik / Guru';
+
+                    $groupedDirect[$targetUserId] = [
+                        'id' => $targetUserId,
+                        'user_id' => $targetUserId,
+                        'type' => 'direct',
+                        'name' => $uEmp->nama_lengkap ?? $uEmp->user?->name ?? 'Rekan Pegawai',
+                        'parent_name' => $uEmp->nama_lengkap ?? $uEmp->user?->name ?? 'Rekan Pegawai',
+                        'student_id' => '',
+                        'student_name' => '',
+                        'position_name' => $posName,
+                        'unit_name' => $uEmp->unit?->name ?? '-',
+                        'unit_id' => $uEmp->unit_id,
+                        'division_name' => $uEmp->division?->name ?? '-',
+                        'role' => $posName,
+                        'foto' => $uEmp->foto,
+                        'photo' => $uEmp->foto,
+                        'last_message' => null,
+                        'last_message_at' => null,
+                        'unread_count' => 0,
+                        'is_online' => $presence['is_online'],
+                        'status' => $presence['status'],
+                        'is_employee' => true,
+                    ];
+                }
             }
         }
 
