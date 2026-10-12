@@ -173,26 +173,26 @@ class Attendance extends Model
     public function getStatusLabelAttribute(): string
     {
         return match (strtoupper($this->status ?? '')) {
-            'HADIR', 'PRESENT' => 'Hadir Tepat Waktu',
-            'TERLAMBAT'        => 'Hadir Terlambat',
-            'SAKIT'            => 'Sakit (Surat Dokter)',
-            'IZIN'             => 'Izin (Keterangan)',
-            'ALPHA', 'ABSENT'  => 'Tanpa Keterangan (Alpha)',
-            'DINAS_LUAR'       => 'Dinas Luar',
-            default            => $this->status ?? 'Belum Absen',
+            'HADIR', 'PRESENT'         => 'Hadir Tepat Waktu',
+            'TERLAMBAT'                => 'Hadir Terlambat',
+            'SAKIT'                    => 'Sakit (Surat Dokter)',
+            'IZIN'                     => 'Izin (Keterangan)',
+            'ALPHA', 'ABSENT', 'ALPA'  => 'Tanpa Keterangan (Alpha)',
+            'DINAS_LUAR'               => 'Dinas Luar',
+            default                    => $this->status ?? 'Belum Absen',
         };
     }
 
     public function getStatusBadgeColorAttribute(): string
     {
         return match (strtoupper($this->status ?? '')) {
-            'HADIR', 'PRESENT' => 'success',
-            'TERLAMBAT' => 'warning',
-            'SAKIT' => 'info',
-            'IZIN' => 'secondary',
-            'ALPHA', 'ABSENT' => 'danger',
-            'DINAS_LUAR' => 'primary',
-            default => 'default',
+            'HADIR', 'PRESENT'         => 'success',
+            'TERLAMBAT'                => 'warning',
+            'SAKIT'                    => 'info',
+            'IZIN'                     => 'secondary',
+            'ALPHA', 'ABSENT', 'ALPA'  => 'danger',
+            'DINAS_LUAR'               => 'primary',
+            default                    => 'default',
         };
     }
 

@@ -77,13 +77,7 @@ class Position extends Model
      */
     public static function generateKode(): string
     {
-        $lastNumber = static::withTrashed()
-            ->where('code', 'LIKE', 'JBT-%')
-            ->pluck('code')
-            ->map(fn (string $code) => (int) preg_replace('/[^0-9]/', '', $code))
-            ->max() ?? 0;
-
-        return 'JBT-'.str_pad($lastNumber + 1, 3, '0', STR_PAD_LEFT);
+        return app(\App\Services\CodeGeneratorService::class)->generate('position_code');
     }
 
     // Accessor level label

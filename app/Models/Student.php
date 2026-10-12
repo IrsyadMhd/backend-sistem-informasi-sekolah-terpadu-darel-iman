@@ -18,6 +18,7 @@ class Student extends Model
         'nama_lengkap',
         'name',
         'nama',
+        'unit_name',
     ];
 
     protected $fillable = [
@@ -208,6 +209,16 @@ class Student extends Model
         $meta = is_array($this->metadata) ? $this->metadata : json_decode($this->attributes['metadata'] ?? '{}', true);
 
         return $meta['photo'] ?? null;
+    }
+
+    /**
+     * Resolusi nama unit pendidikan siswa.
+     */
+    public function getUnitNameAttribute(): ?string
+    {
+        return $this->educationUnit?->name
+            ?? $this->kelas?->unitPendidikan?->name
+            ?? null;
     }
 
 }

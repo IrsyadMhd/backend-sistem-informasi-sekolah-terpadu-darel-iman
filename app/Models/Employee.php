@@ -14,7 +14,7 @@ class Employee extends Model
 
     protected $table = 'employees';
 
-    protected $appends = ['photo_url', 'avatar_url'];
+    protected $appends = ['photo_url', 'avatar_url', 'status_perkawinan', 'pendidikan_terakhir'];
 
     protected $fillable = [
         'niy',
@@ -140,5 +140,15 @@ class Employee extends Model
     public function getNipAttribute(): ?string
     {
         return $this->niy ?? $this->nik ?? null;
+    }
+
+    public function getStatusPerkawinanAttribute(): ?string
+    {
+        return $this->metadata['status_perkawinan'] ?? null;
+    }
+
+    public function getPendidikanTerakhirAttribute(): ?string
+    {
+        return $this->metadata['pendidikan_terakhir'] ?? null;
     }
 }

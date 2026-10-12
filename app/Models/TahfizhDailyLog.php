@@ -183,6 +183,12 @@ class TahfizhDailyLog extends Model
         if (! empty($this->metadata['kelancaran'])) {
             return (string) $this->metadata['kelancaran'];
         }
+        if (! empty($this->notes_teacher) && preg_match('/Kelancaran:\s*([^,|\]]+)/i', $this->notes_teacher, $matches)) {
+            $val = trim($matches[1]);
+            if ($val !== '') {
+                return $val;
+            }
+        }
         if (! empty($this->status)) {
             $statusMap = [
                 'lancar' => 'Lancar',
@@ -194,10 +200,11 @@ class TahfizhDailyLog extends Model
                 'jayyid' => 'Baik (Jayyid)',
                 'makbul' => 'Cukup (Makbul)',
                 'approved' => 'Terverifikasi',
+                'verified' => 'Terverifikasi',
                 'submitted' => 'Menunggu Evaluasi',
             ];
-            $key = strtolower(trim($this->status));
-            return $statusMap[$key] ?? ucfirst(str_replace('_', ' ', $this->status));
+            $key = strtolower(trim((string) $this->status));
+            return $statusMap[$key] ?? ucfirst(str_replace('_', ' ', (string) $this->status));
         }
         return null;
     }
@@ -208,6 +215,12 @@ class TahfizhDailyLog extends Model
             return (string) $this->metadata['tajwid'];
         }
         if (! empty($this->notes_teacher)) {
+            if (preg_match('/Tajwid:\s*([^,|\]]+)/i', $this->notes_teacher, $matches)) {
+                $val = trim($matches[1]);
+                if ($val !== '') {
+                    return $val;
+                }
+            }
             if (preg_match('/tajwid.*?baik|mumtaz/i', $this->notes_teacher)) {
                 return 'Baik';
             }
@@ -224,6 +237,12 @@ class TahfizhDailyLog extends Model
             return (string) $this->metadata['makhraj'];
         }
         if (! empty($this->notes_teacher)) {
+            if (preg_match('/Makhraj:\s*([^,|\]]+)/i', $this->notes_teacher, $matches)) {
+                $val = trim($matches[1]);
+                if ($val !== '') {
+                    return $val;
+                }
+            }
             if (preg_match('/makhraj.*?baik|makharijul.*?tepat/i', $this->notes_teacher)) {
                 return 'Baik';
             }

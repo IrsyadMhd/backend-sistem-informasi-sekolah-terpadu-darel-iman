@@ -8,9 +8,12 @@ class SiteSetting extends Model
 {
     protected $fillable = [
         'application_name', 'school_name', 'logo_text', 'logo_path', 'favicon_path',
-        'footer_text', 'address', 'phone', 'sk_pendirian', 'motto', 'header_style', 'header_sticky', 'sidebar_style',
+        'footer_text', 'address', 'phone', 'website', 'email', 'sk_pendirian', 'motto',
+        'bank_name', 'bank_account_number', 'bank_account_name',
+        'card_rules_student', 'card_rules_employee', 'card_footer_motto',
+        'header_style', 'header_sticky', 'sidebar_style',
         'sidebar_position', 'sidebar_collapsed', 'template', 'sidebar_color',
-        'sidebar_accent_color', 'body_color', 'header_color',
+        'sidebar_accent_color', 'body_color', 'header_color', 'mapbox_token',
     ];
 
     protected $appends = ['logo_url', 'favicon_url'];

@@ -45,12 +45,13 @@ class PrayerGradeRule extends Model
                 'grade' => $rule->grade,
                 'label' => $rule->label,
                 'description' => $rule->description,
+                'is_configured' => true,
             ];
         }
 
-        if ($score >= 90) return ['grade' => 'A', 'label' => 'Mumtaz', 'description' => 'Istimewa'];
-        if ($score >= 80) return ['grade' => 'B', 'label' => 'Jayyid Jiddan', 'description' => 'Sangat Baik'];
-        if ($score >= 75) return ['grade' => 'C', 'label' => 'Jayyid', 'description' => 'Baik'];
-        return ['grade' => 'D', 'label' => 'Maqbul', 'description' => 'Perlu Bimbingan'];
+        if ($score >= 90) return ['grade' => 'A', 'label' => 'Mumtaz', 'description' => 'Istimewa', 'is_configured' => false];
+        if ($score >= 80) return ['grade' => 'B', 'label' => 'Jayyid Jiddan', 'description' => 'Sangat Baik', 'is_configured' => false];
+        if ($score >= 75) return ['grade' => 'C', 'label' => 'Jayyid', 'description' => 'Baik', 'is_configured' => false];
+        return ['grade' => 'D', 'label' => 'Maqbul', 'description' => 'Perlu Bimbingan', 'is_configured' => false];
     }
 }
