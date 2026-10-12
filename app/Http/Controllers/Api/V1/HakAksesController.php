@@ -302,6 +302,7 @@ class HakAksesController extends Controller
         $search = $request->get('search', '');
         $unitId = $request->get('unit_id', '');
         $jabatanId = $request->get('jabatan_id', '');
+        $status = $request->get('status', '');
 
         if ($unitId) {
             $this->accessScope->assertEducationUnitAccess($request->user(), (string) $unitId);
@@ -327,6 +328,12 @@ class HakAksesController extends Controller
 
         if ($jabatanId) {
             $query->where('jabatan_id', $jabatanId);
+        }
+
+        if ($status === 'has_user') {
+            $query->whereNotNull('user_id');
+        } elseif ($status === 'no_user') {
+            $query->whereNull('user_id');
         }
 
         $perPage = (int) $request->get('per_page', 15);
