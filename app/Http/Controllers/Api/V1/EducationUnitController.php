@@ -12,6 +12,7 @@ use App\Models\Employee;
 use App\Models\JenisUnitPendidikan;
 use App\Models\Student;
 use App\Services\AccessScopeService;
+use App\Services\CodeGeneratorService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -452,7 +453,7 @@ class EducationUnitController extends Controller
             } else {
                 $rawPrefix = preg_replace('/[^A-Za-z0-9]/', '', $level ?? 'UP');
                 $prefix = strtoupper(substr($rawPrefix ?: 'UP', 0, 10));
-                $code = $prefix.'-'.strtoupper(substr(md5(uniqid()), 0, 5));
+                $code = CodeGeneratorService::generate('unit_code', null, null, ['extra' => $prefix]);
             }
         }
 
