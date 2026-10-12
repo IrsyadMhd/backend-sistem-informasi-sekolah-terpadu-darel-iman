@@ -609,7 +609,7 @@ class EmployeeController extends Controller
                     $diperbarui++;
                     $berhasil++;
                 } else {
-                    $niyToSave = $niy ?: ('NIY-' . date('Ym') . str_pad((string) rand(100, 999), 3, '0', STR_PAD_LEFT));
+                    $niyToSave = $niy ?: \App\Services\CodeGeneratorService::generate('employee_niy', $unitId);
                     Employee::query()->create([
                         'niy' => $niyToSave,
                         'nik' => $nik ?: null,
@@ -648,7 +648,7 @@ class EmployeeController extends Controller
                 'total' => count($rows),
                 'berhasil' => $berhasil,
                 'diperbarui' => $diperbarui,
-                'duplikat' => 0,
+                'duplikat' => $diperbarui,
                 'gagal' => $gagal,
                 'errors' => $errors,
             ],
