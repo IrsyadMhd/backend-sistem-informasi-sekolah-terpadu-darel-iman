@@ -44,7 +44,7 @@ class KelasExport implements FromCollection, WithHeadings, ShouldAutoSize
                 $cls->tingkat ?? '-',
                 $wali,
                 $jmlSiswa,
-                $cls->kapasitas ?? 30,
+                $cls->kapasitas ?? '-',
                 $cls->ruangan ?? '-',
                 $cls->status ?? 'Aktif',
             ];
