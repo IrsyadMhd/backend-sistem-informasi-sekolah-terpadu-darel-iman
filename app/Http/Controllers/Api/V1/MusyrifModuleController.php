@@ -8,9 +8,11 @@ use App\Models\DisciplineCategory;
 use App\Models\DormitoryDeposit;
 use App\Models\Student;
 use App\Models\StudentPointTransaction;
+use App\Models\TahfizhDailyLog;
 use App\Models\TahfizhExam;
 use App\Models\User;
 use App\Services\AccessScopeService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -152,10 +154,25 @@ class MusyrifModuleController extends Controller
         $student = Student::findOrFail($request->student_id);
         $this->assertStudentAccess($student, $request->user());
 
-        $lastLog = \App\Models\TahfizhDailyLog::where('student_id', $request->student_id)
+        $query = TahfizhDailyLog::where('student_id', $request->student_id)
             ->whereNotNull('hafalan_surah_number')
+            ->where(function ($q) {
+                $q->whereNull('metadata->type')
+                  ->orWhereNotIn(DB::raw("LOWER(COALESCE(metadata->>'type', ''))"), ['murajaah', 'murojaah']);
+            });
+
+        $lastLog = $query->orderBy('record_date', 'desc')
             ->orderBy('created_at', 'desc')
             ->first();
+
+        // Fallback: jika santri belum memiliki log Ziyadah, ambil log terakhir apa pun
+        if (! $lastLog) {
+            $lastLog = TahfizhDailyLog::where('student_id', $request->student_id)
+                ->whereNotNull('hafalan_surah_number')
+                ->orderBy('record_date', 'desc')
+                ->orderBy('created_at', 'desc')
+                ->first();
+        }
 
         return response()->json([
             'success' => true,
@@ -170,33 +187,110 @@ class MusyrifModuleController extends Controller
     {
         $validated = $request->validate([
             'student_id' => 'required|uuid|exists:students,id',
-            'type' => 'required|string|in:Ziyadah,Murajaah,Tasmi,Ujian',
-            'juz' => 'required|integer|min:1|max:30',
+            'type' => 'required|string|in:Ziyadah,ziyadah,Murajaah,murajaah,Murojaah,murojaah,Tasmi,tasmi,Ujian,ujian',
+            'juz' => 'nullable|integer|min:1|max:30',
             'surah_number' => 'required|integer|min:1|max:114',
             'ayat_start' => 'required|integer|min:1',
             'ayat_end' => 'required|integer|gte:ayat_start',
-            'kelancaran' => 'required|string',
-            'tajwid' => 'required|string',
-            'makhraj' => 'required|string',
+            'kelancaran' => 'nullable|string|max:100',
+            'tajwid' => 'nullable|string|max:100',
+            'makhraj' => 'nullable|string|max:100',
             'notes_teacher' => 'nullable|string',
+            'notes_student' => 'nullable|string',
+            'notes' => 'nullable|string',
+            'record_date' => 'nullable|date',
         ]);
 
         $student = Student::findOrFail($validated['student_id']);
         $this->assertStudentAccess($student, $request->user());
         $surah = DB::table('quran_surahs')->where('nomor', $validated['surah_number'])->first();
 
-        $log = \App\Models\TahfizhDailyLog::create([
+        // 1. Normalisasi jenis kegiatan ke format kanonis backend
+        $rawType = trim((string) $validated['type']);
+        $normType = match (strtolower($rawType)) {
+            'murajaah', 'murojaah' => 'Murajaah',
+            'tasmi' => 'Tasmi',
+            'ujian' => 'Ujian',
+            default => 'Ziyadah',
+        };
+
+        // 2. Susun metadata JSONB terstruktur
+        $metadata = [
+            'type' => $normType,
+        ];
+
+        if (!empty($validated['juz']) && is_numeric($validated['juz'])) {
+            $metadata['juz'] = (int) $validated['juz'];
+        }
+
+        if (!empty($validated['kelancaran'])) {
+            $metadata['kelancaran'] = (string) $validated['kelancaran'];
+        }
+
+        if (!empty($validated['tajwid'])) {
+            $metadata['tajwid'] = (string) $validated['tajwid'];
+        }
+
+        if (!empty($validated['makhraj'])) {
+            $metadata['makhraj'] = (string) $validated['makhraj'];
+        }
+
+        if (!empty($validated['notes_student'])) {
+            $metadata['notes_student'] = (string) $validated['notes_student'];
+        }
+
+        // 3. Format notes_teacher dengan mempertahankan ringkasan evaluasi dan teks catatan asli
+        $userNotes = $validated['notes_teacher'] ?? ($validated['notes'] ?? ($request->input('notes') ?? ''));
+
+        $headerParts = [];
+        if (!empty($metadata['juz'])) {
+            $headerParts[] = "Juz {$metadata['juz']}";
+        }
+        $evalParts = [];
+        if (!empty($metadata['tajwid'])) {
+            $evalParts[] = "Tajwid: {$metadata['tajwid']}";
+        }
+        if (!empty($metadata['makhraj'])) {
+            $evalParts[] = "Makhraj: {$metadata['makhraj']}";
+        }
+        if (!empty($metadata['kelancaran'])) {
+            $evalParts[] = "Kelancaran: {$metadata['kelancaran']}";
+        }
+        if (!empty($evalParts)) {
+            $headerParts[] = implode(', ', $evalParts);
+        }
+
+        $summaryTag = "[{$normType}" . (!empty($headerParts) ? ' - ' . implode(' | ', $headerParts) : '') . ']';
+        $fullNotesTeacher = trim($summaryTag . ' ' . trim((string) $userNotes));
+
+        $recordDate = $validated['record_date'] ?? now()->toDateString();
+        $dayName = Carbon::parse($recordDate)->locale('id')->isoFormat('dddd');
+        $isMurajaah = $normType === 'Murajaah';
+        $hafalanBaris = $isMurajaah ? 0 : ((int) $validated['ayat_end'] - (int) $validated['ayat_start'] + 1);
+        $murajaahLembar = $isMurajaah ? max(1, round(((int) $validated['ayat_end'] - (int) $validated['ayat_start'] + 1) / 15, 1)) : 0;
+        $murajaahText = $isMurajaah ? "Surah " . ($surah?->nama_latin ?? "Surah {$validated['surah_number']}") . " ({$validated['ayat_start']}–{$validated['ayat_end']})" : null;
+
+        $log = TahfizhDailyLog::create([
             'student_id' => $student->id,
             'class_id' => $student->kelas_id ?? $student->class_id,
             'teacher_id' => $request->user()?->id,
-            'record_date' => now()->toDateString(),
-            'day_name' => now()->locale('id')->isoFormat('dddd'),
+            'record_date' => $recordDate,
+            'day_name' => $dayName,
             'hafalan_surah_number' => $validated['surah_number'],
             'hafalan_surah_name' => $surah?->nama_latin ?? "Surah ke-{$validated['surah_number']}",
             'hafalan_ayah_start' => $validated['ayat_start'],
             'hafalan_ayah_end' => $validated['ayat_end'],
-            'notes_teacher' => "[{$validated['type']} - Juz {$validated['juz']} | Tajwid: {$validated['tajwid']}, Makhraj: {$validated['makhraj']}, Kelancaran: {$validated['kelancaran']}] " . ($validated['notes_teacher'] ?? ''),
+            'hafalan_baris' => $hafalanBaris,
+            'murajaah_lembar' => $murajaahLembar,
+            'murajaah_text' => $murajaahText,
+            'notes_teacher' => $fullNotesTeacher,
+            'metadata' => $metadata,
         ]);
+
+        // Sinkronisasi capaian per-ayat siswa jika service tersedia
+        try {
+            app(\App\Services\TahfizhAchievementService::class)->synchronize($student);
+        } catch (\Throwable) {}
 
         return response()->json([
             'success' => true,
