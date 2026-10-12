@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Services\AccessScopeService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Rules\ActiveBusinessOption;
 
 class UpdateEmployeeRequest extends FormRequest
 {
@@ -31,6 +32,21 @@ class UpdateEmployeeRequest extends FormRequest
             $nik = preg_replace('/\s+/', ' ', $nik);
             $updates['nik'] = $nik !== '' ? $nik : null;
         }
+
+        $metadata = $this->input('metadata', []);
+        if (! is_array($metadata)) {
+            $metadata = [];
+        }
+        if ($this->filled('status_perkawinan') && empty($metadata['status_perkawinan'])) {
+            $metadata['status_perkawinan'] = trim((string) $this->status_perkawinan);
+        }
+        if ($this->filled('pendidikan_terakhir') && empty($metadata['pendidikan_terakhir'])) {
+            $metadata['pendidikan_terakhir'] = trim((string) $this->pendidikan_terakhir);
+        }
+        if (! empty($metadata)) {
+            $updates['metadata'] = $metadata;
+        }
+
         if (! empty($updates)) {
             $this->merge($updates);
         }
@@ -58,10 +74,12 @@ class UpdateEmployeeRequest extends FormRequest
             'tempat_lahir' => 'nullable|string|max:100',
             'tanggal_lahir' => 'nullable|date',
             'agama' => 'nullable|string|max:30',
+            'status_perkawinan' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('marital_status')],
+            'pendidikan_terakhir' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('last_education')],
             'foto' => 'nullable|string',
             'unit_id' => 'nullable|uuid|exists:education_units,id',
             'jabatan_id' => 'nullable|uuid|exists:positions,id',
-            'status_pegawai' => 'nullable|string|max:50',
+            'status_pegawai' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('employee_status')],
             'tanggal_masuk' => 'nullable|date',
             'tanggal_keluar' => 'nullable|date',
             'status' => 'nullable|string|max:30',
@@ -76,6 +94,8 @@ class UpdateEmployeeRequest extends FormRequest
             'user_id' => 'nullable|uuid|exists:users,id',
             'role_id' => 'nullable|integer',
             'metadata' => 'nullable|array',
+            'metadata.status_perkawinan' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('marital_status')],
+            'metadata.pendidikan_terakhir' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('last_education')],
             'teachings' => 'nullable|array',
         ];
     }

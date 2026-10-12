@@ -4,6 +4,7 @@ namespace App\Http\Requests\V1;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Rules\ActiveBusinessOption;
 
 class StoreStudentRequest extends FormRequest
 {
@@ -20,10 +21,13 @@ class StoreStudentRequest extends FormRequest
             $nama = preg_replace('/\s+/', ' ', $nama);
             $updates['full_name'] = $nama;
         }
-        if ($this->has('nis')) {
+        if ($this->filled('nis')) {
             $nis = trim((string) $this->nis);
             $nis = preg_replace('/\s+/', ' ', $nis);
             $updates['nis'] = $nis;
+        } elseif (! empty($this->unit_id)) {
+            $codeGenerator = app(\App\Services\CodeGeneratorService::class);
+            $updates['nis'] = $codeGenerator->generate('student_nis', (string) $this->unit_id);
         }
         if ($this->has('nisn')) {
             $nisn = trim((string) $this->nisn);
@@ -145,7 +149,7 @@ class StoreStudentRequest extends FormRequest
             'metadata.kode_pos' => ['nullable', 'string', 'max:20'],
             'metadata.kota_kabupaten' => ['nullable', 'string', 'max:120'],
             'metadata.provinsi' => ['nullable', 'string', 'max:120'],
-            'metadata.jenis_tempat_tinggal' => ['nullable', 'string', 'max:120'],
+            'metadata.jenis_tempat_tinggal' => ['nullable', 'string', 'max:120', new ActiveBusinessOption('residence_type')],
             'metadata.jarak_tempuh_ke_sekolah' => ['nullable', 'string', 'max:120'],
             // `moda_transportasi` is the canonical key used by the dashboard.
             // Keep the old spelling valid so previously imported records remain editable.
@@ -164,7 +168,7 @@ class StoreStudentRequest extends FormRequest
             'metadata.apakah_punya_kip' => ['nullable', 'boolean'],
             'metadata.apakah_layak_menerima_pip' => ['nullable', 'boolean'],
             'metadata.alasan_menolak_pip' => ['nullable', 'string'],
-            'metadata.status_siswa' => ['nullable', Rule::in(['aktif', 'lulus', 'mutasi', 'berhenti'])],
+            'metadata.status_siswa' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('student_status')],
             'metadata.keterangan_kelas' => ['nullable', 'string', 'max:255'],
             'metadata.tahun_ajaran_masuk' => ['nullable', 'string', 'max:20'],
             'metadata.tahun_ajaran_berjalan' => ['nullable', 'string', 'max:20'],
@@ -173,7 +177,7 @@ class StoreStudentRequest extends FormRequest
             'metadata.niy_ortu_jika_pegawai' => ['nullable', 'string', 'max:50'],
             'metadata.wali_kelas' => ['nullable', 'string', 'max:255'],
             'metadata.niy_wali_kelas' => ['nullable', 'string', 'max:50'],
-            'metadata.status_pernikahan_wali' => ['nullable', 'string', 'max:50'],
+            'metadata.status_pernikahan_wali' => ['nullable', 'string', 'max:50', new ActiveBusinessOption('marital_status')],
             'metadata.tanggungan_anak_wali' => ['nullable', 'integer', 'min:0'],
             'metadata.ayah' => ['nullable', 'array'],
             'metadata.ibu' => ['nullable', 'array'],
@@ -197,8 +201,8 @@ class StoreStudentRequest extends FormRequest
             'metadata.tempat_lahir_ayah' => ['nullable', 'string', 'max:120'],
             'metadata.tgl_lahir_ayah' => ['nullable', 'date'],
             'metadata.telfon_ayah' => ['nullable', 'string', 'max:50'],
-            'metadata.pendidikan_terakhir_ayah' => ['nullable', 'string', 'max:80'],
-            'metadata.pekerjaan_ayah' => ['nullable', 'string', 'max:120'],
+            'metadata.pendidikan_terakhir_ayah' => ['nullable', 'string', 'max:80', new ActiveBusinessOption('last_education')],
+            'metadata.pekerjaan_ayah' => ['nullable', 'string', 'max:120', new ActiveBusinessOption('parent_occupation')],
             'metadata.instansi_pekerjaan_ayah' => ['nullable', 'string', 'max:180'],
             'metadata.jabatan_pekerjaan_ayah' => ['nullable', 'string', 'max:120'],
             'metadata.alamat_instansi_ayah' => ['nullable', 'string'],
@@ -210,8 +214,8 @@ class StoreStudentRequest extends FormRequest
             'metadata.tempat_lahir_ibu' => ['nullable', 'string', 'max:120'],
             'metadata.tgl_lahir_ibu' => ['nullable', 'date'],
             'metadata.telfon_ibu' => ['nullable', 'string', 'max:50'],
-            'metadata.pendidikan_terakhir_ibu' => ['nullable', 'string', 'max:80'],
-            'metadata.pekerjaan_ibu' => ['nullable', 'string', 'max:120'],
+            'metadata.pendidikan_terakhir_ibu' => ['nullable', 'string', 'max:80', new ActiveBusinessOption('last_education')],
+            'metadata.pekerjaan_ibu' => ['nullable', 'string', 'max:120', new ActiveBusinessOption('parent_occupation')],
             'metadata.instansi_pekerjaan_ibu' => ['nullable', 'string', 'max:180'],
             'metadata.jabatan_pekerjaan_ibu' => ['nullable', 'string', 'max:120'],
             'metadata.alamat_instansi_ibu' => ['nullable', 'string'],
@@ -223,8 +227,8 @@ class StoreStudentRequest extends FormRequest
             'metadata.tempat_lahir_wali' => ['nullable', 'string', 'max:120'],
             'metadata.tgl_lahir_wali' => ['nullable', 'date'],
             'metadata.telfon_wali' => ['nullable', 'string', 'max:50'],
-            'metadata.pendidikan_terakhir_wali' => ['nullable', 'string', 'max:80'],
-            'metadata.pekerjaan_wali' => ['nullable', 'string', 'max:120'],
+            'metadata.pendidikan_terakhir_wali' => ['nullable', 'string', 'max:80', new ActiveBusinessOption('last_education')],
+            'metadata.pekerjaan_wali' => ['nullable', 'string', 'max:120', new ActiveBusinessOption('parent_occupation')],
             'metadata.instansi_pekerjaan_wali' => ['nullable', 'string', 'max:180'],
             'metadata.jabatan_pekerjaan_wali' => ['nullable', 'string', 'max:120'],
             'metadata.alamat_instansi_wali' => ['nullable', 'string'],
