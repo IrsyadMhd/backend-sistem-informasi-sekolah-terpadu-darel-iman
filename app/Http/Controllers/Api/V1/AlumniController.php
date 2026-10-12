@@ -24,14 +24,30 @@ class AlumniController extends Controller
 
         $query = Student::with(['educationUnit', 'schoolClass'])
             ->where(function ($q) {
-                $q->where('is_active', false)
-                  ->orWhere('metadata->is_alumni', true)
-                  ->orWhere('metadata->status_siswa', 'alumni')
-                  ->orWhere('metadata->status_alumni', 'alumni')
-                  ->orWhere('metadata->status_alumni', 'Tamat')
-                  ->orWhere('metadata->status_alumni', 'Lulus')
-                  ->orWhereNotNull('metadata->tahun_lulus')
-                  ->orWhereNotNull('metadata->mutasi_type');
+                // 1. Kondisi Alumni eksplisit
+                $q->where(function ($sub) {
+                    $sub->where('metadata->is_alumni', true)
+                        ->orWhere('metadata->status_siswa', 'alumni')
+                        ->orWhere('metadata->status_alumni', 'alumni')
+                        ->orWhere('metadata->status_alumni', 'Tamat')
+                        ->orWhere('metadata->status_alumni', 'Lulus');
+                })
+                // 2. Kondisi Mutasi eksplisit
+                ->orWhere(function ($sub) {
+                    $sub->whereNotNull('metadata->mutasi_type')
+                        ->whereRaw("COALESCE(metadata->>'mutasi_type', '') != ''");
+                })
+                // 3. Siswa yang dinonaktifkan KARENA lulus atau mutasi
+                ->orWhere(function ($sub) {
+                    $sub->where('is_active', false)
+                        ->where(function ($inner) {
+                            $inner->whereNotNull('metadata->tahun_lulus')
+                                ->orWhereNotNull('metadata->tahun_mutasi')
+                                ->orWhere('metadata->status_siswa', 'lulus')
+                                ->orWhere('metadata->status_siswa', 'alumni')
+                                ->orWhere('metadata->status_siswa', 'mutasi');
+                        });
+                });
             });
 
         // Scope data real-time ke unit_id pengguna (kecuali Super Admin / Yayasan / Admin)
@@ -101,18 +117,40 @@ class AlumniController extends Controller
             }
         }
 
-        // Filter Tujuan Kelulusan
+        // Filter Tujuan Kelulusan (dengan normalisasi multi-keyword lintas variasi web & mobile)
         if ($request->filled('tujuan_kelulusan') && !in_array($request->query('tujuan_kelulusan'), ['semua', 'all', ''])) {
-            $tujuan = (string) $request->query('tujuan_kelulusan');
-            $query->where(function ($q) use ($tujuan) {
-                $q->where('metadata->tujuan_kelulusan', 'like', "%{$tujuan}%")
-                  ->orWhere('metadata->perguruan_tinggi', 'like', "%{$tujuan}%")
-                  ->orWhere('metadata->status_lanjutan', 'like', "%{$tujuan}%")
-                  ->orWhere('metadata->pekerjaan', 'like', "%{$tujuan}%");
+            $rawTujuan = strtolower(trim((string) $request->query('tujuan_kelulusan')));
+            $keywords = match ($rawTujuan) {
+                'pesantren', 'ponpes', 'mahad' => ['pesantren', 'ponpes', 'pondok', "ma'had", 'mahad', 'tahfizh', 'tahfidz'],
+                'bekerja', 'kerja', 'karir' => ['kerja', 'bekerja', 'karir', 'wirausaha', 'bisnis', 'swasta', 'pns', 'tni', 'polri'],
+                'kuliah', 'kampus' => ['kuliah', 'ptn', 'pts', 'universitas', 'institut', 'kampus', 'studi'],
+                'sekolah', 'madrasah' => ['sekolah', 'sma', 'smk', 'ma', 'smp', 'madrasah', 'lanjutan'],
+                default => [$rawTujuan],
+            };
+
+            $query->where(function ($q) use ($keywords) {
+                foreach ($keywords as $kw) {
+                    $pattern = "%{$kw}%";
+                    $q->orWhereRaw("LOWER(COALESCE(metadata->>'tujuan_kelulusan', '')) LIKE ?", [$pattern])
+                      ->orWhereRaw("LOWER(COALESCE(metadata->>'perguruan_tinggi', '')) LIKE ?", [$pattern])
+                      ->orWhereRaw("LOWER(COALESCE(metadata->>'status_lanjutan', '')) LIKE ?", [$pattern])
+                      ->orWhereRaw("LOWER(COALESCE(metadata->>'pekerjaan', '')) LIKE ?", [$pattern]);
+                }
             });
         }
 
-        $perPage = (int) $request->query('per_page', 50);
+        if ($request->boolean('all') || $request->query('per_page') === 'all') {
+            $alumni = $query->orderByDesc('updated_at')->get();
+            return response()->json([
+                'current_page' => 1,
+                'data' => $alumni,
+                'total' => $alumni->count(),
+                'per_page' => $alumni->count(),
+                'last_page' => 1,
+            ]);
+        }
+
+        $perPage = min(500, max(1, (int) $request->query('per_page', 50)));
         $alumni = $query->orderByDesc('updated_at')->paginate($perPage);
 
         return response()->json($alumni);
@@ -150,8 +188,12 @@ class AlumniController extends Controller
               ->orWhere('metadata->status_alumni', 'Tamat')
               ->orWhere('metadata->status_alumni', 'Lulus')
               ->orWhere(function ($sub) {
-                  $sub->whereNull('metadata->mutasi_type')
-                      ->where('is_active', false);
+                  $sub->where('is_active', false)
+                      ->where(function ($inner) {
+                          $inner->whereNotNull('metadata->tahun_lulus')
+                              ->orWhere('metadata->status_siswa', 'lulus')
+                              ->orWhere('metadata->status_siswa', 'alumni');
+                      });
               });
         })->count();
 
@@ -168,14 +210,51 @@ class AlumniController extends Controller
             })
             ->count();
         $siswaLulusTahunIni = (clone $studentQuery)->where('is_active', false)
-            ->whereYear('updated_at', now()->year)
+            ->where(function ($q) {
+                $q->where('metadata->is_alumni', true)
+                  ->orWhere('metadata->status_siswa', 'alumni')
+                  ->orWhere('metadata->status_siswa', 'lulus')
+                  ->orWhere('metadata->status_alumni', 'Lulus')
+                  ->orWhere('metadata->status_alumni', 'Tamat');
+            })
+            ->where(function ($q) {
+                $q->whereYear('updated_at', now()->year)
+                  ->orWhere('metadata->tahun_lulus', (string) now()->year);
+            })
             ->count();
 
-        $lanjutStudi = (clone $studentQuery)->where(function ($q) {
-            $q->whereNotNull('metadata->tujuan_kelulusan')
-              ->orWhereNotNull('metadata->perguruan_tinggi')
-              ->orWhereNotNull('metadata->status_lanjutan');
-        })->count();
+        $lanjutStudi = (clone $studentQuery)
+            ->where(function ($q) {
+                $q->where('metadata->is_alumni', true)
+                  ->orWhere('metadata->status_siswa', 'alumni')
+                  ->orWhere('metadata->status_alumni', 'alumni')
+                  ->orWhere('metadata->status_alumni', 'Tamat')
+                  ->orWhere('metadata->status_alumni', 'Lulus');
+            })
+            ->where(function ($q) {
+                $q->whereNotNull('metadata->tujuan_kelulusan')
+                  ->orWhereNotNull('metadata->perguruan_tinggi')
+                  ->orWhereNotNull('metadata->status_lanjutan');
+            })
+            ->count();
+
+        // Kumpulkan tahun-tahun kelulusan dan mutasi yang tersedia di DB
+        $dbYears = (clone $studentQuery)->where(function ($q) {
+            $q->where('metadata->is_alumni', true)
+              ->orWhere('metadata->status_siswa', 'alumni')
+              ->orWhere('metadata->status_alumni', 'alumni')
+              ->orWhere('metadata->status_alumni', 'Tamat')
+              ->orWhere('metadata->status_alumni', 'Lulus')
+              ->orWhereNotNull('metadata->mutasi_type');
+        })
+        ->selectRaw("DISTINCT COALESCE(NULLIF(metadata->>'tahun_lulus', ''), NULLIF(metadata->>'tahun_mutasi', ''), NULLIF(tahun_masuk, '')) as thn")
+        ->pluck('thn')
+        ->filter(fn ($y) => ! empty($y) && strlen((string) $y) === 4)
+        ->values()
+        ->all();
+
+        $availableYears = array_values(array_unique(array_merge(['2026', '2025', '2024', '2023'], $dbYears)));
+        rsort($availableYears);
 
         return response()->json([
             'status' => 'success',
@@ -186,7 +265,8 @@ class AlumniController extends Controller
                 'total_prestasi' => $totalPrestasi,
                 'lulus_tahun_ini' => $siswaLulusTahunIni,
                 'lanjut_studi' => $lanjutStudi,
-                'persentase_kelulusan' => $totalSiswa > 0 ? round(($totalAlumni / $totalSiswa) * 100, 1) : 100,
+                'available_years' => $availableYears,
+                'persentase_kelulusan' => $totalSiswa > 0 ? round(($totalAlumni / $totalSiswa) * 100, 1) : 0,
                 'rekap_prestasi' => RekapPrestasiSiswa::query()
                     ->when(! $accessScopeService->hasGlobalScope($user) && $accessibleUnitIds->isNotEmpty(), function ($q) use ($accessibleUnitIds) {
                         $q->whereHas('siswa', fn ($sq) => $sq->whereIn('unit_id', $accessibleUnitIds));
