@@ -255,10 +255,33 @@ class TeacherPortalController extends Controller
                 ->orWhere('unit_pendidikan_id', $educationUnit->id))
             ->findOrFail($subjectId);
 
-        $kurikulum = MasterKurikulum::query()
-            ->where('unit_pendidikan_id', $educationUnit->id)
-            ->where('tahun_ajaran_id', $academicYear->id)
-            ->firstOrFail();
+        $kurikulum = null;
+        if (! empty($subject->kurikulum_id)) {
+            $kurikulum = MasterKurikulum::query()->find($subject->kurikulum_id);
+        }
+        if (! $kurikulum && ! empty($kelas->kurikulum_id)) {
+            $kurikulum = MasterKurikulum::query()->find($kelas->kurikulum_id);
+        }
+        if (! $kurikulum) {
+            $kurikulum = MasterKurikulum::query()
+                ->where('unit_pendidikan_id', $educationUnit->id)
+                ->where('tahun_ajaran_id', $academicYear->id)
+                ->first();
+        }
+        if (! $kurikulum) {
+            $targetJenjang = in_array(strtoupper((string) $educationUnit->level), ['PONPES', 'PONDOK', 'PESANTREN'], true)
+                ? 'SMP'
+                : strtoupper((string) ($educationUnit->level ?? $kelas->jenjang ?? ''));
+            $kurikulum = MasterKurikulum::query()
+                ->where('tahun_ajaran_id', $academicYear->id)
+                ->where('jenjang', $targetJenjang)
+                ->where('status', true)
+                ->first();
+        }
+        if (! $kurikulum) {
+            $kurikulum = MasterKurikulum::query()->where('status', true)->first();
+        }
+        abort_unless($kurikulum, 422, 'Master kurikulum aktif belum dikonfigurasi untuk unit atau mata pelajaran ini.');
         $subjectName = $subject->name ?? $subject->nama_mapel;
 
         return LmsModulAjar::create([
