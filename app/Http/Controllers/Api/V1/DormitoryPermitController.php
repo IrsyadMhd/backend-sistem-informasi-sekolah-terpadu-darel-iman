@@ -7,6 +7,7 @@ use App\Models\DormitoryPermit;
 use App\Models\ParentModel;
 use App\Models\Student;
 use App\Services\AccessScopeService;
+use App\Services\CodeGeneratorService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -143,7 +144,7 @@ class DormitoryPermitController extends Controller
             );
         }
 
-        $permitNumber = 'BP-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -4));
+        $permitNumber = CodeGeneratorService::generate('permit_number', $studentUnitId);
 
         $permit = DormitoryPermit::create([
             'id' => (string) Str::uuid(),
