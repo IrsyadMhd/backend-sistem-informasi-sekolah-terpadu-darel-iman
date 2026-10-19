@@ -33,6 +33,7 @@ class HakAksesController extends Controller
         $search = $request->get('search', '');
 
         $query = Role::withCount(['permissions', 'users'])
+            ->orderBy('level')
             ->orderBy('name');
 
         if ($search) {
@@ -44,6 +45,7 @@ class HakAksesController extends Controller
             'id' => $r->id,
             'name' => $r->name,
             'guard_name' => $r->guard_name,
+            'level' => (int) ($r->level ?? 9),
             'jumlah_izin' => $r->permissions_count,
             'jumlah_pengguna' => $r->users_count,
             'permissions' => $r->permissions->pluck('name'),
@@ -67,15 +69,25 @@ class HakAksesController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:100', 'unique:roles,name'],
             'guard_name' => ['nullable', 'string', 'max:50'],
+            'level' => ['nullable', 'integer', 'between:1,9'],
             'permissions' => ['nullable', 'array'],
             'permissions.*' => ['string', 'exists:permissions,name'],
         ]);
+
+        $user = $request->user();
+        $isSuperAdmin = $user && ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin'));
+
+        // Hanya Super Admin yang berhak membuat role level 1 atau 2
+        if (isset($validated['level']) && (int) $validated['level'] <= 2 && ! $isSuperAdmin) {
+            abort(403, 'Hanya Super Admin yang berhak membuat peran dengan tingkat tata kelola 1 atau 2.');
+        }
 
         try {
             $role = DB::transaction(function () use ($validated) {
                 $role = Role::create([
                     'name' => $validated['name'],
                     'guard_name' => $validated['guard_name'] ?? 'web',
+                    'level' => $validated['level'] ?? 5,
                 ]);
 
                 if (! empty($validated['permissions'])) {
@@ -88,7 +100,9 @@ class HakAksesController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => "Role '{$role->name}' berhasil ditambahkan.",
-                'data' => $role->load('permissions'),
+                'data' => array_merge($role->load('permissions')->toArray(), [
+                    'level' => (int) ($role->level ?? 9),
+                ]),
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
@@ -112,6 +126,7 @@ class HakAksesController extends Controller
                 'id' => $role->id,
                 'name' => $role->name,
                 'guard_name' => $role->guard_name,
+                'level' => (int) ($role->level ?? 9),
                 'permissions' => $role->permissions->pluck('name'),
                 'created_at' => $role->created_at,
                 'updated_at' => $role->updated_at,
@@ -130,16 +145,46 @@ class HakAksesController extends Controller
         $validated = $request->validate([
             'name' => ['required', 'string', 'min:2', 'max:100', Rule::unique('roles', 'name')->ignore($role->id)],
             'guard_name' => ['nullable', 'string', 'max:50'],
+            'level' => ['nullable', 'integer', 'between:1,9'],
             'permissions' => ['nullable', 'array'],
             'permissions.*' => ['string', 'exists:permissions,name'],
         ]);
 
+        $user = $request->user();
+        $isSuperAdmin = $user && ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin'));
+
+        // Proteksi nama role sistem krusial
+        $protectedNames = ['Super Admin', 'Admin'];
+        if (in_array($role->name, $protectedNames, true) && $role->name !== $validated['name']) {
+            return response()->json([
+                'success' => false,
+                'message' => "Nama role sistem '{$role->name}' dilindungi dan tidak dapat diubah.",
+            ], 422);
+        }
+
+        // Super Admin wajib tetap level 1
+        if ($role->name === 'Super Admin' && isset($validated['level']) && (int) $validated['level'] !== 1) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Level untuk peran Super Admin harus tetap tingkat 1.',
+            ], 422);
+        }
+
+        // Role selain Super Admin tidak boleh dinaikkan ke level 1 oleh non-Super Admin
+        if (isset($validated['level']) && (int) $validated['level'] <= 2 && ! $isSuperAdmin) {
+            abort(403, 'Hanya Super Admin yang berhak menetapkan tingkatan hierarki tata kelola 1 atau 2.');
+        }
+
         try {
             DB::transaction(function () use ($role, $validated) {
-                $role->update([
-                    'name' => $validated['name'],
-                    'guard_name' => $validated['guard_name'] ?? $role->guard_name,
-                ]);
+                $role->name = $validated['name'];
+                if (isset($validated['guard_name'])) {
+                    $role->guard_name = $validated['guard_name'];
+                }
+                if (isset($validated['level'])) {
+                    $role->level = (int) $validated['level'];
+                }
+                $role->save();
 
                 $role->syncPermissions($validated['permissions'] ?? []);
             });
@@ -147,7 +192,9 @@ class HakAksesController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => "Role '{$role->name}' berhasil diperbarui.",
-                'data' => $role->fresh()->load('permissions'),
+                'data' => array_merge($role->fresh()->load('permissions')->toArray(), [
+                    'level' => (int) ($role->level ?? 9),
+                ]),
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -164,6 +211,30 @@ class HakAksesController extends Controller
     {
         $this->accessScope->assertGlobalAccessManagement($request->user());
         $role = Role::findOrFail($id);
+
+        $protectedCanonicalRoles = [
+            'Super Admin',
+            'Admin',
+            'Ketua Yayasan',
+            'Pengurus Yayasan',
+            'Sekretaris Yayasan',
+            'Bendahara Yayasan',
+            'Operator',
+            'Tata Usaha',
+            'Kepala Sekolah',
+            'Guru',
+            'Musyrif',
+            'Orang Tua',
+            'Siswa',
+            'Alumni',
+        ];
+
+        if (in_array($role->name, $protectedCanonicalRoles, true)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Role sistem '{$role->name}' dilindungi dan tidak dapat dihapus.",
+            ], 422);
+        }
 
         if ($role->users()->count() > 0) {
             return response()->json([
@@ -395,6 +466,8 @@ class HakAksesController extends Controller
     {
         $validated = $request->validate([
             'role_name' => ['required', 'string', 'exists:roles,name'],
+            'additional_roles' => ['nullable', 'array'],
+            'additional_roles.*' => ['string', 'exists:roles,name'],
             'permissions' => ['nullable', 'array'],
             'permissions.*' => ['string', 'exists:permissions,name'],
             'password' => ['nullable', 'string', Password::min(8)->mixedCase()->letters()->numbers()->symbols()],
@@ -408,8 +481,17 @@ class HakAksesController extends Controller
             $validated['permissions'] ?? []
         );
 
+        $additionalRoles = collect($validated['additional_roles'] ?? [])
+            ->filter(fn ($r) => ! empty($r) && $r !== $validated['role_name'])
+            ->values()
+            ->all();
+
+        foreach ($additionalRoles as $addRole) {
+            $this->accessScope->assertRoleAssignmentAllowed($request->user(), $addRole);
+        }
+
         try {
-            DB::transaction(function () use ($employee, $validated) {
+            DB::transaction(function () use ($employee, $validated, $additionalRoles) {
                 // Tentukan atau buat akun User jika belum terhubung
                 $user = $employee->user;
                 if (! $user) {
@@ -432,8 +514,9 @@ class HakAksesController extends Controller
                 }
                 $employee->save();
 
-                // Sync Spatie role & direct permissions di User
-                $user->syncRoles([$validated['role_name']]);
+                // Sync Spatie primary role & additional roles di User
+                $allRolesToSync = array_values(array_unique(array_merge([$validated['role_name']], $additionalRoles)));
+                $user->syncRoles($allRolesToSync);
 
                 if (isset($validated['permissions'])) {
                     $user->syncPermissions($validated['permissions']);
