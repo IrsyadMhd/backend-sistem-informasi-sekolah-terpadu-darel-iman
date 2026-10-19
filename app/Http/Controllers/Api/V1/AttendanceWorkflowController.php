@@ -407,6 +407,8 @@ class AttendanceWorkflowController extends Controller
             $oldStatus = $locked->status;
             $locked->update([
                 'status' => 'final',
+                'teaching_session_status' => 'completed',
+                'session_closed_at' => $locked->session_closed_at ?: now(),
                 'finalized_at' => now(),
                 'finalized_by' => $request->user()->id,
                 'updated_by' => $request->user()->id,
