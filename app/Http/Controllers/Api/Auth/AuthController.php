@@ -238,15 +238,20 @@ class AuthController extends Controller
             ? ['Yayasan', 'Ketua Yayasan']
             : [$validated['role']];
 
-        $target = User::query()
+        $targetQuery = User::query()
             ->where('is_active', true)
             ->role($targetRoles)
             // Exclude pengguna Super Admin yang kebetulan juga memiliki role target
             // (misalnya akun superadmin@dareliman.sch.id yang di-assign semua role).
             // Hal ini mencegah impersonation mengembalikan token SA alih-alih user target.
-            ->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'Superadmin', 'super_admin']))
-            ->orderBy('name')
-            ->first();
+            ->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', ['Super Admin', 'Superadmin', 'super_admin']));
+
+        // Pemisahan tegas: Jika meminta role Guru atau Guru Tahfizh, jangan ambil akun pejabat struktural/tendik
+        if (in_array($validated['role'], ['Guru', 'Guru Tahfizh'], true)) {
+            $targetQuery->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', ['Kepala Sekolah', 'Tata Usaha', 'Yayasan', 'Ketua Yayasan', 'Divisi Pendidikan']));
+        }
+
+        $target = $targetQuery->orderBy('name')->first();
 
         if (! $target) {
             return response()->json([
