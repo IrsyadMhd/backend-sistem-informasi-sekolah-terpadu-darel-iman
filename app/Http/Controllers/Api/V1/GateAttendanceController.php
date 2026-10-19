@@ -32,6 +32,9 @@ class GateAttendanceController extends Controller
         if ($request->filled('class_id')) {
             $query->where('class_id', $request->query('class_id'));
         }
+        if ($request->filled('student_id')) {
+            $query->where('student_id', $request->query('student_id'));
+        }
         if ($request->filled('date_from') && $request->filled('date_to')) {
             $query->whereBetween('attendance_date', [$request->query('date_from'), $request->query('date_to')]);
         } elseif ($request->filled('date')) {
@@ -84,8 +87,8 @@ class GateAttendanceController extends Controller
             'unit_id' => 'nullable|uuid',
             'attendance_date' => 'nullable|date',
             'check_in_time' => 'nullable|string',
-            'attendance_method' => 'nullable|string|in:QRCODE,RFID,FACE,FINGERPRINT,MANUAL,qr,rfid,face,fingerprint,manual',
-            'location' => 'nullable|string',
+            'attendance_method' => 'nullable|string|in:QRCODE,RFID,FACE,FINGERPRINT,MANUAL,TAP_LOKASI,TAP_GPS,qr,rfid,face,fingerprint,manual,tap_lokasi,tap_gps',
+            'location' => 'nullable|string|max:255',
             'latitude' => 'nullable|numeric',
             'longitude' => 'nullable|numeric',
             'photo_snapshot' => 'nullable|string',
@@ -113,7 +116,11 @@ class GateAttendanceController extends Controller
             'unit_id' => 'nullable|uuid',
             'attendance_date' => 'nullable|date',
             'check_out_time' => 'nullable|string',
-            'attendance_method' => 'nullable|string|in:QRCODE,RFID,FACE,FINGERPRINT,MANUAL,qr,rfid,face,fingerprint,manual',
+            'attendance_method' => 'nullable|string|in:QRCODE,RFID,FACE,FINGERPRINT,MANUAL,TAP_LOKASI,TAP_GPS,qr,rfid,face,fingerprint,manual,tap_lokasi,tap_gps',
+            'location' => 'nullable|string|max:255',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
+            'notes' => 'nullable|string|max:500',
             'is_early' => 'nullable|boolean',
             'pickup_person' => 'nullable|string',
             'pickup_relation' => 'nullable|string',
@@ -323,6 +330,26 @@ class GateAttendanceController extends Controller
 
         if ($user->hasAnyRole(['Super Admin', 'Admin', 'Superadmin', 'super_admin'])) {
             return;
+        }
+
+        // Jika user adalah Siswa atau Orang Tua, verifikasi kepemilikan siswa
+        if ($user->hasAnyRole(['Siswa', 'siswa', 'student'])) {
+            $myStudentId = $user->student?->id ?? $user->student_id;
+            if ($myStudentId || $student->user_id) {
+                abort_unless((string) $student->user_id === (string) $user->id || (string) $student->id === (string) $myStudentId, 403, 'Akses presensi siswa tidak valid.');
+                return;
+            }
+        }
+
+        if ($user->hasAnyRole(['Orang Tua', 'orang_tua', 'orang-tua', 'Orangtua', 'Wali Murid', 'parent'])) {
+            $parent = \App\Models\ParentModel::where('user_id', $user->id)->first();
+            if ($parent) {
+                $isChild = \App\Models\Student::where('id', $student->id)
+                    ->where(fn ($q) => $q->where('parent_id', $parent->id)->orWhereHas('parentsPivot', fn ($p) => $p->whereKey($parent->id)))
+                    ->exists();
+                abort_unless($isChild, 403, 'Siswa bukan anak dari akun orang tua ini.');
+                return;
+            }
         }
 
         abort_unless(
