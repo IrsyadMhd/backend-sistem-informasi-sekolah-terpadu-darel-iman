@@ -177,6 +177,36 @@ class BusinessOptionController extends Controller
         $this->accessScope->assertGlobalAccessManagement($request->user());
 
         $option = BusinessOption::findOrFail($id);
+
+        // Periksa apakah opsi masih digunakan dalam data aktif sebelum soft delete
+        $isUsedInEmployees = \Illuminate\Support\Facades\Schema::hasTable('employees')
+            && \Illuminate\Support\Facades\DB::table('employees')
+                ->whereNull('deleted_at')
+                ->where(function ($q) use ($option) {
+                    $q->where('status_pegawai', $option->name)
+                        ->orWhere('status_pegawai', $option->code);
+                })
+                ->exists();
+
+        $isUsedInStudents = \Illuminate\Support\Facades\Schema::hasTable('students')
+            && \Illuminate\Support\Facades\DB::table('students')
+                ->whereNull('deleted_at')
+                ->where(function ($q) use ($option) {
+                    $q->where('metadata->parent_occupation', $option->code)
+                        ->orWhere('metadata->residence_type', $option->code)
+                        ->orWhere('metadata->last_education', $option->code)
+                        ->orWhere('metadata->status_siswa', $option->code);
+                })
+                ->exists();
+
+        if ($isUsedInEmployees || $isUsedInStudents) {
+            return response()->json([
+                'success' => false,
+                'status' => 'error',
+                'message' => "Opsi bisnis '{$option->name}' masih direferensikan dalam data aktif dan tidak dapat dihapus. Silakan nonaktifkan status opsi ini.",
+            ], 422);
+        }
+
         $option->delete();
 
         return response()->json([
