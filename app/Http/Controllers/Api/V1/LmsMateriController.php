@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\SimpanMateriRequest;
 use App\Http\Requests\V1\UbahMateriRequest;
 use App\Http\Resources\V1\LmsMateriResource;
+use App\Http\Resources\V1\LmsMateriSupervisiLogResource;
 use App\Models\Employee;
+use App\Models\LmsMateriSupervisiLog;
 use App\Models\LmsModulAjar;
 use App\Models\User;
 use App\Services\AccessScopeService;
@@ -29,8 +31,10 @@ class LmsMateriController extends Controller
         $filters = [
             'search' => $request->query('search'),
             'modul_ajar_id' => $request->query('modul_ajar_id'),
+            'mata_pelajaran_id' => $request->query('mata_pelajaran_id'),
             'tipe' => $request->query('tipe'),
             'status' => $request->query('status'),
+            'status_supervisi' => $request->query('status_supervisi'),
             'dengan_sampah' => $request->query('dengan_sampah'),
             'unit_pendidikan_id' => $request->query('unit_pendidikan_id'),
         ];
@@ -404,5 +408,148 @@ class LmsMateriController extends Controller
                 abort_unless(in_array($materiUnitId, $allowedUnitIds, true), 403, 'Akses ditolak: Materi di luar unit wewenang Anda.');
             }
         }
+    }
+
+    public function ajukanTelaah(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $materi = $this->materiService->cariBerdasarkanId($id);
+        if (! $materi) {
+            return response()->json(['status' => 'error', 'message' => 'Materi Pembelajaran tidak ditemukan.'], 404);
+        }
+
+        if ($this->isTeacher($user)) {
+            abort_unless($materi->guru_id === $this->teacherEmployeeId($user), 403, 'Akses ditolak: Hanya guru pemilik materi yang dapat mengajukan.');
+        }
+
+        $oldStatus = $materi->status_supervisi ?? 'draft';
+        $catatan = $request->input('catatan', 'Guru mengajukan materi untuk telaah supervisi.');
+
+        $materi->update([
+            'status_supervisi' => 'diajukan',
+        ]);
+
+        LmsMateriSupervisiLog::create([
+            'materi_id' => $materi->id,
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'user_role' => 'Guru Pengampu',
+            'status_sebelumnya' => $oldStatus,
+            'status_baru' => 'diajukan',
+            'catatan' => $catatan,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Materi berhasil diajukan untuk telaah supervisi Kepala Sekolah dan Divisi Pendidikan.',
+            'data' => new LmsMateriResource($materi->fresh(['supervisor', 'supervisiLogs', 'guru', 'subject', 'modulAjar'])),
+        ]);
+    }
+
+    public function supervisi(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->authorizeSupervisi($user);
+
+        $validated = $request->validate([
+            'status' => 'required|in:perlu_revisi,disetujui',
+            'catatan' => 'required|string|min:3|max:3000',
+        ], [
+            'status.required' => 'Status supervisi wajib ditentukan.',
+            'status.in' => 'Status supervisi harus salah satu dari: perlu_revisi, disetujui.',
+            'catatan.required' => 'Catatan koreksi / ulasan supervisi wajib diisi.',
+            'catatan.min' => 'Catatan koreksi minimal 3 karakter.',
+        ]);
+
+        $materi = $this->materiService->cariBerdasarkanId($id);
+        if (! $materi) {
+            return response()->json(['status' => 'error', 'message' => 'Materi Pembelajaran tidak ditemukan.'], 404);
+        }
+
+        $this->assertCanViewMateri($user, $materi);
+
+        $oldStatus = $materi->status_supervisi ?? 'diajukan';
+        $newStatus = $validated['status'];
+        $catatan = $validated['catatan'];
+
+        $roleName = $user->roles->pluck('name')->first() ?? 'Supervisor Pendidikan';
+
+        $updateData = [
+            'status_supervisi' => $newStatus,
+            'catatan_koreksi' => $catatan,
+            'supervisor_id' => $user->id,
+            'supervisor_role' => $roleName,
+            'tanggal_supervisi' => now(),
+        ];
+
+        if ($newStatus === 'disetujui') {
+            $updateData['is_published'] = true;
+            $updateData['status'] = 'published';
+            $updateData['tanggal_publish'] = now();
+        } else {
+            $updateData['is_published'] = false;
+            $updateData['status'] = 'draft';
+        }
+
+        $materi->update($updateData);
+
+        LmsMateriSupervisiLog::create([
+            'materi_id' => $materi->id,
+            'user_id' => $user->id,
+            'user_name' => $user->name,
+            'user_role' => $roleName,
+            'status_sebelumnya' => $oldStatus,
+            'status_baru' => $newStatus,
+            'catatan' => $catatan,
+        ]);
+
+        $statusLabel = $newStatus === 'disetujui' ? 'disetujui' : 'dikembalikan untuk direvisi';
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Materi Pembelajaran berhasil {$statusLabel} oleh {$roleName}.",
+            'data' => new LmsMateriResource($materi->fresh(['supervisor', 'supervisiLogs', 'guru', 'subject', 'modulAjar'])),
+        ]);
+    }
+
+    public function supervisiLogs(Request $request, string $id): JsonResponse
+    {
+        $user = $request->user();
+        $this->authorizeView($user);
+
+        $materi = $this->materiService->cariBerdasarkanId($id);
+        if (! $materi) {
+            return response()->json(['status' => 'error', 'message' => 'Materi Pembelajaran tidak ditemukan.'], 404);
+        }
+
+        $this->assertCanViewMateri($user, $materi);
+
+        $logs = LmsMateriSupervisiLog::query()
+            ->where('materi_id', $materi->id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'data' => LmsMateriSupervisiLogResource::collection($logs),
+        ]);
+    }
+
+    private function authorizeSupervisi(User $user): void
+    {
+        if ($this->canAccessAllUnits($user) || $user->hasAnyRole([
+            'Kepala Sekolah',
+            'kepala_sekolah',
+            'Waka Kurikulum',
+            'waka_kurikulum',
+            'Waka Kesiswaan',
+            'waka_kesiswaan',
+            'Wakil Kesiswaan',
+            'wakil_kesiswaan',
+        ])) {
+            return;
+        }
+
+        abort(403, 'Akses ditolak: Hanya Kepala Sekolah, Waka Kurikulum, atau Divisi Pendidikan yang berwenang melakukan supervisi materi.');
     }
 }
