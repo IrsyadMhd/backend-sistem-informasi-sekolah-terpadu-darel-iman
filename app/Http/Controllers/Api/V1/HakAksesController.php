@@ -470,7 +470,7 @@ class HakAksesController extends Controller
             'additional_roles.*' => ['string', 'exists:roles,name'],
             'permissions' => ['nullable', 'array'],
             'permissions.*' => ['string', 'exists:permissions,name'],
-            'password' => ['nullable', 'string', Password::min(8)->mixedCase()->letters()->numbers()->symbols()],
+            'password' => ['nullable', 'string', 'min:8'],
         ]);
 
         $employee = $this->accessScope->accessibleEmployees($request->user())->whereKey($employeeId)->first();

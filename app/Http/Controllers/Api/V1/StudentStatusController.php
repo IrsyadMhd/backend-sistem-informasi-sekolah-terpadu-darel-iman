@@ -77,11 +77,40 @@ class StudentStatusController extends Controller
         ]);
     }
 
+    private const SYSTEM_STATUS_CODES = [
+        'aktif',
+        'lulus',
+        'mutasi',
+        'berhenti',
+        'cuti',
+        'nonaktif',
+    ];
+
+    private function assertCanManageStatus(Request $request): void
+    {
+        $user = $request->user();
+        if (! $user) {
+            abort(401, 'Unauthenticated');
+        }
+
+        if ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin') || $user->hasRole('Admin')) {
+            return;
+        }
+
+        if ($user->can('sistem.master_data') || $user->can('student.manage') || $user->can('operator.manage')) {
+            return;
+        }
+
+        abort(403, 'Akses ditolak. Anda tidak memiliki wewenang untuk mengelola master status siswa.');
+    }
+
     /**
      * Store a newly created resource in storage.
      */
     public function store(Request $request): JsonResponse
     {
+        $this->assertCanManageStatus($request);
+
         $validated = $request->validate([
             'code' => ['required', 'string', 'max:50', 'alpha_dash', 'unique:student_statuses,code'],
             'name' => ['required', 'string', 'max:100'],
@@ -125,6 +154,7 @@ class StudentStatusController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
+        $this->assertCanManageStatus($request);
         $status = StudentStatus::findOrFail($id);
 
         $validated = $request->validate([
@@ -136,8 +166,18 @@ class StudentStatusController extends Controller
             'description' => ['nullable', 'string', 'max:500'],
         ]);
 
+        $targetCode = strtolower(trim($validated['code']));
+
+        // Proteksi kode status sistem agar integritas referensi operasional tetap terjaga
+        if (in_array($status->code, self::SYSTEM_STATUS_CODES, true) && $targetCode !== $status->code) {
+            return response()->json([
+                'success' => false,
+                'message' => "Kode status sistem '{$status->code}' dilindungi dan tidak dapat diubah.",
+            ], 422);
+        }
+
         $status->update([
-            'code' => strtolower(trim($validated['code'])),
+            'code' => $targetCode,
             'name' => trim($validated['name']),
             'badge_color' => $validated['badge_color'] ?? $status->badge_color,
             'order' => $validated['order'] ?? $status->order,
@@ -155,9 +195,52 @@ class StudentStatusController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        $this->assertCanManageStatus($request);
         $status = StudentStatus::findOrFail($id);
+
+        // 1. Cegah penghapusan status sistem inti
+        if (in_array($status->code, self::SYSTEM_STATUS_CODES, true)) {
+            return response()->json([
+                'success' => false,
+                'message' => "Status sistem resmi '{$status->name}' dilindungi dan tidak dapat dihapus. Silakan nonaktifkan status melalui saklar aktif.",
+            ], 422);
+        }
+
+        // 2. Cegah penghapusan jika status masih direferensikan pada data siswa aktif
+        $studentCount = \Illuminate\Support\Facades\DB::table('students')
+            ->whereNull('deleted_at')
+            ->where(function ($q) use ($status) {
+                $q->where('metadata->status_siswa', $status->code)
+                    ->orWhere('metadata->status_siswa', $status->name);
+            })
+            ->count();
+
+        if ($studentCount > 0) {
+            return response()->json([
+                'success' => false,
+                'message' => "Status '{$status->name}' masih digunakan oleh {$studentCount} data siswa aktif dan tidak dapat dihapus. Silakan nonaktifkan status bila tidak lagi berlaku.",
+            ], 422);
+        }
+
+        // 3. Cegah penghapusan jika tercatat pada riwayat mutasi siswa
+        if (\Illuminate\Support\Facades\Schema::hasTable('student_mutations')) {
+            $mutationCount = \Illuminate\Support\Facades\DB::table('student_mutations')
+                ->where(function ($q) use ($status) {
+                    $q->where('to_status', $status->code)
+                        ->orWhere('from_status', $status->code);
+                })
+                ->count();
+
+            if ($mutationCount > 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Status '{$status->name}' masih direferensikan dalam {$mutationCount} riwayat mutasi siswa.",
+                ], 422);
+            }
+        }
+
         $status->delete();
 
         return response()->json([

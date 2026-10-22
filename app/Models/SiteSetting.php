@@ -10,6 +10,7 @@ class SiteSetting extends Model
         'application_name', 'school_name', 'logo_text', 'logo_path', 'favicon_path',
         'footer_text', 'address', 'phone', 'website', 'email', 'sk_pendirian', 'motto',
         'bank_name', 'bank_account_number', 'bank_account_name',
+        'bsi_va_prefix', 'bsi_va_format',
         'card_rules_student', 'card_rules_employee', 'card_footer_motto',
         'header_style', 'header_sticky', 'sidebar_style',
         'sidebar_position', 'sidebar_collapsed', 'template', 'sidebar_color',

@@ -73,7 +73,7 @@ class UserAccountController extends Controller
         $this->accessScope->assertGlobalAccessManagement($request->user());
         $validated = $request->validate($this->rules());
 
-        $user = DB::transaction(function () use ($validated) {
+        $user = DB::transaction(function () use ($validated, $request) {
             $user = User::query()->create([
                 'name' => $validated['name'],
                 'email' => strtolower($validated['email']),
@@ -82,7 +82,18 @@ class UserAccountController extends Controller
                 'is_active' => $validated['is_active'] ?? true,
                 'metadata' => ['must_change_password' => true, 'created_by' => 'user_account_module'],
             ]);
-            $user->syncRoles([$validated['role']]);
+
+            $additionalRoles = collect($validated['additional_roles'] ?? [])
+                ->filter(fn ($r) => ! empty($r) && $r !== $validated['role'])
+                ->values()
+                ->all();
+
+            foreach ($additionalRoles as $addRole) {
+                $this->accessScope->assertRoleAssignmentAllowed($request->user(), $addRole);
+            }
+
+            $allRolesToSync = array_values(array_unique(array_merge([$validated['role']], $additionalRoles)));
+            $user->syncRoles($allRolesToSync);
 
             return $user->load(['roles:id,name', 'employee.unit', 'student.educationUnit']);
         });
@@ -119,9 +130,20 @@ class UserAccountController extends Controller
                 'name' => ['required', 'string', 'max:255'],
                 'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
                 'role' => ['required', 'string', Rule::exists(Role::class, 'name')],
+                'additional_roles' => ['nullable', 'array'],
+                'additional_roles.*' => ['string', Rule::exists(Role::class, 'name')],
             ]
             : $this->rules($user, false));
         $this->accessScope->assertRoleAssignmentAllowed($request->user(), $validated['role']);
+
+        $additionalRoles = collect($validated['additional_roles'] ?? [])
+            ->filter(fn ($r) => ! empty($r) && $r !== $validated['role'])
+            ->values()
+            ->all();
+
+        foreach ($additionalRoles as $addRole) {
+            $this->accessScope->assertRoleAssignmentAllowed($request->user(), $addRole);
+        }
 
         $removingOwnAdminAccess = $actorIsSuperAdmin
             && $request->user()->is($user)
@@ -130,7 +152,7 @@ class UserAccountController extends Controller
 
         abort_if($removingOwnAdminAccess, 422, 'Super Admin tidak dapat menonaktifkan atau mencabut role dirinya sendiri.');
 
-        DB::transaction(function () use ($user, $validated, $isUnitOnlyManager) {
+        DB::transaction(function () use ($user, $validated, $additionalRoles, $isUnitOnlyManager) {
             $user->fill([
                 'name' => $validated['name'],
                 'email' => strtolower($validated['email']),
@@ -143,7 +165,8 @@ class UserAccountController extends Controller
             }
             $user->save();
 
-            $user->syncRoles([$validated['role']]);
+            $allRolesToSync = array_values(array_unique(array_merge([$validated['role']], $additionalRoles)));
+            $user->syncRoles($allRolesToSync);
 
             if (! $user->is_active) {
                 $user->tokens()->delete();
@@ -248,6 +271,8 @@ class UserAccountController extends Controller
             'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user?->id)],
             'phone' => ['nullable', 'string', 'max:32'],
             'role' => ['required', 'string', Rule::exists(Role::class, 'name')],
+            'additional_roles' => ['nullable', 'array'],
+            'additional_roles.*' => ['string', Rule::exists(Role::class, 'name')],
             'is_active' => ['sometimes', 'boolean'],
         ];
 

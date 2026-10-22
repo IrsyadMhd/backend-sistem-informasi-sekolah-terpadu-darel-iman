@@ -21,7 +21,7 @@ class LmsPengumpulanTugasRepository implements LmsPengumpulanTugasRepositoryInte
             return $query;
         }
 
-        $adminRoles = ['superadmin', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan'];
+        $adminRoles = ['superadmin', 'admin', 'operator', 'yayasan', 'ketuayayasan', 'pengurusyayasan', 'sekretarisyayasan', 'bendaharayayasan', 'kepalasekolah', 'tatausaha', 'tu', 'divisipendidikan'];
         $userRoles = $user->getRoleNames()->map(fn ($r) => strtolower((string) preg_replace('/[\s_-]+/', '', $r)));
 
         if ($userRoles->intersect($adminRoles)->isNotEmpty()) {

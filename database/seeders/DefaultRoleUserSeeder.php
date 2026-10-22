@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\AcademicYear;
+use App\Models\ClassSchedule;
 use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Kelas;
@@ -11,6 +12,7 @@ use App\Models\Role;
 use App\Models\Semester;
 use App\Models\Student;
 use App\Models\StudentParent;
+use App\Models\Subject;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -60,12 +62,14 @@ class DefaultRoleUserSeeder extends Seeder
             return;
         }
 
-        $unit = EducationUnit::query()->where('is_active', true)->orderBy('code')->first();
+        $unit = EducationUnit::query()->where('code', 'SDIT-01')->first()
+            ?? EducationUnit::query()->where('is_active', true)->orderBy('code')->first();
         $academicYear = AcademicYear::query()->where('is_active', true)->first()
             ?? AcademicYear::query()->latest('start_date')->first();
         $semester = Semester::query()->where('is_active', true)->first()
             ?? Semester::query()->where('academic_year_id', $academicYear?->id)->orderBy('sequence')->first();
-        $kelas = Kelas::query()->where('status', 'Aktif')->first();
+        $kelas = Kelas::query()->where('kode_kelas', 'SDIT1-1A')->first()
+            ?? Kelas::query()->where('status', 'Aktif')->first();
         $defaultPassword = (string) env('DEFAULT_TEST_ACCOUNT_PASSWORD', 'Password123!');
         $canonicalOverrides = [
             'Super Admin' => ['superadmin@dareliman.sch.id', (string) env('DEFAULT_SUPER_ADMIN_PASSWORD', 'Password123!')],
@@ -136,7 +140,7 @@ class DefaultRoleUserSeeder extends Seeder
                 );
 
                 if (in_array($roleName, ['Guru', 'Guru Tahfizh', 'Guru BK', 'Wali Kelas'], true)) {
-                    Teacher::query()->updateOrCreate(
+                    $teacher = Teacher::query()->updateOrCreate(
                         ['user_id' => $user->id],
                         [
                             'employee_id' => $employee->id,
@@ -144,9 +148,64 @@ class DefaultRoleUserSeeder extends Seeder
                             'full_name' => $user->name,
                             'email' => $email,
                             'phone' => $phone,
-                            'metadata' => ['fixture' => 'canonical_role_login'],
+                            'metadata' => [
+                                'fixture' => 'canonical_role_login',
+                                'education_unit_id' => $unit?->id,
+                            ],
                         ],
                     );
+
+                    if ($roleName === 'Guru' && $kelas) {
+                        $subject = Subject::query()->where('kode_mapel', 'MAPEL-PAI-SD-1')->first()
+                            ?? Subject::query()->where('unit_pendidikan_id', $unit?->id)->first();
+                        if ($subject) {
+                            $subject->update(['guru_pengampu_id' => $employee->id]);
+                            ClassSchedule::query()->updateOrCreate(
+                                [
+                                    'kelas_id' => $kelas->id,
+                                    'subject_id' => $subject->id,
+                                    'day_of_week' => 1,
+                                ],
+                                [
+                                    'class_id' => $kelas->id,
+                                    'employee_id' => $employee->id,
+                                    'teacher_id' => $teacher->id,
+                                    'academic_year_id' => $academicYear?->id,
+                                    'semester_id' => $semester?->id,
+                                    'time_start' => '08:00:00',
+                                    'time_end' => '09:30:00',
+                                    'week_type' => 'regular',
+                                    'is_active' => true,
+                                    'metadata' => [
+                                        'guru' => $employee->nama_lengkap,
+                                        'unit' => $unit?->name,
+                                    ],
+                                ]
+                            );
+                            ClassSchedule::query()->updateOrCreate(
+                                [
+                                    'kelas_id' => $kelas->id,
+                                    'subject_id' => $subject->id,
+                                    'day_of_week' => 4,
+                                ],
+                                [
+                                    'class_id' => $kelas->id,
+                                    'employee_id' => $employee->id,
+                                    'teacher_id' => $teacher->id,
+                                    'academic_year_id' => $academicYear?->id,
+                                    'semester_id' => $semester?->id,
+                                    'time_start' => '10:00:00',
+                                    'time_end' => '11:30:00',
+                                    'week_type' => 'regular',
+                                    'is_active' => true,
+                                    'metadata' => [
+                                        'guru' => $employee->nama_lengkap,
+                                        'unit' => $unit?->name,
+                                    ],
+                                ]
+                            );
+                        }
+                    }
                 }
             }
         }

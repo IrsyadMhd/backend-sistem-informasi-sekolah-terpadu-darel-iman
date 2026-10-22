@@ -261,11 +261,25 @@ class TeachingAttendanceService
             $locked = LessonAttendanceSession::query()->lockForUpdate()->findOrFail($session->id);
             $attendance = $locked->teachingAttendance;
 
-            if (! $attendance || (string) $attendance->employee_id !== (string) $employee->id) {
-                throw ValidationException::withMessages([
-                    'attendance' => 'Presensi guru yang valid wajib ada sebelum sesi dimulai.',
+            if (! $attendance) {
+                $unitId = $employee->unit_id ?: $schedule->kelas?->unit_pendidikan_id;
+                $attendance = TeachingAttendance::query()->firstOrCreate([
+                    'schedule_id' => $schedule->id,
+                    'attendance_date' => $locked->attendance_date->toDateString(),
+                ], [
+                    'employee_id' => $employee->id,
+                    'education_unit_id' => $unitId,
+                    'academic_year_id' => $schedule->academic_year_id,
+                    'semester_id' => $schedule->semester_id,
+                    'check_in_at' => now(),
+                    'status' => 'hadir',
+                    'attendance_method' => 'portal_checkin',
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
                 ]);
+                $locked->update(['teaching_attendance_id' => $attendance->id]);
             }
+
             if ($locked->attendance_date->toDateString() !== now()->toDateString()) {
                 throw ValidationException::withMessages([
                     'session' => 'Sesi hanya dapat dimulai pada tanggal presensi.',
@@ -274,7 +288,7 @@ class TeachingAttendanceService
             if ($locked->teaching_session_status === 'active') {
                 return $locked;
             }
-            if (! in_array($locked->teaching_session_status, ['ready', 'scheduled'], true)) {
+            if (! in_array($locked->teaching_session_status, ['ready', 'scheduled', null, 'active'], true)) {
                 throw ValidationException::withMessages([
                     'session' => 'Sesi tidak berada pada status siap mengajar.',
                 ]);
@@ -303,10 +317,23 @@ class TeachingAttendanceService
         $updated = DB::transaction(function () use ($request, $session, $employee): LessonAttendanceSession {
             $locked = LessonAttendanceSession::query()->lockForUpdate()->findOrFail($session->id);
             $attendance = $locked->teachingAttendance;
-            if (! $attendance || (string) $attendance->employee_id !== (string) $employee->id) {
-                throw ValidationException::withMessages([
-                    'attendance' => 'Presensi guru tidak ditemukan untuk sesi ini.',
+            if (! $attendance) {
+                $unitId = $employee->unit_id ?: $locked->schedule?->kelas?->unit_pendidikan_id;
+                $attendance = TeachingAttendance::query()->firstOrCreate([
+                    'schedule_id' => $locked->schedule_id,
+                    'attendance_date' => $locked->attendance_date->toDateString(),
+                ], [
+                    'employee_id' => $employee->id,
+                    'education_unit_id' => $unitId,
+                    'academic_year_id' => $locked->schedule?->academic_year_id,
+                    'semester_id' => $locked->schedule?->semester_id,
+                    'check_in_at' => $locked->session_started_at ?: now(),
+                    'status' => 'hadir',
+                    'attendance_method' => 'portal_checkin',
+                    'created_by' => $request->user()->id,
+                    'updated_by' => $request->user()->id,
                 ]);
+                $locked->update(['teaching_attendance_id' => $attendance->id]);
             }
             if ($locked->teaching_session_status === 'completed') {
                 return $locked;

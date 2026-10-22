@@ -187,11 +187,50 @@ class WorshipAttendanceService
             ]
         );
 
+        $this->broadcastWorship($session, $studentId, $status, $detail, $actor->name ?? 'Musyrif Asrama');
+
         return [
             'success' => true,
             'message' => 'Status presensi ibadah santri berhasil diverifikasi.',
             'data' => $detail->load('student'),
         ];
+    }
+
+    protected function broadcastWorship(WorshipAttendanceSession $session, string $studentId, string $status, WorshipAttendanceDetail $detail, string $verifierName): void
+    {
+        try {
+            $session->loadMissing('template');
+            $prayerName = $session->template?->prayer_name ?? $session->template?->nama ?? 'Sholat';
+            $nowWib = Carbon::now()->timezone('Asia/Jakarta');
+            $recTime = $detail->attended_at ? Carbon::parse($detail->attended_at)->timezone('Asia/Jakarta')->format('H:i') : $nowWib->format('H:i');
+            $dateStr = $session->session_date ? Carbon::parse($session->session_date)->format('Y-m-d') : $nowWib->format('Y-m-d');
+            $rawTime = $dateStr . ' ' . $recTime . ':00';
+
+            $isDone = in_array($status, ['hadir_berjamaah', 'hadir_sendiri', 'hadir', 'selesai']);
+            $isExcused = in_array($status, ['izin', 'sakit', 'uzur_syarii', 'haid', 'dispensasi']);
+            $bLabel = $isDone ? ($status === 'hadir_sendiri' ? 'Munfarid' : 'Berjamaah') : ($isExcused ? 'Uzur' : 'Tidak Hadir');
+            $bType = $isDone ? 'green' : ($isExcused ? 'amber' : 'red');
+
+            app(\App\Services\RealtimeBroadcastService::class)->broadcastStudentActivity((string) $studentId, [
+                'id' => 'worship-' . $detail->id,
+                'student_id' => (string) $studentId,
+                'raw_time' => $rawTime,
+                'type' => 'sholat',
+                'title' => 'Sholat ' . ucfirst($prayerName),
+                'subtitle' => 'Musyrif: ' . $verifierName,
+                'date_label' => 'Hari ini',
+                'time_label' => $recTime,
+                'is_past' => false,
+                'badge_label' => $bLabel,
+                'badge_type' => $bType,
+                'icon' => 'hands-pray',
+                'icon_bg' => '#EFF6FF',
+                'icon_color' => '#3B82F6',
+                'screen' => 'Mutabaah',
+                'verifier_role' => 'Musyrif / Pembina Ibadah',
+                'verifier_name' => $verifierName,
+            ]);
+        } catch (\Throwable) {}
     }
 
     /**

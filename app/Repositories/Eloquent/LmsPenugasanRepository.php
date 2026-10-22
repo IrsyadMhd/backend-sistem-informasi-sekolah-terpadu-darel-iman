@@ -25,46 +25,52 @@ class LmsPenugasanRepository implements LmsPenugasanRepositoryInterface
             return $query;
         }
 
+        $isSupervisorOrStaff = $accessScope->isSupervisor($user) || $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'super-admin',
+            'Admin', 'admin',
+            'Operator', 'operator',
+            'Tata Usaha', 'tata_usaha', 'TU', 'tu',
+            'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
+            'Yayasan', 'Ketua Yayasan', 'ketua_yayasan', 'Pengurus Yayasan', 'pengurus_yayasan',
+            'Sekretaris Yayasan', 'sekretaris_yayasan', 'Bendahara Yayasan', 'bendahara_yayasan',
+            'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan',
+            'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Wakil Kesiswaan',
+            'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+        ]);
+
         $employee = Employee::where('user_id', $user->id)->first();
         $teacher = Teacher::where('user_id', $user->id)->first() ?? ($employee ? Teacher::where('employee_id', $employee->id)->first() : null);
 
         $teacherIds = array_values(array_filter(array_unique([
             $employee?->id,
             $teacher?->id,
+            $user->id,
         ])));
         $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
         $accessibleRombelIds = $accessScope->accessibleRombels($user)->pluck('id')->all();
 
-        $isTeacherOnly = ! $user->hasAnyRole([
-            'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan',
-            'Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum',
-            'Waka Kesiswaan', 'waka_kesiswaan', 'Tata Usaha', 'tata_usaha', 'tu',
-        ]) && $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']);
+        $isTeacherOnly = ! $isSupervisorOrStaff && ($accessScope->isTeacher($user) || $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran', 'Wali Kelas', 'wali_kelas', 'wali-kelas']));
 
         if ($isTeacherOnly) {
-            return $query->where(function ($q) use ($teacherIds, $user, $unitIds, $accessibleRombelIds) {
+            return $query->where(function ($q) use ($teacherIds, $user) {
                 if (! empty($teacherIds)) {
                     $q->whereIn('guru_id', $teacherIds)
                       ->orWhere('created_by', $user->id);
                 } else {
                     $q->where('created_by', $user->id);
                 }
-                if (! empty($accessibleRombelIds)) {
-                    $q->orWhereIn('kelas_id', $accessibleRombelIds);
-                }
-                if (! empty($unitIds)) {
-                    $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds));
-                }
             });
         }
 
-        // Staff / TU / Kepsek: Strictly scoped to their unit's classes/rombels
+        // Staff / TU / Kepsek / Operator / Supervisor: Strictly scoped to their unit's classes/rombels
         return $query->where(function ($q) use ($unitIds, $accessibleRombelIds) {
             if (! empty($accessibleRombelIds)) {
                 $q->whereIn('kelas_id', $accessibleRombelIds);
             }
             if (! empty($unitIds)) {
-                $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds));
+                $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds))
+                  ->orWhereHas('modulAjar', fn ($qm) => $qm->whereIn('unit_pendidikan_id', $unitIds))
+                  ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds));
             }
         });
     }
@@ -100,7 +106,16 @@ class LmsPenugasanRepository implements LmsPenugasanRepositoryInterface
             $query->where('kelas_id', $filters['kelas_id']);
         }
 
-        if (! empty($filters['guru_id'])) {
+        if (! empty($filters['teacher_owner_ids']) && is_array($filters['teacher_owner_ids'])) {
+            $ownerIds = $filters['teacher_owner_ids'];
+            $createdBy = $filters['created_by'] ?? null;
+            $query->where(function ($q) use ($ownerIds, $createdBy) {
+                $q->whereIn('guru_id', $ownerIds);
+                if ($createdBy) {
+                    $q->orWhere('created_by', $createdBy);
+                }
+            });
+        } elseif (! empty($filters['guru_id'])) {
             $query->where('guru_id', $filters['guru_id']);
         }
 
@@ -263,13 +278,20 @@ class LmsPenugasanRepository implements LmsPenugasanRepositoryInterface
         }
         if (isset($data['file_path'])) {
             $pengumpulan->file_path = $data['file_path'];
+        } elseif (isset($data['file'])) {
+            $pengumpulan->file_path = $data['file'];
         }
         if (isset($data['url_link'])) {
             $pengumpulan->url_link = $data['url_link'];
+        } elseif (isset($data['link'])) {
+            $pengumpulan->url_link = $data['link'];
+        }
+        if (isset($data['metadata'])) {
+            $pengumpulan->metadata = is_array($data['metadata']) ? $data['metadata'] : json_decode($data['metadata'], true);
         }
         if (isset($data['waktu_kumpul'])) {
             $pengumpulan->waktu_kumpul = $data['waktu_kumpul'];
-        } elseif (! $pengumpulan->waktu_kumpul && isset($data['jawaban_teks'])) {
+        } elseif (! $pengumpulan->waktu_kumpul && (isset($data['jawaban_teks']) || isset($data['url_link']) || isset($data['link']) || isset($data['file_path']) || isset($data['file']))) {
             $pengumpulan->waktu_kumpul = now();
         }
 

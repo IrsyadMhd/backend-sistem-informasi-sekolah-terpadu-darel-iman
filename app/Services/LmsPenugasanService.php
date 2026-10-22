@@ -52,6 +52,12 @@ class LmsPenugasanService
         if (isset($data['lampiran']) && ! isset($data['file_lampiran'])) {
             $data['file_lampiran'] = $data['lampiran'];
         }
+        if (isset($data['link']) && ! isset($data['link_lampiran'])) {
+            $data['link_lampiran'] = $data['link'];
+        }
+        if (isset($data['metadata']) && is_string($data['metadata'])) {
+            $data['metadata'] = json_decode($data['metadata'], true);
+        }
         if (isset($data['status'])) {
             $statusVal = strtolower((string) $data['status']);
             $data['is_published'] = in_array($statusVal, ['dipublikasikan', 'published', '1', 'true', 'active'], true);
@@ -73,6 +79,12 @@ class LmsPenugasanService
         }
         if (isset($data['lampiran']) && ! isset($data['file_lampiran'])) {
             $data['file_lampiran'] = $data['lampiran'];
+        }
+        if (isset($data['link']) && ! isset($data['link_lampiran'])) {
+            $data['link_lampiran'] = $data['link'];
+        }
+        if (isset($data['metadata']) && is_string($data['metadata'])) {
+            $data['metadata'] = json_decode($data['metadata'], true);
         }
         if (isset($data['status'])) {
             $statusVal = strtolower((string) $data['status']);
@@ -114,8 +126,39 @@ class LmsPenugasanService
         $unitIds = ($user && ! $hasGlobal) ? $accessScope->accessibleEducationUnits($user)->pluck('id')->all() : [];
         $rombelIds = ($user && ! $hasGlobal) ? $accessScope->accessibleRombels($user)->pluck('id')->all() : [];
 
+        $isSupervisorOrStaff = $user && ($accessScope->isSupervisor($user) || $user->hasAnyRole([
+            'Super Admin', 'super_admin', 'super-admin',
+            'Admin', 'admin',
+            'Operator', 'operator',
+            'Tata Usaha', 'tata_usaha', 'TU', 'tu',
+            'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
+            'Yayasan', 'Ketua Yayasan', 'ketua_yayasan', 'Pengurus Yayasan', 'pengurus_yayasan',
+            'Sekretaris Yayasan', 'sekretaris_yayasan', 'Bendahara Yayasan', 'bendahara_yayasan',
+            'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan',
+            'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Wakil Kesiswaan',
+            'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+        ]));
+
+        $isTeacherOnly = $user && ! $isSupervisorOrStaff && ($accessScope->isTeacher($user) || $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran', 'Wali Kelas', 'wali_kelas', 'wali-kelas']));
+
+        $employee = $user ? Employee::where('user_id', $user->id)->first() : null;
+        $teacher = $user ? (Teacher::where('user_id', $user->id)->first() ?? ($employee ? Teacher::where('employee_id', $employee->id)->first() : null)) : null;
+        $teacherIds = array_values(array_filter(array_unique([
+            $employee?->id,
+            $teacher?->id,
+            $user?->id,
+        ])));
+
         $modulQuery = LmsModulAjar::query();
-        if (! empty($unitIds)) {
+        if ($isTeacherOnly) {
+            $modulQuery->where(function ($q) use ($teacherIds, $user) {
+                if (! empty($teacherIds)) {
+                    $q->whereIn('guru_id', $teacherIds)->orWhere('created_by', $user->id);
+                } else {
+                    $q->where('created_by', $user->id);
+                }
+            });
+        } elseif (! empty($unitIds)) {
             $modulQuery->whereIn('unit_pendidikan_id', $unitIds);
         }
         $modulOptions = $modulQuery->get()
@@ -159,7 +202,9 @@ class LmsPenugasanService
         }
 
         $guruQuery = Employee::query();
-        if (! empty($unitIds)) {
+        if ($isTeacherOnly && $employee) {
+            $guruQuery->where('id', $employee->id);
+        } elseif (! empty($unitIds)) {
             $guruQuery->whereIn('unit_id', $unitIds);
         }
         $guruOptions = $guruQuery->get()
@@ -173,7 +218,11 @@ class LmsPenugasanService
             ->toArray();
 
         if (empty($guruOptions) && class_exists(Teacher::class)) {
-            $guruOptions = Teacher::get()
+            $tQuery = Teacher::query();
+            if ($isTeacherOnly && $teacher) {
+                $tQuery->where('id', $teacher->id);
+            }
+            $guruOptions = $tQuery->get()
                 ->map(fn ($item) => [
                     'value' => $item->id,
                     'label' => $item->full_name ?? $item->name ?? 'Guru',
@@ -224,8 +273,16 @@ class LmsPenugasanService
                 ['value' => 'kelompok', 'label' => 'Kelompok'],
             ],
             'jenis' => [
+                ['value' => 'tertulis', 'label' => 'Tertulis (Teks / Foto Lembar Kerja)'],
+                ['value' => 'kuis', 'label' => 'Kuis (Jawaban di Aplikasi)'],
+                ['value' => 'esai', 'label' => 'Esai (Teks Panjang / Analisis)'],
+                ['value' => 'dokumen', 'label' => 'Unggah Dokumen (PDF / DOCX)'],
+                ['value' => 'praktik', 'label' => 'Praktik (Foto / Video Unjuk Kerja)'],
+                ['value' => 'tahfizh', 'label' => 'Tahfizh (Setoran Langsung / Audio / Video)'],
+                ['value' => 'literasi', 'label' => 'Literasi (Ringkasan Teks / Audio Membaca)'],
+                ['value' => 'proyek', 'label' => 'Proyek Kelompok (File / Laporan / Presentasi)'],
+                // Aliases for backward compatibility
                 ['value' => 'tugas', 'label' => 'Tugas Mandiri / PR'],
-                ['value' => 'proyek', 'label' => 'Proyek / Portofolio'],
                 ['value' => 'quiz', 'label' => 'Kuis Formatif'],
                 ['value' => 'latihan', 'label' => 'Latihan Soal'],
             ],

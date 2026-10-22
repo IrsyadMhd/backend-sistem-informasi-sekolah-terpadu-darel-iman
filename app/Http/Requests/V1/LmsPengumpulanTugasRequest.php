@@ -30,6 +30,7 @@ class LmsPengumpulanTugasRequest extends FormRequest
             'link' => ['nullable', 'string', 'max:1000'],
             'catatan' => ['nullable', 'string'],
             'nilai' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'metadata' => ['nullable'],
         ];
     }
 }

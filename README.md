@@ -50,6 +50,64 @@ php artisan simulate:academic-year-2026-2027 --module=finance     # Tagihan & Pe
 # Membersihkan / Rollback data simulasi secara aman (hanya menghapus data bertanda is_simulation):
 php artisan simulate:academic-year-2026-2027 --rollback
 ```
+
+---
+
+## Panduan Seeder: Mode LIVE (Data Riil) vs Mode SIMULASI (Pengembangan)
+
+Aplikasi ini membedakan secara tegas antara **Data Master Fondasi Sistem (System Core)** yang **wajib di-seed di server Live** dan **Data Simulasi/Dummy** yang **dilarang di-seed di server Live**.
+
+### 1. Kategori Seeder Wajib Saat LIVE (Core System Bootstrap)
+*Seeder ini adalah bagian dari infrastruktur dan kerangka aplikasi. Tanpa seeder ini, aplikasi rusak, tidak bisa login, atau navigasi sidebar kosong.*
+
+| Seeder | Deskripsi & Urgensi |
+|---|---|
+| `CoreAdminUserSeeder` | Akun Super Admin & Admin awal untuk setup pertama kali. |
+| `RolePermissionSeeder` | Mendaftarkan 20+ Canonical Roles (Yayasan, Kepala Sekolah, Guru, TU, Musyrif, dll) dan ribuan izin Spatie. |
+| `AttendancePermissionSeeder` | Izin alur verifikasi presensi dan approval izin sakit santri. |
+| `AppNavigationSeeder` | Mendaftarkan struktur modul dan seluruh pohon menu navigasi Web Dashboard & Mobile App. |
+| `SiteSettingsSeeder` | Konfigurasi dasar nama lembaga, tema, logo default, dan pengaturan aplikasi. |
+| `StudentCardSettingsSeeder` | Konfigurasi tata letak dan template cetak kartu santri/pelajar. |
+| `MasterJenisUnitPendidikanSeeder` | Master kategori jenjang pendidikan (TKIT, TAUD, SDIT, MIT, SMPIT, SMAIT, Ponpes). |
+| `TransportationModeSeeder` | Master moda transportasi santri (Jalan Kaki, Sepeda, Mobil, Antar Jemput). |
+| `QuranSurahSeeder` | Master 114 Surah Al-Qur'an (nama Arab, latin, jumlah ayat, juz) untuk modul Tahfizh. |
+| `DoaSeeder` | Kumpulan doa harian & adab belajar resmi Islam untuk fitur Islami di aplikasi siswa/santri. |
+
+### 2. Kategori Seeder Template / Acuan Standar (Sangat Disarankan)
+*Template master acuan agar admin tidak perlu mengetik dari nol via web:*
+- `MasterJabatanSeeder` (Standar nama jabatan: Kepala Sekolah, Waka, Guru, Wali Kelas, Musyrif).
+- `MasterKurikulumSeeder` (Template acuan kurikulum SIT/Merdeka).
+- `PrayerScheduleSeeder` (Template acuan jadwal sholat default).
+- `IndikatorKinerjaUtamaSeeder` (Template indikator IKU yayasan).
+
+### 3. Kategori Seeder Dummy / Simulasi (DILARANG SAAT LIVE)
+*Berisi ribuan murid, guru fiktif, nilai rapor fiktif, dan presensi coba-coba. Otomatis di-skip saat mode Live:*
+- `DataDummyUnitPendidikanSeeder`, `DataDummyPegawaiSeeder`, `TeacherSeeder`
+- `DataDummySiswaSeeder`, `ParentSeeder`, `SimulasiSiswaSemuaKelasSeeder` (1.050 siswa simulasi)
+- `SimulasiTerpadu2026Seeder`, `SimulasiTahunanRamadhanSeeder`, `AlumniDanMutasiSeeder`
+- `AttendanceSeeder`, `PresensiAwalJuli2026Seeder`, `PresensiPembelajaranSeeder`, `WorshipAttendanceSeeder`
+- `TahfizhSeeder`, `MutabaahEnterpriseSeeder`, `MutabaahProgramAndRuleSeeder`
+- `StudentGradesSeeder`, `LmsRaporSeeder`, `JadwalPelajaranSeeder`, `KelasSeeder`, `SubjectSeeder`
+- Seluruh seeder bank soal, modul, materi, tugas, dan ujian LMS (`Lms*Seeder`, `Modul*Seeder`, `Materi*Seeder`)
+
+---
+
+### Cara Menjalankan di Server LIVE (Data Riil Bersih)
+
+1. Pastikan di `.env` server Live:
+```env
+APP_ENV=production
+APP_DEBUG=false
+SEED_DUMMY_DATA=false
+```
+
+2. Jalankan perintah migrasi & seeding:
+```bash
+php artisan migrate:fresh --seed
+```
+*Sistem di `DatabaseSeeder.php` otomatis hanya mengeksekusi Seeder Wajib (Kategori 1) dan mengabaikan seluruh seeder dummy (Kategori 3). Database Anda akan 100% bersih, siap diisi unit, guru, dan santri riil.*
+
+---
 2. Web Dashboard
 cd web-dashboard
 npm install

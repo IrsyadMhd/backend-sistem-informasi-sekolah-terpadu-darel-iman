@@ -163,8 +163,22 @@ class MutabaahPortalService
                         ?? \App\Models\User::where('email', 'superadmin@dareliman.sch.id')->value('id')
                         ?? \App\Models\User::value('id');
 
-                    $isBoardingInit = \Illuminate\Support\Str::contains(strtoupper(($student->educationUnit?->name ?? '') . ' ' . ($student->educationUnit?->code ?? '') . ' ' . ($student->educationUnit?->level ?? '')), ['PONPES', 'MAHAD', 'PESANTREN']);
-                    $programTypeInit = $isBoardingInit ? 'boarding' : 'fullday';
+                    $progSettingInit = DB::table('education_program_settings')
+                        ->where('education_unit_id', $student->unit_id)
+                        ->where('is_active', true)
+                        ->where(function ($q) use ($date) {
+                            $q->whereNull('effective_from')->orWhereDate('effective_from', '<=', $date);
+                        })
+                        ->where(function ($q) use ($date) {
+                            $q->whereNull('effective_until')->orWhereDate('effective_until', '>=', $date);
+                        })
+                        ->where(function ($q) use ($student) {
+                            $q->whereNull('class_id')->orWhere('class_id', $student->kelas_id);
+                        })
+                        ->orderByRaw('CASE WHEN class_id IS NULL THEN 0 ELSE 1 END DESC')
+                        ->first();
+                    $programTypeInit = $progSettingInit?->program_type ?? 'fullday';
+                    $isBoardingInit = $programTypeInit === 'boarding';
 
                     $rulesInit = \Illuminate\Support\Facades\Cache::remember("mutabaah_input_rules_{$programTypeInit}", 3600, function () use ($programTypeInit) {
                         return DB::table('mutabaah_input_rules')
@@ -177,13 +191,7 @@ class MutabaahPortalService
                     $templateItems = $template->items()->with('agendaItem')->where('is_active', true)->get();
                     $detailRows = $templateItems->map(function ($tItem) use ($header, $validUserId, $rulesInit, $isBoardingInit, $programTypeInit) {
                         $rule = $rulesInit->get($tItem->agenda_item_id);
-                        $isHomeItem = $programTypeInit === 'fullday' && (($rule && $rule->input_source === 'parent') || in_array($tItem->agendaItem?->code, [
-                            'TAHAJUD-WITIR', 'SUBUH', 'SHOLAT-SUNNAH-FAJAR', 'WUDHU-SEBELUM-TIDUR',
-                            'DOA-ZIKIR-SEBELUM-TIDUR', 'DOA-BANGUN-TIDUR', 'SALAM-ORANG-TUA',
-                            'DOA-KELUAR-RUMAH', 'DOA-NAIK-KENDARAAN', 'ZIKIR-PETANG', 'BAKDIYAH-MAGRIB',
-                            'MAGHRIB', 'ISYA', 'MENDOAKAN-ORTU', 'MURAJAAH-DENGAN-ORTU',
-                            'BACA-SURAT-ALKAHFI', 'PUASA-SUNNAH'
-                        ]));
+                        $isHomeItem = $programTypeInit === 'fullday' && ($rule ? in_array($rule->input_source, ['parent', 'either']) : false);
 
                         return [
                             'id' => (string) \Illuminate\Support\Str::uuid(),
@@ -217,9 +225,24 @@ class MutabaahPortalService
             }
         }
 
-        // Tentukan Program Sekolah (Fullday vs Boarding)
-        $isBoarding = \Illuminate\Support\Str::contains(strtoupper(($student->educationUnit?->name ?? '') . ' ' . ($student->educationUnit?->code ?? '') . ' ' . ($student->educationUnit?->level ?? '')), ['PONPES', 'MAHAD', 'PESANTREN']);
-        $programType = $isBoarding ? 'boarding' : 'fullday';
+        // Tentukan Program Sekolah (Fullday vs Boarding) dari database education_program_settings
+        $progSetting = DB::table('education_program_settings')
+            ->where('education_unit_id', $student->unit_id)
+            ->where('is_active', true)
+            ->where(function ($q) use ($date) {
+                $q->whereNull('effective_from')->orWhereDate('effective_from', '<=', $date);
+            })
+            ->where(function ($q) use ($date) {
+                $q->whereNull('effective_until')->orWhereDate('effective_until', '>=', $date);
+            })
+            ->where(function ($q) use ($student) {
+                $q->whereNull('class_id')->orWhere('class_id', $student->kelas_id);
+            })
+            ->orderByRaw('CASE WHEN class_id IS NULL THEN 0 ELSE 1 END DESC')
+            ->first();
+
+        $programType = $progSetting?->program_type ?? 'fullday';
+        $isBoarding = $programType === 'boarding';
 
         // Ambil aturan mutabaah_input_rules sesuai program (dicache 1 jam untuk performa instan)
         $rules = \Illuminate\Support\Facades\Cache::remember("mutabaah_input_rules_{$programType}", 3600, function () use ($programType) {
@@ -232,13 +255,10 @@ class MutabaahPortalService
 
         $enrichedDetails = $details->map(function ($d) use ($programType, $isBoarding, $rules, $header) {
             $rule = $rules->get($d->agenda_item_id);
-            $isHome = $programType === 'fullday' && (($rule && $rule->input_source === 'parent') || $d->input_location === 'home' || in_array($d->agenda_code, [
-                'TAHAJUD-WITIR', 'SUBUH', 'SHOLAT-SUNNAH-FAJAR', 'WUDHU-SEBELUM-TIDUR',
-                'DOA-ZIKIR-SEBELUM-TIDUR', 'DOA-BANGUN-TIDUR', 'SALAM-ORANG-TUA',
-                'DOA-KELUAR-RUMAH', 'DOA-NAIK-KENDARAAN', 'ZIKIR-PETANG', 'BAKDIYAH-MAGRIB',
-                'MAGHRIB', 'ISYA', 'MENDOAKAN-ORTU', 'MURAJAAH-DENGAN-ORTU',
-                'BACA-SURAT-ALKAHFI', 'PUASA-SUNNAH'
-            ]));
+            $isHome = $programType === 'fullday' && (
+                ($rule ? in_array($rule->input_source, ['parent', 'either']) : false) ||
+                $d->input_location === 'home'
+            );
 
             // Jika amalan rumah dan input_source bukan 'parent', berarti orang tua BELUM mengisi!
             $isParentFilled = $d->input_source === 'parent';
@@ -263,7 +283,18 @@ class MutabaahPortalService
         })->values();
 
         $signature = $header ? MutabaahParentSignature::where('daily_header_id', $header->id)->latest('signed_at')->first() : null;
-        [$weekly, $monthly] = [$this->periodSummary($student->id, Carbon::parse($date)->startOfWeek(), Carbon::parse($date)->endOfWeek()), $this->periodSummary($student->id, Carbon::parse($date)->startOfMonth(), Carbon::parse($date)->endOfMonth())];
+        $dateCarbon = Carbon::parse($date);
+        $weekly = $this->periodSummary($student->id, $dateCarbon->copy()->startOfWeek(), $dateCarbon->copy()->endOfWeek());
+        $monthly = $this->periodSummary($student->id, $dateCarbon->copy()->startOfMonth(), $dateCarbon->copy()->endOfMonth());
+
+        $activeSemester = \App\Models\Semester::where('is_active', true)->first();
+        $semFrom = ($activeSemester && $activeSemester->start_date)
+            ? Carbon::parse($activeSemester->start_date)
+            : ($dateCarbon->month >= 7 ? Carbon::create($dateCarbon->year, 7, 1) : Carbon::create($dateCarbon->year, 1, 1));
+        $semTo = ($activeSemester && $activeSemester->end_date)
+            ? Carbon::parse($activeSemester->end_date)
+            : ($dateCarbon->month >= 7 ? Carbon::create($dateCarbon->year, 12, 31) : Carbon::create($dateCarbon->year, 6, 30));
+        $semester = $this->periodSummary($student->id, $semFrom, $semTo);
 
         $todayGoodCount = $enrichedDetails->filter(fn ($d) => $d->status_value === 'good')->count();
         $todayLessCount = $enrichedDetails->filter(fn ($d) => $d->status_value === 'less')->count();
@@ -278,6 +309,8 @@ class MutabaahPortalService
             'today' => $header ? [
                 'id' => $header->id, 'status' => $header->status, 'score' => $header->score,
                 'total_items' => $header->total_items,
+                'program' => $programType,
+                'care_location' => $isBoarding ? 'boarding' : 'home',
                 'good_count' => $todayGoodCount,
                 'less_count' => $todayLessCount,
                 'not_done_count' => $todayNotDoneCount,
@@ -285,7 +318,7 @@ class MutabaahPortalService
                 'notes' => $header->supervisor_notes,
                 'finalized_at' => $header->finalized_at, 'details' => $enrichedDetails, 'signature' => $signature,
             ] : null,
-            'weekly' => $weekly, 'monthly' => $monthly,
+            'weekly' => $weekly, 'monthly' => $monthly, 'semester' => $semester,
         ];
     }
 
@@ -299,7 +332,20 @@ class MutabaahPortalService
             ->groupBy('h.id', 'h.activity_date', 'h.status', 'h.score', 'h.good_count', 'h.less_count', 'h.not_done_count', 'h.na_count', 'h.supervisor_notes')
             ->orderByDesc('h.activity_date')->paginate(min((int) ($filters['per_page'] ?? 20), 60));
 
-        return ['rows' => $rows, 'weekly' => $this->periodSummary($student->id, $until->copy()->startOfWeek(), $until->copy()->endOfWeek()), 'monthly' => $this->periodSummary($student->id, $until->copy()->startOfMonth(), $until->copy()->endOfMonth())];
+        $activeSemester = \App\Models\Semester::where('is_active', true)->first();
+        $semFrom = ($activeSemester && $activeSemester->start_date)
+            ? Carbon::parse($activeSemester->start_date)
+            : ($until->month >= 7 ? Carbon::create($until->year, 7, 1) : Carbon::create($until->year, 1, 1));
+        $semTo = ($activeSemester && $activeSemester->end_date)
+            ? Carbon::parse($activeSemester->end_date)
+            : ($until->month >= 7 ? Carbon::create($until->year, 12, 31) : Carbon::create($until->year, 6, 30));
+
+        return [
+            'rows' => $rows,
+            'weekly' => $this->periodSummary($student->id, $until->copy()->startOfWeek(), $until->copy()->endOfWeek()),
+            'monthly' => $this->periodSummary($student->id, $until->copy()->startOfMonth(), $until->copy()->endOfMonth()),
+            'semester' => $this->periodSummary($student->id, $semFrom, $semTo),
+        ];
     }
 
     public function sign(User $user, string $headerId, array $data, Request $request): MutabaahParentSignature
@@ -347,7 +393,16 @@ class MutabaahPortalService
             $row = $this->visibleHeaders($studentId)->whereBetween('h.activity_date', [$from->toDateString(), $to->toDateString()])
                 ->selectRaw('ROUND(AVG(h.score),2) score, COUNT(*) days, SUM(h.good_count) good, SUM(h.less_count) less, SUM(h.not_done_count) not_done, SUM(h.na_count) na')->first();
 
-            return ['score' => (float) ($row->score ?? 0), 'days' => (int) ($row->days ?? 0), 'good' => (int) ($row->good ?? 0), 'less' => (int) ($row->less ?? 0), 'not_done' => (int) ($row->not_done ?? 0), 'na' => (int) ($row->na ?? 0)];
+            return [
+                'score' => (float) ($row->score ?? 0),
+                'days' => (int) ($row->days ?? 0),
+                'good' => (int) ($row->good ?? 0),
+                'less' => (int) ($row->less ?? 0),
+                'not_done' => (int) ($row->not_done ?? 0),
+                'na' => (int) ($row->na ?? 0),
+                'from' => $from->toDateString(),
+                'until' => $to->toDateString(),
+            ];
         });
     }
 }

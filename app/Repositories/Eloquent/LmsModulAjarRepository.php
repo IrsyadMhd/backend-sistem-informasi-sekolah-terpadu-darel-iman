@@ -6,6 +6,7 @@ use App\Models\LmsModulAjar;
 use App\Models\LmsModulAjarRevision;
 use App\Repositories\Contracts\LmsModulAjarRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
 
 class LmsModulAjarRepository implements LmsModulAjarRepositoryInterface
 {
@@ -62,7 +63,15 @@ class LmsModulAjarRepository implements LmsModulAjarRepositoryInterface
         }
 
         if (! empty($filters['mata_pelajaran_id'])) {
-            $query->where('mata_pelajaran_id', $filters['mata_pelajaran_id']);
+            $mapelVal = $filters['mata_pelajaran_id'];
+            if (Str::isUuid($mapelVal)) {
+                $query->where('mata_pelajaran_id', $mapelVal);
+            } else {
+                $query->whereHas('subject', function ($q) use ($mapelVal) {
+                    $q->where('name', $mapelVal)
+                      ->orWhere('nama_mapel', $mapelVal);
+                });
+            }
         }
 
         if (! empty($filters['guru_id'])) {
@@ -222,7 +231,15 @@ class LmsModulAjarRepository implements LmsModulAjarRepositoryInterface
             }
 
             if (! empty($filters['mata_pelajaran_id'])) {
-                $query->where('mata_pelajaran_id', $filters['mata_pelajaran_id']);
+                $mapelVal = $filters['mata_pelajaran_id'];
+                if (Str::isUuid($mapelVal)) {
+                    $query->where('mata_pelajaran_id', $mapelVal);
+                } else {
+                    $query->whereHas('subject', function ($q) use ($mapelVal) {
+                        $q->where('name', $mapelVal)
+                          ->orWhere('nama_mapel', $mapelVal);
+                    });
+                }
             }
 
             if (! empty($filters['kelas_id'])) {

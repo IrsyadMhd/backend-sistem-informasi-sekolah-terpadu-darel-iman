@@ -331,6 +331,13 @@ class StudentController extends Controller
 
     private function mappedPayload(array $validated): array
     {
+        $metadata = $validated['metadata'] ?? [];
+        if (!empty($metadata['no_va']) && empty($metadata['nis_pembayaran'])) {
+            $metadata['nis_pembayaran'] = $metadata['no_va'];
+        } elseif (!empty($metadata['nis_pembayaran']) && empty($metadata['no_va'])) {
+            $metadata['no_va'] = $metadata['nis_pembayaran'];
+        }
+
         return [
             'parent_id' => $validated['parent_id'] ?? null,
             'unit_id' => $validated['unit_id'] ?? null,
@@ -343,8 +350,103 @@ class StudentController extends Controller
             'birth_place' => $validated['birth_place'] ?? null,
             'address' => $validated['address'] ?? null,
             'is_active' => Arr::get($validated, 'is_active', true),
-            'metadata' => $validated['metadata'] ?? [],
+            'metadata' => $metadata,
         ];
+    }
+
+    public function generateVaBsi(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $roles = $user?->roles?->pluck('name')->map(fn($r) => strtolower(preg_replace('/[\s_-]+/', '', $r)))->toArray() ?? [];
+        $isAuthorized = in_array('superadmin', $roles) || in_array('admin', $roles) || in_array('operator', $roles) || in_array('tatausaha', $roles) || in_array('tu', $roles) || in_array('yayasan', $roles) || in_array('kepalasekolah', $roles);
+
+        if (!$isAuthorized) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Hanya Super Admin, Admin, Operator, dan Tata Usaha (TU) yang dapat mengenerate Nomor VA BSI.',
+            ], 403);
+        }
+
+        $siteSetting = \App\Models\SiteSetting::current();
+        $prefix = $siteSetting->bsi_va_prefix ?: '9023';
+        $format = $siteSetting->bsi_va_format ?: '{PREFIX}{NIS}';
+
+        [$canAccessAllUnits, $scopedUnitId] = $this->scopeForUser($user);
+
+        $studentId = $request->input('student_id');
+        $unitId = $request->input('unit_id') ?: $scopedUnitId;
+        $kelasId = $request->input('kelas_id');
+        $forceOverwrite = (bool) $request->input('force_overwrite', false);
+
+        $query = Student::query()->with('educationUnit');
+
+        if ($studentId) {
+            $query->whereKey($studentId);
+        } else {
+            if (!$canAccessAllUnits && $scopedUnitId) {
+                $query->where('unit_id', $scopedUnitId);
+            } elseif ($unitId && strtolower($unitId) !== 'all' && strtolower($unitId) !== 'semua') {
+                $query->where('unit_id', $unitId);
+            }
+
+            if ($kelasId && strtolower($kelasId) !== 'all' && strtolower($kelasId) !== 'semua') {
+                $query->where('kelas_id', $kelasId);
+            }
+
+            if (!$forceOverwrite) {
+                // Hanya siswa yang belum memiliki no_va atau nis_pembayaran
+                $query->where(function ($q) {
+                    $q->whereNull('metadata->no_va')
+                      ->orWhereRaw("metadata->>'no_va' = ''")
+                      ->orWhereNull('metadata->nis_pembayaran')
+                      ->orWhereRaw("metadata->>'nis_pembayaran' = ''");
+                });
+            }
+        }
+
+        $students = $query->get();
+        $updatedCount = 0;
+        $sampleVa = null;
+
+        foreach ($students as $std) {
+            $cleanNis = preg_replace('/\D/', '', (string) $std->nis);
+            if (empty($cleanNis)) {
+                continue;
+            }
+
+            if (str_contains($format, '{UNIT_CODE}')) {
+                $unitCode = preg_replace('/\D/', '', (string) ($std->educationUnit?->code ?? '01'));
+                $unitCodePad = str_pad($unitCode, 2, '0', STR_PAD_LEFT);
+                $va = $prefix . $unitCodePad . $cleanNis;
+            } else {
+                $va = $prefix . $cleanNis;
+            }
+
+            $currentMeta = is_array($std->metadata) ? $std->metadata : [];
+            $currentMeta['no_va'] = $va;
+            $currentMeta['nis_pembayaran'] = $va;
+            $currentMeta['va_bsi_bank'] = 'Bank Syariah Indonesia (BSI)';
+
+            $std->metadata = $currentMeta;
+            $std->save();
+
+            $updatedCount++;
+            if (!$sampleVa) {
+                $sampleVa = [
+                    'student_name' => $std->full_name,
+                    'nis' => $std->nis,
+                    'no_va' => $va,
+                ];
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => "Berhasil memproses $updatedCount Nomor Virtual Account (VA BSI) siswa.",
+            'updated_count' => $updatedCount,
+            'biller_code' => $prefix,
+            'sample' => $sampleVa,
+        ]);
     }
 
     private function scopedStudentQuery(User $user)

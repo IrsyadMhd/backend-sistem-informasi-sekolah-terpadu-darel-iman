@@ -7,19 +7,42 @@ use App\Models\LmsModulAjar;
 use App\Repositories\Contracts\LmsMateriRepositoryInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Str;
 
 class LmsMateriRepository implements LmsMateriRepositoryInterface
 {
     public function getFiltered(array $filters = [], int $perPage = 15, string $orderBy = 'urutan', string $orderDir = 'asc'): LengthAwarePaginator
     {
-        $query = LmsMateri::with(['modulAjar', 'subject', 'guru', 'media', 'creator']);
+        $query = LmsMateri::with(['modulAjar', 'subject', 'guru', 'media', 'creator', 'supervisor', 'supervisiLogs']);
 
         if (! empty($filters['dengan_sampah'])) {
             $query->withTrashed();
         }
 
+        if (! empty($filters['status_supervisi'])) {
+            $query->where('status_supervisi', $filters['status_supervisi']);
+        }
+
         if (! empty($filters['modul_ajar_id'])) {
             $query->where('modul_ajar_id', $filters['modul_ajar_id']);
+        }
+
+        if (! empty($filters['mata_pelajaran_id'])) {
+            $mapelId = $filters['mata_pelajaran_id'];
+            if (Str::isUuid($mapelId)) {
+                $query->where(function ($q) use ($mapelId) {
+                    $q->where('mata_pelajaran_id', $mapelId)
+                      ->orWhereHas('modulAjar', fn ($m) => $m->where('mata_pelajaran_id', $mapelId));
+                });
+            } else {
+                $query->where(function ($q) use ($mapelId) {
+                    $q->whereHas('subject', function ($sq) use ($mapelId) {
+                        $sq->where('name', $mapelId)->orWhere('nama_mapel', $mapelId);
+                    })->orWhereHas('modulAjar.subject', function ($sq) use ($mapelId) {
+                        $sq->where('name', $mapelId)->orWhere('nama_mapel', $mapelId);
+                    });
+                });
+            }
         }
 
         if (! empty($filters['guru_id'])) {
@@ -83,7 +106,7 @@ class LmsMateriRepository implements LmsMateriRepositoryInterface
 
     public function findById(string $id, bool $withTrashed = false): ?LmsMateri
     {
-        $query = LmsMateri::with(['modulAjar', 'subject', 'guru', 'media', 'creator', 'updater', 'deleter']);
+        $query = LmsMateri::with(['modulAjar', 'subject', 'guru', 'media', 'creator', 'updater', 'deleter', 'supervisor', 'supervisiLogs']);
         if ($withTrashed) {
             $query->withTrashed();
         }

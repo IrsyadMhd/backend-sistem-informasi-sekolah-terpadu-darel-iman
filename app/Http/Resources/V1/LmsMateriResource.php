@@ -48,6 +48,18 @@ class LmsMateriResource extends JsonResource
             'ringkasan' => $this->ringkasan,
             'catatan' => $this->catatan,
             'bobot' => (int) ($this->bobot ?? 0),
+            'status_supervisi' => $this->status_supervisi ?? 'disetujui',
+            'catatan_koreksi' => $this->catatan_koreksi,
+            'supervisor_id' => $this->supervisor_id,
+            'supervisor' => $this->whenLoaded('supervisor', function () {
+                return [
+                    'id' => $this->supervisor->id,
+                    'name' => $this->supervisor->name,
+                ];
+            }),
+            'supervisor_role' => $this->supervisor_role,
+            'tanggal_supervisi' => $this->tanggal_supervisi?->toIso8601String(),
+            'supervisi_logs' => LmsMateriSupervisiLogResource::collection($this->whenLoaded('supervisiLogs')),
             'media' => $this->whenLoaded('media'),
             'created_by' => $this->created_by,
             'creator' => $this->whenLoaded('creator', function () {

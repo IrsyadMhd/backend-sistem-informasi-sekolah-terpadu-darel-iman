@@ -35,7 +35,9 @@ class LmsPengumpulanTugasResource extends JsonResource
             // Standard Database Columns
             'jawaban_teks' => $this->jawaban_teks,
             'file_path' => $this->file_path,
+            'file_url' => $this->file_url,
             'url_link' => $this->url_link,
+            'metadata' => $this->metadata ?? [],
             'status' => $this->status ?? 'belum',
             'waktu_kumpul' => $this->waktu_kumpul ? $this->waktu_kumpul->format('Y-m-d H:i') : null,
             'waktu_kumpul_formatted' => $this->waktu_kumpul ? $this->waktu_kumpul->diffForHumans() : null,

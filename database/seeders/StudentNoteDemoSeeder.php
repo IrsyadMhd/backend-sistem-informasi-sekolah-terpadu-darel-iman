@@ -20,21 +20,24 @@ class StudentNoteDemoSeeder extends Seeder
      */
     public function run(): void
     {
-        $parentUser = User::where('email', 'orangtua@dareliman.sch.id')->first();
-        if (! $parentUser) {
-            $this->command?->warn('User orangtua@dareliman.sch.id tidak ditemukan.');
+        $parentUsers = User::whereIn('email', [
+            'orangtua@dareliman.sch.id',
+            'ortu.2534@family.dareliman.sch.id',
+        ])->get();
+        if ($parentUsers->isEmpty()) {
+            $this->command?->warn('User orang tua demo tidak ditemukan.');
             return;
         }
 
-        $parent = ParentModel::where('user_id', $parentUser->id)->first();
-        if (! $parent) {
-            $this->command?->warn('Parent record untuk orangtua@dareliman.sch.id tidak ditemukan.');
+        $parents = ParentModel::whereIn('user_id', $parentUsers->pluck('id'))->get();
+        if ($parents->isEmpty()) {
+            $this->command?->warn('Parent record untuk orang tua demo tidak ditemukan.');
             return;
         }
 
-        $students = Student::where('parent_id', $parent->id)->get();
+        $students = Student::whereIn('parent_id', $parents->pluck('id'))->get();
         if ($students->isEmpty()) {
-            $this->command?->warn('Siswa untuk orangtua@dareliman.sch.id tidak ditemukan.');
+            $this->command?->warn('Siswa untuk orang tua demo tidak ditemukan.');
             return;
         }
 
@@ -259,7 +262,7 @@ class StudentNoteDemoSeeder extends Seeder
                     'follow_up' => $item['follow_up'],
                     'visible_to_parent' => true,
                     'visible_to_student' => true,
-                    'signed_by_user_id' => $item['signed'] ? $parentUser->id : null,
+                    'signed_by_user_id' => $item['signed'] ? ($student->parent?->user_id ?? $parentUsers->first()?->id) : null,
                     'signed_at' => $item['signed'] ? Carbon::parse($item['date'])->setTime(19, 30) : null,
                     'signature_content_hash' => $item['signed'] ? $hash : null,
                 ]);
@@ -277,20 +280,21 @@ class StudentNoteDemoSeeder extends Seeder
         foreach ($students as $student) {
             $isPondok = str_contains(strtolower($student->name), 'pondok') || str_contains(strtolower($student->educationUnit?->name ?? ''), 'abu ja\'far');
             $isSMP = str_contains(strtolower($student->name), 'smp') || str_contains(strtolower($student->educationUnit?->name ?? ''), 'smp');
+            $targetParentUserId = $student->parent?->user_id ?? $parentUsers->first()?->id;
 
             if ($isPondok) {
                 // Chat dengan Wali Kelas Test
                 \App\Models\PortalMessage::create([
                     'student_id' => $student->id,
                     'sender_user_id' => $waliKelas->user_id,
-                    'recipient_user_id' => $parentUser->id,
+                    'recipient_user_id' => $targetParentUserId,
                     'message' => 'Assalamu\'alaikum Warahmatullah, bapak/ibu wali santri. Alhamdulillah perkembangan tahfizh dan adab ananda di asrama sangat baik pekan ini.',
                     'read_at' => Carbon::now()->subHours(5),
                     'created_at' => Carbon::now()->subHours(5),
                 ]);
                 \App\Models\PortalMessage::create([
                     'student_id' => $student->id,
-                    'sender_user_id' => $parentUser->id,
+                    'sender_user_id' => $targetParentUserId,
                     'recipient_user_id' => $waliKelas->user_id,
                     'message' => 'Wa\'alaikumussalam Warahmatullah ustadz. Alhamdulillah, syukron atas kabar baiknya. Kami titipkan ananda ya ustadz.',
                     'read_at' => Carbon::now()->subHours(4),
@@ -299,7 +303,7 @@ class StudentNoteDemoSeeder extends Seeder
                 \App\Models\PortalMessage::create([
                     'student_id' => $student->id,
                     'sender_user_id' => $waliKelas->user_id,
-                    'recipient_user_id' => $parentUser->id,
+                    'recipient_user_id' => $targetParentUserId,
                     'message' => 'Na\'am bapak/ibu, mohon terus didoakan agar ananda istiqomah dalam thalabul \'ilmi.',
                     'read_at' => null, // Unread message
                     'created_at' => Carbon::now()->subMinutes(30),
@@ -311,14 +315,14 @@ class StudentNoteDemoSeeder extends Seeder
                     \App\Models\PortalMessage::create([
                         'student_id' => $student->id,
                         'sender_user_id' => $waliSMPUser->id,
-                        'recipient_user_id' => $parentUser->id,
+                        'recipient_user_id' => $targetParentUserId,
                         'message' => 'Assalamu\'alaikum bapak/ibu. Selamat atas pencapaian ananda yang berhasil meraih juara 2 olimpiade matematika tingkat kota!',
                         'read_at' => Carbon::now()->subDay(),
                         'created_at' => Carbon::now()->subDay(),
                     ]);
                     \App\Models\PortalMessage::create([
                         'student_id' => $student->id,
-                        'sender_user_id' => $parentUser->id,
+                        'sender_user_id' => $targetParentUserId,
                         'recipient_user_id' => $waliSMPUser->id,
                         'message' => 'Wa\'alaikumussalam ustadz. Alhamdulillah berkat bimbingan para asatidzah di sekolah.',
                         'read_at' => Carbon::now()->subHours(20),
@@ -332,7 +336,7 @@ class StudentNoteDemoSeeder extends Seeder
                     \App\Models\PortalMessage::create([
                         'student_id' => $student->id,
                         'sender_user_id' => $waliSMAUser->id,
-                        'recipient_user_id' => $parentUser->id,
+                        'recipient_user_id' => $targetParentUserId,
                         'message' => 'Assalamu\'alaikum bapak/ibu wali murid. Berikut kami lampirkan rekap nilai try out UTBK ananda yang masuk 3 besar tingkat sekolah.',
                         'read_at' => null, // Unread message
                         'created_at' => Carbon::now()->subHours(2),

@@ -65,7 +65,7 @@ class StoreStudentRequest extends FormRequest
                 'nama_ayah', 'hp_ayah', 'nomor_wa_ayah', 'pekerjaan_ayah', 'pendidikan_terakhir_ayah', 'nik_ayah',
                 'nama_ibu', 'hp_ibu', 'nomor_wa_ibu', 'pekerjaan_ibu', 'pendidikan_terakhir_ibu', 'nik_ibu',
                 'nama_wali', 'hp_wali', 'nomor_wa_wali', 'pekerjaan_wali', 'nik_wali',
-                'nis_pembayaran', 'no_pendaftaran',
+                'nis_pembayaran', 'no_va', 'no_pendaftaran',
             ];
             foreach ($emptyToNullKeys as $key) {
                 if (array_key_exists($key, $meta)) {
@@ -173,6 +173,7 @@ class StoreStudentRequest extends FormRequest
             'metadata.tahun_ajaran_masuk' => ['nullable', 'string', 'max:20'],
             'metadata.tahun_ajaran_berjalan' => ['nullable', 'string', 'max:20'],
             'metadata.nis_pembayaran' => ['nullable', 'string', 'max:50'],
+            'metadata.no_va' => ['nullable', 'string', 'max:50'],
             'metadata.status_orang_tua' => ['nullable', Rule::in(['Umum', 'Pegawai'])],
             'metadata.niy_ortu_jika_pegawai' => ['nullable', 'string', 'max:50'],
             'metadata.wali_kelas' => ['nullable', 'string', 'max:255'],

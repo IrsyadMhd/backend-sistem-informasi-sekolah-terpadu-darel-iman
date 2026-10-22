@@ -8,6 +8,7 @@ use App\Models\QuranSurah;
 use App\Models\Student;
 use App\Services\TahfizhAchievementService;
 use App\Models\TahfizhDailyLog;
+use App\Models\TahfizhKpiTarget;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -299,6 +300,42 @@ class TahfizhController extends Controller
             }
         }
 
+        // Broadcast realtime ke HP orang tua
+        if ($log && !empty($log->student_id)) {
+            try {
+                $surahName = $log->hafalan_surah_name ?: $log->tilawah_text ?: 'Al-Qur’an';
+                $ayahInfo = '';
+                if ($log->hafalan_ayah_start && $log->hafalan_ayah_end) {
+                    $ayahInfo = ' (Ayat ' . $log->hafalan_ayah_start . '–' . $log->hafalan_ayah_end . ')';
+                }
+                $teacherName = $user->name ?? $user->full_name ?? 'Ustadz Pembimbing Tahfizh';
+                $nowWib = \Carbon\Carbon::now()->timezone('Asia/Jakarta');
+                $recTime = $nowWib->format('H:i');
+                $dateStr = $log->record_date ? \Carbon\Carbon::parse($log->record_date)->format('Y-m-d') : $nowWib->format('Y-m-d');
+                $rawTime = $dateStr . ' ' . $recTime . ':00';
+
+                app(\App\Services\RealtimeBroadcastService::class)->broadcastStudentActivity((string) $log->student_id, [
+                    'id' => 'tahfizh-' . $log->id,
+                    'student_id' => (string) $log->student_id,
+                    'raw_time' => $rawTime,
+                    'type' => 'tahfizh',
+                    'title' => 'Membaca Al-Qur’an (Tahfizh)',
+                    'subtitle' => 'Surah ' . $surahName . $ayahInfo,
+                    'date_label' => 'Hari ini',
+                    'time_label' => $recTime,
+                    'is_past' => false,
+                    'badge_label' => ucfirst($log->status ?? 'Selesai'),
+                    'badge_type' => 'green',
+                    'icon' => 'book-open-page-variant',
+                    'icon_bg' => '#FEF2F2',
+                    'icon_color' => '#EF4444',
+                    'screen' => 'Tahfizh',
+                    'verifier_role' => 'Guru Pembimbing Tahfizh',
+                    'verifier_name' => $teacherName,
+                ]);
+            } catch (\Throwable) {}
+        }
+
         return response()->json([
             'status' => 'success',
             'message' => 'Catatan Tahfizh & Murajaah harian berhasil disimpan.',
@@ -376,8 +413,13 @@ class TahfizhController extends Controller
     {
         $this->assertStudentAccess($request, (string) $studentId);
 
-        $totalQuranAyats = 6236; // Total ayat dalam 30 Juz Al-Qur'an
-        $totalQuranSurahs = 114;
+        $student = Student::with(['kelas', 'educationUnit'])->find($studentId);
+        $kpiTarget = $student ? TahfizhKpiTarget::resolveTargetForStudent($student) : null;
+
+        $targetAyats = $kpiTarget ? (int) $kpiTarget->target_ayats : 6236;
+        $targetSurahs = $kpiTarget ? (int) $kpiTarget->target_surahs : 114;
+        $targetName = $kpiTarget ? $kpiTarget->target_name : "Target 30 Juz Penuh Al-Qur'an";
+        $targetJuz = $kpiTarget ? $kpiTarget->target_juz : "30 Juz Lengkap";
 
         // Ambil semua setoran hafalan baru siswa yang valid (abaikan murajaah murni)
         $logs = TahfizhDailyLog::where('student_id', $studentId)
@@ -429,16 +471,31 @@ class TahfizhController extends Controller
         }
 
         $completedSurahsCount = count($surahsMemorized);
-        $remainingSurahsCount = max($totalQuranSurahs - $completedSurahsCount, 0);
-        $remainingAyatsCount = max($totalQuranAyats - $totalAyatsMemorized, 0);
-        $progressPercentage = round(($totalAyatsMemorized / $totalQuranAyats) * 100, 2);
+        $remainingSurahsCount = max($targetSurahs - $completedSurahsCount, 0);
+        $remainingAyatsCount = max($targetAyats - $totalAyatsMemorized, 0);
+        $progressPercentage = $targetAyats > 0 ? round(($totalAyatsMemorized / $targetAyats) * 100, 2) : 0;
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'student_id' => $studentId,
-                'total_quran_surahs' => $totalQuranSurahs,
-                'total_quran_ayats' => $totalQuranAyats,
+                'target' => $kpiTarget ? [
+                    'id' => $kpiTarget->id,
+                    'name' => $targetName,
+                    'juz' => $targetJuz,
+                    'total_ayats' => $targetAyats,
+                    'total_surahs' => $targetSurahs,
+                    'minimum_kkm' => $kpiTarget->minimum_kkm_ayats,
+                    'unit_level' => $kpiTarget->unit_level,
+                    'grade_level' => $kpiTarget->grade_level,
+                    'program_type' => $kpiTarget->program_type,
+                ] : null,
+                'target_name' => $targetName,
+                'target_juz' => $targetJuz,
+                'total_quran_surahs' => $targetSurahs,
+                'total_quran_ayats' => $targetAyats,
+                'global_quran_ayats' => 6236,
+                'global_quran_surahs' => 114,
                 'total_ayats_memorized' => $totalAyatsMemorized,
                 'remaining_ayats' => $remainingAyatsCount,
                 'total_surahs_memorized' => $completedSurahsCount,

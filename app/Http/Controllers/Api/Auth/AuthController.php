@@ -214,9 +214,15 @@ class AuthController extends Controller
      */
     public function impersonate(Request $request): JsonResponse
     {
-        abort_unless($request->user()?->hasRole('Super Admin'), 403, 'Hanya Super Admin yang dapat menggunakan akses role.');
+        $user = $request->user();
+        abort_unless(
+            $user && ($user->hasAnyRole(['Super Admin', 'Superadmin', 'super_admin', 'Admin']) || (bool) ($user->is_superadmin ?? false)),
+            403,
+            'Hanya Super Admin atau Admin yang dapat menggunakan akses role.'
+        );
 
         $allowedRoles = [
+            'Admin',
             'Yayasan',
             'Ketua Yayasan',
             'Divisi Pendidikan',
@@ -234,9 +240,11 @@ class AuthController extends Controller
             'device_name' => ['nullable', 'string', 'max:100'],
         ]);
 
-        $targetRoles = $validated['role'] === 'Yayasan'
-            ? ['Yayasan', 'Ketua Yayasan']
-            : [$validated['role']];
+        $targetRoles = match ($validated['role']) {
+            'Yayasan' => ['Yayasan', 'Ketua Yayasan', 'Pengurus Yayasan'],
+            'Admin' => ['Admin'],
+            default => [$validated['role']],
+        };
 
         $targetQuery = User::query()
             ->where('is_active', true)

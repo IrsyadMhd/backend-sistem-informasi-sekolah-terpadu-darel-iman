@@ -21,6 +21,7 @@ class LmsPengumpulanTugas extends Model
         'jawaban_teks',
         'file_path',
         'url_link',
+        'metadata',
         'status',
         'waktu_kumpul',
         'nilai_guru',
@@ -35,6 +36,7 @@ class LmsPengumpulanTugas extends Model
     {
         return [
             'nilai_guru' => 'float',
+            'metadata' => 'array',
             'waktu_kumpul' => 'datetime',
             'waktu_dinilai' => 'datetime',
             'created_at' => 'datetime',

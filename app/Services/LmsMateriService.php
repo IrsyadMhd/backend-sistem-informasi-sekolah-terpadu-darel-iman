@@ -187,8 +187,32 @@ class LmsMateriService
             }
         }
 
+        $subjectsQuery = \App\Models\Subject::query()
+            ->with('unitPendidikan:id,name,code')
+            ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code', 'unit_pendidikan_id')
+            ->where('status', true);
+
+        if ($user && ! $isGlobalOrLeadership && $user->hasRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran'])) {
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            $scope = app(\App\Services\AccessScopeService::class);
+            $scheduleMapelIds = $scope->accessibleSchedules($user)->pluck('subject_id')->filter()->unique()->all();
+            $assignedMapelIds = \App\Models\Subject::query()->where('guru_pengampu_id', $employeeId)->pluck('id')->all();
+            $allowedMapelIds = array_values(array_unique(array_merge($scheduleMapelIds, $assignedMapelIds)));
+
+            if (! empty($allowedMapelIds)) {
+                $subjectsQuery->whereIn('id', $allowedMapelIds);
+            } elseif (! empty($unitId)) {
+                $subjectsQuery->where('unit_pendidikan_id', $unitId);
+            }
+        } elseif (! empty($unitId)) {
+            $subjectsQuery->where('unit_pendidikan_id', $unitId);
+        } elseif (! empty($unitIds)) {
+            $subjectsQuery->whereIn('unit_pendidikan_id', $unitIds);
+        }
+
         return [
             'modul_ajar' => $modulAjars,
+            'subjects' => $subjectsQuery->get(),
             'tipe_options' => [
                 ['id' => 'teks', 'nama' => 'Teks / Ringkasan'],
                 ['id' => 'dokumen', 'nama' => 'Dokumen / PDF / Office'],

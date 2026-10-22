@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AcademicYear;
 use App\Models\ClassSchedule;
 use App\Models\Employee;
 use App\Models\Kelas;
@@ -9,6 +10,7 @@ use App\Models\LessonAttendanceSession;
 use App\Models\LmsPresensi;
 use App\Models\ParentModel;
 use App\Models\SchoolClass;
+use App\Models\Semester;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -76,20 +78,30 @@ class AttendanceAccessService
 
     public function teacherSchedules(User $user): Builder
     {
-        if ($user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Tata Usaha', 'TU', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan'])) {
-            $unitId = $user->unit_id ?? $user->education_unit_id ?? $user->employee?->unit_id;
+        $activeSemesterId = Semester::where('is_active', true)->value('id');
+        $activeAcademicYearId = AcademicYear::where('is_active', true)->value('id');
 
-            return ClassSchedule::query()->when($unitId, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $unitId)));
+        if ($user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Tata Usaha', 'TU', 'tata_usaha', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan'])) {
+            $isSuper = $user->is_superadmin || $user->hasAnyRole(['Super Admin', 'super_admin']);
+            $unitId = $isSuper ? null : ($user->unit_id ?? $user->education_unit_id ?? $user->employee?->unit_id);
+
+            return ClassSchedule::query()
+                ->when($unitId, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $unitId)))
+                ->when($activeSemesterId, fn ($q) => $q->where(fn ($sub) => $sub->where('semester_id', $activeSemesterId)->orWhereNull('semester_id')))
+                ->when($activeAcademicYearId, fn ($q) => $q->where(fn ($sub) => $sub->where('academic_year_id', $activeAcademicYearId)->orWhereNull('academic_year_id')));
         }
 
         $employee = $this->employee($user);
 
-        return ClassSchedule::query()->where(function (Builder $query) use ($employee, $user) {
-            if ($employee) {
-                $query->where('employee_id', $employee->id);
-            }
-            $query->orWhereHas('teacher', fn (Builder $q) => $q->where('user_id', $user->id));
-        });
+        return ClassSchedule::query()
+            ->when($activeSemesterId, fn ($q) => $q->where(fn ($sub) => $sub->where('semester_id', $activeSemesterId)->orWhereNull('semester_id')))
+            ->when($activeAcademicYearId, fn ($q) => $q->where(fn ($sub) => $sub->where('academic_year_id', $activeAcademicYearId)->orWhereNull('academic_year_id')))
+            ->where(function (Builder $query) use ($employee, $user) {
+                if ($employee) {
+                    $query->where('employee_id', $employee->id);
+                }
+                $query->orWhereHas('teacher', fn (Builder $q) => $q->where('user_id', $user->id));
+            });
     }
 
     public function homeroomClasses(User $user): Builder
@@ -127,6 +139,8 @@ class AttendanceAccessService
         $at ??= now();
         $early = (int) config('attendance.active_schedule_early_minutes', 15);
         $late = (int) config('attendance.active_schedule_late_minutes', 0);
+        $activeSemesterId = Semester::where('is_active', true)->value('id');
+        $activeAcademicYearId = AcademicYear::where('is_active', true)->value('id');
         $teacherScheduleIds = $this->teacherSchedules($user)->pluck('id');
         $homeroomClassIds = $user->hasRole('Wali Kelas')
             ? $this->homeroomClasses($user)->pluck('id')
@@ -140,6 +154,8 @@ class AttendanceAccessService
             ->with(['subject', 'kelas', 'schoolClass', 'employee', 'teacher'])
             ->where('day_of_week', $at->dayOfWeekIso)
             ->where(fn (Builder $q) => $q->where('is_active', true)->orWhereNull('is_active'))
+            ->when($activeSemesterId, fn ($q) => $q->where(fn ($sub) => $sub->where('semester_id', $activeSemesterId)->orWhereNull('semester_id')))
+            ->when($activeAcademicYearId, fn ($q) => $q->where(fn ($sub) => $sub->where('academic_year_id', $activeAcademicYearId)->orWhereNull('academic_year_id')))
             ->where(function (Builder $query) use ($teacherScheduleIds, $homeroomClassIds) {
                 $query->whereIn('id', $teacherScheduleIds);
                 if ($homeroomClassIds->isNotEmpty()) {
@@ -148,6 +164,7 @@ class AttendanceAccessService
             })
             ->orderBy('time_start')
             ->get()
+            ->unique(fn ($s) => ($s->subject_id ?? $s->subject?->name) . '_' . ($s->kelas_id ?? $s->class_id) . '_' . $s->day_of_week . '_' . $s->time_start . '_' . $s->time_end)
             ->filter(function (ClassSchedule $schedule) use ($at, $early, $late) {
                 $start = $at->copy()->setTimeFromTimeString($schedule->time_start)->subMinutes($early);
                 $end = $at->copy()->setTimeFromTimeString($schedule->time_end)->addMinutes($late);

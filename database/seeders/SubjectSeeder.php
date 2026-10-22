@@ -372,45 +372,67 @@ class SubjectSeeder extends Seeder
             ],
         ];
 
-        $guruCount = $gurus->count();
         $urutanIndex = 1;
 
-        foreach ($subjectsData as $data) {
-            $jenjang = $data['jenjang'];
+        foreach ($units as $unit) {
+            $unitLevel = strtoupper($unit->level ?? 'SD');
+            
+            // Tentukan jenjang mapel yang sesuai dengan unit
+            $targetJenjang = match (true) {
+                str_contains($unitLevel, 'TK') || str_contains($unitLevel, 'TAUD') || str_contains($unitLevel, 'PAUD') => 'TK',
+                str_contains($unitLevel, 'SMP') || str_contains($unitLevel, 'PONPES') => 'SMP',
+                str_contains($unitLevel, 'SMA') || str_contains($unitLevel, 'MAHAD') => 'SMA',
+                default => 'SD',
+            };
 
-            // Cari unit pendidikan sesuai jenjang, fallback ke unit pertama
-            $matchedUnit = $units->first(fn ($u) => str_contains(strtoupper($u->level ?? $u->name), strtoupper($jenjang))) ?? $defaultUnit;
+            $unitSubjects = array_filter($subjectsData, fn ($s) => $s['jenjang'] === $targetJenjang);
+            if (empty($unitSubjects)) {
+                $unitSubjects = array_filter($subjectsData, fn ($s) => $s['jenjang'] === 'SD');
+            }
 
-            // Cari kurikulum sesuai jenjang, fallback ke kurikulum pertama
-            $matchedKurikulum = $kurikulums->first(fn ($k) => str_contains(strtoupper($k->jenjang ?? $k->kode_kurikulum), strtoupper($jenjang))) ?? $defaultKurikulum;
+            // Cari kurikulum sesuai jenjang unit
+            $matchedKurikulum = $kurikulums->first(fn ($k) => str_contains(strtoupper($k->jenjang ?? $k->kode_kurikulum), $targetJenjang)) ?? $defaultKurikulum;
 
-            // Pilih guru pengampu secara bergantian jika ada
-            $assignedGuru = $guruCount > 0 ? $gurus->get(($urutanIndex - 1) % $guruCount) : null;
+            // Guru di unit ini
+            $unitGurus = Employee::where('unit_id', $unit->id)->where('status', 'Aktif')->orderBy('nama_lengkap')->get();
+            $unitGuruCount = $unitGurus->count();
+            $guruSubIdx = 0;
 
-            Subject::updateOrCreate(
-                [
-                    'kode_mapel' => $data['kode_mapel'],
-                ],
-                array_merge($data, [
-                    'unit_pendidikan_id' => $matchedUnit->id,
-                    'kurikulum_id' => $matchedKurikulum->id,
-                    'nama_singkat' => strtoupper(substr($data['nama_mapel'], 0, 8)),
-                    'code' => $data['kode_mapel'],
-                    'name' => $data['nama_mapel'],
-                    'guru_pengampu_id' => $assignedGuru?->id,
-                    'tingkat_kelas' => 'All',
-                    'bobot_pengetahuan' => 40,
-                    'bobot_keterampilan' => 40,
-                    'bobot_sikap' => 20,
-                    'bobot_nilai' => [
-                        'pengetahuan' => 40,
-                        'keterampilan' => 40,
-                        'sikap' => 20,
+            foreach ($unitSubjects as $data) {
+                $assignedGuru = $unitGuruCount > 0 ? $unitGurus->get($guruSubIdx % $unitGuruCount) : null;
+                $guruSubIdx++;
+
+                // Untuk SDIT-01, pertahankan kode mapel asli jika ada untuk backward compatibility
+                $mapelCode = ($unit->code === 'SDIT-01') 
+                    ? $data['kode_mapel'] 
+                    : sprintf('%s-%s', $unit->code, $data['kode_mapel']);
+
+                Subject::updateOrCreate(
+                    [
+                        'code' => $mapelCode,
                     ],
-                    'urutan_tampil' => $urutanIndex++,
-                    'status' => true,
-                ])
-            );
+                    array_merge($data, [
+                        'kode_mapel' => $mapelCode,
+                        'code' => $mapelCode,
+                        'unit_pendidikan_id' => $unit->id,
+                        'kurikulum_id' => $matchedKurikulum->id,
+                        'nama_singkat' => strtoupper(substr($data['nama_mapel'], 0, 8)),
+                        'name' => sprintf('%s (%s)', $data['nama_mapel'], $unit->code),
+                        'guru_pengampu_id' => $assignedGuru?->id,
+                        'tingkat_kelas' => 'All',
+                        'bobot_pengetahuan' => 40,
+                        'bobot_keterampilan' => 40,
+                        'bobot_sikap' => 20,
+                        'bobot_nilai' => [
+                            'pengetahuan' => 40,
+                            'keterampilan' => 40,
+                            'sikap' => 20,
+                        ],
+                        'urutan_tampil' => $urutanIndex++,
+                        'status' => true,
+                    ])
+                );
+            }
         }
     }
 }

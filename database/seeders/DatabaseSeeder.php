@@ -44,6 +44,11 @@ class DatabaseSeeder extends Seeder
         // 1. Master data and the deterministic login/ownership graph.
         $this->call([
             SuperAdminAcceptanceSeeder::class,
+            DefaultRoleUserSeeder::class,
+            MasterKurikulumSeeder::class,
+            KelasSeeder::class,
+            SubjectSeeder::class,
+            JadwalPelajaranSeeder::class,
             ModulSemesterSeeder::class,
             QrCredentialSeeder::class,
             PemantauanDivisiSeeder::class,
@@ -99,6 +104,9 @@ class DatabaseSeeder extends Seeder
             $this->call(AlumniDanMutasiSeeder::class);
             $this->call(StudentNoteDemoSeeder::class);
             $this->call(GuruTestWorkspaceSeeder::class);
+            $this->call(JadwalSiswaAlyaZahraSeeder::class);
+            $this->call(SimulasiOperasionalLengkap2026Seeder::class);
+            $this->call(GuruRolesDanPenugasanSeeder::class);
         }
     }
 }

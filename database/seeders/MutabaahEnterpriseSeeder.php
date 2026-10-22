@@ -8,6 +8,7 @@ use App\Models\MutabaahAgendaItem;
 use App\Models\MutabaahCategory;
 use App\Models\MutabaahTemplate;
 use App\Models\Semester;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Schema;
 
@@ -199,6 +200,7 @@ class MutabaahEnterpriseSeeder extends Seeder
         }
 
         $supervisor = \App\Models\MutabaahSupervisorAssignment::first();
+        $firstUser = User::first();
 
         // Seed Rekam Jejak Harian untuk Seluruh Siswa Aktif pada Tanggal Hari Ini & Pekan Berjalan
         if ($defaultTemplate && $supervisor) {
@@ -237,8 +239,8 @@ class MutabaahEnterpriseSeeder extends Seeder
                             'score' => 92.50,
                             'supervisor_notes' => 'Alhamdulillah ananda istiqamah dalam menjalankan amalan yaumiyyah pekan ini.',
                             'finalized_at' => now(),
-                            'created_by' => $student->user_id ?? $firstEmployee?->user_id ?? $student->id,
-                            'updated_by' => $firstEmployee?->user_id ?? $student->id,
+                            'created_by' => $student->user_id ?? $firstEmployee?->user_id ?? $firstUser?->id,
+                            'updated_by' => $firstEmployee?->user_id ?? $student->user_id ?? $firstUser?->id,
                         ]
                     );
 
@@ -258,7 +260,7 @@ class MutabaahEnterpriseSeeder extends Seeder
                                 'input_source' => 'system',
                                 'input_location' => in_array($tItem->agendaItem?->code, ['WUDHU-SEBELUM-TIDUR', 'DOA-BANGUN-TIDUR', 'MENDOAKAN-ORTU']) ? 'home' : 'school',
                                 'verification_status' => 'verified',
-                                'input_by' => $student->user_id ?? $student->id,
+                                'input_by' => $student->user_id ?? $firstEmployee?->user_id ?? $firstUser?->id,
                                 'input_at' => now(),
                             ]
                         );

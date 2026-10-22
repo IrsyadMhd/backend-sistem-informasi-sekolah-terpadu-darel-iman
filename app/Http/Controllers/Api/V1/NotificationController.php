@@ -36,9 +36,9 @@ class NotificationController extends Controller
     public function unreadCount(Request $request): JsonResponse
     {
         $userId   = $request->user()->id;
-        $cacheKey = "notif_unread:{$userId}";
+        $cacheKey = "notif_unread_v2:{$userId}";
 
-        $count = Cache::remember($cacheKey, 10, function () use ($userId) {
+        $counts = Cache::remember($cacheKey, 10, function () use ($userId) {
             $notifCount = Notification::byUser($userId)
                 ->unread()
                 ->count();
@@ -53,12 +53,20 @@ class NotificationController extends Controller
                 }
             } catch (\Throwable $e) {}
 
-            return (int) ($notifCount + $chatCount);
+            return [
+                'notif_count' => (int) $notifCount,
+                'chat_count'  => (int) $chatCount,
+            ];
         });
 
+        $notifCount = is_array($counts) ? (int) ($counts['notif_count'] ?? 0) : (int) $counts;
+        $chatCount  = is_array($counts) ? (int) ($counts['chat_count'] ?? 0) : 0;
+
         return response()->json([
-            'status'       => 'success',
-            'unread_count' => (int) $count,
+            'status'             => 'success',
+            'unread_count'       => $notifCount,
+            'unread_chat_count'  => $chatCount,
+            'total_unread_count' => $notifCount + $chatCount,
         ]);
     }
 
@@ -75,6 +83,7 @@ class NotificationController extends Controller
 
         // Invalidate unread count cache for this user
         Cache::forget("notif_unread:{$request->user()->id}");
+        Cache::forget("notif_unread_v2:{$request->user()->id}");
 
         return response()->json([
             'status'  => 'success',
@@ -94,6 +103,7 @@ class NotificationController extends Controller
 
         // Invalidate unread count cache
         Cache::forget("notif_unread:{$request->user()->id}");
+        Cache::forget("notif_unread_v2:{$request->user()->id}");
 
         return response()->json([
             'status'  => 'success',

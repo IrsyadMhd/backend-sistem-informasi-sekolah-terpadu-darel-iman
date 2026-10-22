@@ -28,6 +28,7 @@ class AttendanceCaptureService
             'session_started_at' => now(),
             'session_expires_at' => now()->addMinutes($minutes),
             'session_closed_at' => null,
+            'teaching_session_status' => 'active',
         ]);
 
         return ['session' => $session->fresh(), 'token' => $token];
@@ -36,7 +37,11 @@ class AttendanceCaptureService
     public function close(LessonAttendanceSession $session): LessonAttendanceSession
     {
         $this->ensureActive($session);
-        $session->update(['session_closed_at' => now(), 'session_token_hash' => null]);
+        $session->update([
+            'session_closed_at' => now(),
+            'session_token_hash' => null,
+            'teaching_session_status' => 'completed',
+        ]);
 
         return $session->fresh();
     }

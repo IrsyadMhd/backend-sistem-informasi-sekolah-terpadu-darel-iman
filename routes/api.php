@@ -71,6 +71,7 @@ use App\Http\Controllers\Api\V1\MusyrifModuleController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\ScheduleController;
+use App\Http\Controllers\Api\V1\ExamScheduleController;
 use App\Http\Controllers\Api\V1\ModaTransportasiController;
 use App\Http\Controllers\Api\V1\SiteSettingController;
 use App\Http\Controllers\Api\V1\Step04TeacherController;
@@ -80,6 +81,7 @@ use App\Http\Controllers\Api\V1\StudentStatusController;
 use App\Http\Controllers\Api\V1\StudentParentPortalController;
 use App\Http\Controllers\Api\V1\SubjectController;
 use App\Http\Controllers\Api\V1\TahfizhController;
+use App\Http\Controllers\Api\V1\TahfizhKpiTargetController;
 use App\Http\Controllers\Api\V1\TahunAjaranController;
 use App\Http\Controllers\Api\V1\TeacherController;
 use App\Http\Controllers\Api\V1\TeacherPortalController;
@@ -125,11 +127,18 @@ Route::post('/shalat', [EQuranController::class, 'shalat']);
 Route::get('/v2/shalat/master-list', [EQuranController::class, 'masterList']);
 Route::get('/shalat/master-list', [EQuranController::class, 'masterList']);
 
+Route::middleware([
+    'auth:sanctum',
+    'role_or_permission:Super Admin|Admin|Tata Usaha|Operator|Kepala Sekolah|Guru|Guru Tahfizh|Musyrif|sistem.master_data|master.view|tahfizh.view|teacher.tahfizh.view|tahfizh.monitoring_target'
+])->group(function () {
+    Route::post('/equran/sync-surah', [EQuranController::class, 'syncSurah']);
+    Route::post('/equran/sync-doa', [EQuranController::class, 'syncDoa']);
+});
+
 Route::middleware(['auth:sanctum', 'can:sistem.master_data'])->group(function () {
     Route::post('/equran/surah', [EQuranController::class, 'store']);
     Route::put('/equran/surah/{id}', [EQuranController::class, 'update']);
     Route::delete('/equran/surah/{id}', [EQuranController::class, 'destroy']);
-    Route::post('/equran/sync-surah', [EQuranController::class, 'syncSurah']);
 
     Route::post('/doa', [EQuranController::class, 'storeDoa']);
     Route::delete('/doa', [EQuranController::class, 'destroyAllDoas']);
@@ -141,7 +150,6 @@ Route::middleware(['auth:sanctum', 'can:sistem.master_data'])->group(function ()
     Route::post('/equran/doa', [EQuranController::class, 'storeDoa']);
     Route::put('/equran/doa/{id}', [EQuranController::class, 'updateDoa']);
     Route::delete('/equran/doa/{id}', [EQuranController::class, 'destroyDoa']);
-    Route::post('/equran/sync-doa', [EQuranController::class, 'syncDoa']);
 
     Route::post('/v2/shalat/save-master', [EQuranController::class, 'saveMaster']);
     Route::post('/shalat/save-master', [EQuranController::class, 'saveMaster']);
@@ -415,6 +423,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:student.view|student.view_all|sistem.master_data');
     Route::post('/students/import', [StudentController::class, 'import'])
         ->middleware('permission:student.create|sistem.master_data');
+    Route::post('/students/generate-va-bsi', [StudentController::class, 'generateVaBsi'])
+        ->middleware('permission:student.create|student.update|student.edit|academic.manage|sistem.master_data');
     Route::apiResource('students', StudentController::class)->only(['index', 'show'])
         ->middleware('permission:student.view|student.view_all|kesiswaan.data_lengkap_siswa|foundation.student.view|sistem.master_data');
     Route::apiResource('students', StudentController::class)->only(['store'])
@@ -807,6 +817,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/tahfizh/reject-murajaah/{id}', [StudentParentPortalController::class, 'rejectMurajaahReview'])
         ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
 
+    Route::get('/tahfizh/targets/options', [TahfizhKpiTargetController::class, 'options']);
+    Route::apiResource('/tahfizh/targets', TahfizhKpiTargetController::class);
+
     Route::get('/mutabaah', fn () => app(FeaturePlaceholderController::class)('mutabaah'));
     Route::get('/materials', fn () => app(FeaturePlaceholderController::class)('materials'));
     Route::get('/assignments', fn () => app(FeaturePlaceholderController::class)('assignments'));
@@ -891,10 +904,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Jadwal Pelajaran
     Route::get('/schedules-options', [ScheduleController::class, 'options'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
+    Route::get('/schedules/availability', [ScheduleController::class, 'availability'])
+        ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::post('/schedules/check-conflict', [ScheduleController::class, 'checkConflict'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::get('/schedules/export', [ScheduleController::class, 'export'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view|report.export');
+    Route::get('/schedules/matrix', [ScheduleController::class, 'matrix'])
+        ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::apiResource('schedules', ScheduleController::class)->only(['index', 'show'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::apiResource('schedules', ScheduleController::class)->only(['store'])
@@ -903,6 +920,14 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:academic.schedule.update|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
     Route::apiResource('schedules', ScheduleController::class)->only(['destroy'])
         ->middleware('permission:academic.schedule.delete|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
+
+    // Jadwal Ujian & Kategori Ujian
+    Route::get('/exam-schedules-options', [ExamScheduleController::class, 'options']);
+    Route::get('/exam-categories', [ExamScheduleController::class, 'categoriesIndex']);
+    Route::post('/exam-categories', [ExamScheduleController::class, 'categoriesStore']);
+    Route::put('/exam-categories/{id}', [ExamScheduleController::class, 'categoriesUpdate']);
+    Route::delete('/exam-categories/{id}', [ExamScheduleController::class, 'categoriesDestroy']);
+    Route::apiResource('exam-schedules', ExamScheduleController::class);
 
     // Nilai Siswa / Raport
     Route::prefix('assessment-formulas')->group(function () {
@@ -960,6 +985,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/materi/stats', [LmsMateriController::class, 'stats']);
         Route::get('/materi/options', [LmsMateriController::class, 'options']);
         Route::post('/materi/{id}/restore', [LmsMateriController::class, 'restore']);
+        Route::post('/materi/{id}/ajukan-telaah', [LmsMateriController::class, 'ajukanTelaah']);
+        Route::post('/materi/{id}/supervisi', [LmsMateriController::class, 'supervisi']);
+        Route::get('/materi/{id}/supervisi-logs', [LmsMateriController::class, 'supervisiLogs']);
         Route::apiResource('materi', LmsMateriController::class);
 
         // Media Pembelajaran (Media)
@@ -1137,6 +1165,12 @@ Route::middleware('auth:sanctum')->group(function () {
                 ->middleware('permission:teacher.student_note.update|kesiswaan.catatan_siswa');
             Route::delete('/student-notes/{id}', [TeacherPortalController::class, 'deleteStudentNote'])
                 ->middleware('permission:teacher.student_note.update|kesiswaan.catatan_siswa');
+
+            // Teacher Discipline & Violations Tracking
+            Route::get('/discipline-categories', [TeacherPortalController::class, 'disciplineCategories']);
+            Route::get('/discipline-violations', [TeacherPortalController::class, 'disciplineViolations']);
+            Route::post('/discipline-violations', [TeacherPortalController::class, 'storeDisciplineViolation']);
+
             Route::get('/notifications', [TeacherPortalController::class, 'notifications'])
                 ->middleware('permission:teacher.dashboard.view');
             Route::get('/profile', [TeacherPortalController::class, 'profile'])
@@ -1162,8 +1196,12 @@ Route::middleware('auth:sanctum')->group(function () {
              Route::get('/attendance-qr', [StudentParentPortalController::class, 'attendanceQr']);
              Route::get('/schedules', [StudentParentPortalController::class, 'schedules']);
              Route::get('/dormitory-permits', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalIndex']);
+             Route::post('/dormitory-permits/apply', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalApply'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student');
+             Route::post('/dormitory-permits/{permit}/request-extension', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalRequestExtension'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student');
              Route::get('/academic-calendar', [StudentParentPortalController::class, 'academicCalendar']);
             Route::get('/attendance', [StudentParentPortalController::class, 'attendance']);
+            Route::get('/gate-attendance/today', [StudentParentPortalController::class, 'gateAttendanceToday']);
+            Route::post('/gate-attendance/tap', [StudentParentPortalController::class, 'gateAttendanceTap']);
             Route::post('/permissions', [StudentParentPortalController::class, 'submitPermission'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
             Route::get('/permissions', [StudentParentPortalController::class, 'permissionsHistory']);
             Route::get('/materials', [StudentParentPortalController::class, 'materials']);
@@ -1186,6 +1224,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::patch('/school-information/read-all', [StudentParentPortalController::class, 'markAllSchoolInformationRead']);
             Route::patch('/school-information/{informationId}/state', [StudentParentPortalController::class, 'updateSchoolInformationState']);
             Route::get('/notifications', [StudentParentPortalController::class, 'notifications']);
+            Route::post('/notifications/mark-all-read', [StudentParentPortalController::class, 'markAllNotificationsRead']);
             Route::get('/bills', [StudentParentPortalController::class, 'bills']);
             Route::get('/reports', [StudentParentPortalController::class, 'reports']);
             Route::get('/reports/{id}/download', [StudentParentPortalController::class, 'downloadReport']);
@@ -1290,8 +1329,10 @@ Route::middleware('auth:sanctum')->group(function () {
             // Perizinan & Absensi Kepulangan Santri Asrama (Boarding Pass)
             Route::get('/permits', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'index']);
             Route::post('/permits', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'store']);
+            Route::post('/permits/emergency-exit', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'emergencyExit']);
             Route::post('/permits/{permit}/checkout', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'checkout']);
             Route::post('/permits/{permit}/return-checkin', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'returnCheckin']);
+            Route::post('/permits/{permit}/review-extension', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'reviewExtension']);
         });
     });
 

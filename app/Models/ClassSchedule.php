@@ -20,6 +20,8 @@ class ClassSchedule extends Model
         'teacher_id',
         'subject_id',
         'classroom_id',
+        'activity_type',
+        'activity_name',
         'academic_year_id',
         'semester_id',
         'day_of_week',

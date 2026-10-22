@@ -138,11 +138,43 @@ class AddChildrenToTestParentSeeder extends Seeder
                 ],
             ], $c['extra_meta']);
 
+            $targetParent = $parent;
+            if ($c['program_type'] === 'boarding') {
+                $boardingUser = User::firstOrCreate(
+                    ['email' => 'wali.santri.202607099@dareliman.sch.id'],
+                    [
+                        'name' => 'Wali Santri Rayhan Pratama',
+                        'password' => $defaultPassword,
+                        'phone' => '081299990799',
+                        'is_active' => true,
+                        'metadata' => [
+                            'education_unit_id' => $c['unit']->id,
+                            'unit_code' => $c['unit']->code,
+                            'unit_name' => $c['unit']->name,
+                        ],
+                    ]
+                );
+                $roleOrtu = Role::where('name', 'Orang Tua')->first();
+                if ($roleOrtu) {
+                    $boardingUser->syncRoles([$roleOrtu->name]);
+                }
+                $targetParent = ParentModel::firstOrCreate(
+                    ['user_id' => $boardingUser->id],
+                    [
+                        'full_name' => 'Wali Santri Rayhan Pratama',
+                        'phone' => '081299990799',
+                        'email' => 'wali.santri.202607099@dareliman.sch.id',
+                        'nik' => '1371000000000799',
+                        'address' => 'Kompleks Ponpes Putra Dar el-Iman',
+                    ]
+                );
+            }
+
             $student = Student::updateOrCreate(
                 ['nis' => $c['nis']],
                 [
                     'user_id' => $studentUser->id,
-                    'parent_id' => $parent->id,
+                    'parent_id' => $targetParent->id,
                     'unit_id' => $c['unit']->id,
                     'kelas_id' => $c['kelas']->id,
                     'class_id' => $c['kelas']->id,
@@ -160,11 +192,11 @@ class AddChildrenToTestParentSeeder extends Seeder
 
             // Relasi ke student_parents
             StudentParent::updateOrCreate(
-                ['student_id' => $student->id, 'parent_id' => $parent->id],
+                ['student_id' => $student->id, 'parent_id' => $targetParent->id],
                 [
                     'relationship_type' => 'father',
                     'is_primary' => true,
-                    'metadata' => ['phone' => '081299990022'],
+                    'metadata' => ['phone' => $targetParent->phone ?? '081299990022'],
                 ]
             );
 

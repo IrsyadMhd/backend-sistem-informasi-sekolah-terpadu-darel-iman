@@ -202,6 +202,20 @@ class NavigationModuleTest extends TestCase
         $kepsekRes = $this->actingAs($kepsek, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
         $kepsekMenus = collect($kepsekRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
         $this->assertContains('dash-tahfizh', $kepsekMenus);
+
+        // Pure Guru: dash-tahfizh absent
+        $pureGuru = User::factory()->create();
+        $pureGuru->assignRole('Guru');
+        $pureGuruRes = $this->actingAs($pureGuru, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $pureGuruMenus = collect($pureGuruRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertNotContains('dash-tahfizh', $pureGuruMenus);
+
+        // Guru with additional role 'Guru Tahfizh': dash-tahfizh present
+        $multiRoleGuru = User::factory()->create();
+        $multiRoleGuru->assignRole(['Guru', 'Guru Tahfizh']);
+        $multiRoleRes = $this->actingAs($multiRoleGuru, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
+        $multiRoleMenus = collect($multiRoleRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertContains('dash-tahfizh', $multiRoleMenus);
     }
 
     public function test_master_unit_access_equivalence(): void
@@ -303,12 +317,14 @@ class NavigationModuleTest extends TestCase
 
     public function test_jadwal_pelajaran_menu_access_equivalence(): void
     {
-        // Guru: present
+        // Guru: hidden (guru hanya melihat/mencetak jadwal di Portal Guru)
         $guru = User::factory()->create();
         $guru->assignRole('Guru');
         $guruRes = $this->actingAs($guru, 'sanctum')->getJson('/api/v1/navigation/modules?platform=web');
         $guruMenus = collect($guruRes->json('data.modules'))->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
-        $this->assertContains('akademik-jadwal', $guruMenus);
+        $this->assertNotContains('akademik-jadwal', $guruMenus);
+        $this->assertNotContains('presensi-gerbang', $guruMenus);
+        $this->assertNotContains('presensi-device', $guruMenus);
 
         // Admin: present
         $admin = User::factory()->create();

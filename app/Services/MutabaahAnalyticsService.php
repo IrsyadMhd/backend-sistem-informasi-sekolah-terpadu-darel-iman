@@ -22,9 +22,10 @@ class MutabaahAnalyticsService
         if (($filters['_user'] ?? null) instanceof User) {
             $this->dataScope->applyStudents($studentQuery, $filters['_user'], $to->toDateString());
         }
+        $targetKelasId = $filters['kelas_id'] ?? $filters['class_id'] ?? null;
         $studentCount = $studentQuery
             ->when($filters['education_unit_id'] ?? null, fn ($q, $id) => $q->where('unit_id', $id))
-            ->when($filters['kelas_id'] ?? null, fn ($q, $id) => $q->where('class_id', $id))->count();
+            ->when($targetKelasId, fn ($q, $id) => $q->byClass($id))->count();
         $todayStats = (clone $todayHeaders)->selectRaw("
             COUNT(*) total,
             COUNT(*) FILTER (WHERE h.status IN ('finalized','parent_reviewed','parent_signed')) finalized,
@@ -81,11 +82,12 @@ class MutabaahAnalyticsService
         if (($filters['_user'] ?? null) instanceof User) {
             $this->dataScope->applyStudents($eligibleStudents, $filters['_user'], $to->toDateString());
         }
+        $targetKelasId = $filters['kelas_id'] ?? $filters['class_id'] ?? null;
         $eligibleStudents
             ->when($filters['education_unit_id'] ?? null, fn ($q, $id) => $q->where(fn ($student) => $student
                 ->where('unit_id', $id)
                 ->orWhereHas('kelas', fn ($kelas) => $kelas->where('unit_pendidikan_id', $id))))
-            ->when($filters['kelas_id'] ?? null, fn ($q, $id) => $q->byClass($id))
+            ->when($targetKelasId, fn ($q, $id) => $q->byClass($id))
             ->when($filters['search'] ?? null, fn ($q, $search) => $q->where(fn ($x) => $x
                 ->where('full_name', 'ilike', "%{$search}%")
                 ->orWhere('nis', 'ilike', "%{$search}%")));
@@ -172,7 +174,7 @@ class MutabaahAnalyticsService
             ->when($filters['education_level'] ?? null, fn ($q, $level) => $q->where('c.level', $level))
             ->when($filters['academic_year_id'] ?? null, fn ($q, $id) => $q->where('h.academic_year_id', $id))
             ->when($filters['semester_id'] ?? null, fn ($q, $id) => $q->where('h.semester_id', $id))
-            ->when($filters['kelas_id'] ?? null, fn ($q, $id) => $q->where('h.kelas_id', $id))
+            ->when($filters['kelas_id'] ?? $filters['class_id'] ?? null, fn ($q, $id) => $q->where(fn ($sub) => $sub->where('h.kelas_id', $id)->orWhere('h.rombel_id', $id)))
             ->when($filters['rombel_id'] ?? null, fn ($q, $id) => $q->where('h.rombel_id', $id))
             ->when($filters['supervisor_assignment_id'] ?? null, fn ($q, $id) => $q->where('h.supervisor_assignment_id', $id))
             ->when($filters['search'] ?? null, fn ($q, $search) => $q->where(fn ($x) => $x->where('s.full_name', 'ilike', "%{$search}%")->orWhere('s.nis', 'ilike', "%{$search}%")));

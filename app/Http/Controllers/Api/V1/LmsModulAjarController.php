@@ -145,60 +145,135 @@ class LmsModulAjarController extends Controller
             'mata_pelajaran_id',
         ]);
 
-        $units = $this->accessScope->accessibleEducationUnits($request->user())
-            ->select('id', 'name', 'code')
-            ->get();
-        $kurikulums = MasterKurikulum::query()
-            ->select('id', 'nama_kurikulum', 'kode_kurikulum')
-            ->where('status', true)
-            ->when($learningContext['unit_pendidikan_id'] ?? null, fn ($query, $unitId) => $query->where('unit_pendidikan_id', $unitId))
-            ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
-            ->get();
-        $subjects = Subject::query()
-            ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code')
-            ->where('status', true)
-            ->when($learningContext['unit_pendidikan_id'] ?? null, fn ($query, $unitId) => $query->where('unit_pendidikan_id', $unitId))
-            ->when($learningContext['kurikulum_id'] ?? null, fn ($query, $curriculumId) => $query->where('kurikulum_id', $curriculumId))
-            ->get();
+        $user = $request->user();
+        $isTeacher = $this->isTeacher($user);
+        $canAccessAll = $this->canAccessAllUnits($user);
 
-        $teachers = Employee::query()
-            ->select('id', 'nama_lengkap', 'niy', 'nik')
-            ->when($learningContext['unit_pendidikan_id'] ?? null, fn ($query, $unitId) => $query->where('unit_id', $unitId))
-            ->get();
-        if ($teachers->isEmpty()) {
-            $teachers = Teacher::select('id', 'full_name as nama_lengkap', 'employee_number as niy')->get();
-        }
-
-        $classes = Kelas::query()
-            ->select('id', 'nama_kelas', 'kode_kelas')
-            ->when($learningContext['unit_pendidikan_id'] ?? null, fn ($query, $unitId) => $query->where('unit_pendidikan_id', $unitId))
-            ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
-            ->when($request->query('semester_id'), fn ($query, $semesterId) => $query->where('semester_id', $semesterId))
-            ->get();
-
-        if ($this->isTeacher($request->user())) {
-            $employeeId = $this->teacherEmployeeId($request->user());
+        if ($isTeacher) {
+            $employeeId = $this->teacherEmployeeId($user);
             $employee = Employee::query()->where('id', $employeeId)->first();
-            if ($units->isEmpty() && $employee?->unit_id) {
-                $units = EducationUnit::where('id', $employee->unit_id)->select('id', 'name', 'code')->get();
+            $teacherUnitId = $employee?->unit_id;
+            if (empty($learningContext['unit_pendidikan_id']) && $teacherUnitId) {
+                $learningContext['unit_pendidikan_id'] = $teacherUnitId;
             }
+
+            $units = EducationUnit::where('id', $teacherUnitId)->select('id', 'name', 'code')->get();
+            if ($units->isEmpty()) {
+                $units = $this->accessScope->accessibleEducationUnits($user)->select('id', 'name', 'code')->get();
+            }
+
+            $kurikulums = MasterKurikulum::query()
+                ->select('id', 'nama_kurikulum', 'kode_kurikulum')
+                ->where('status', true)
+                ->when($teacherUnitId, fn ($query, $uId) => $query->where('unit_pendidikan_id', $uId))
+                ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
+                ->get();
+
+            $scheduleMapelIds = $this->accessScope->accessibleSchedules($user)
+                ->pluck('subject_id')
+                ->filter()
+                ->unique()
+                ->all();
+            $assignedMapelIds = Subject::query()
+                ->where('guru_pengampu_id', $employeeId)
+                ->pluck('id')
+                ->all();
+            $allowedMapelIds = array_values(array_unique(array_merge($scheduleMapelIds, $assignedMapelIds)));
+
+            if (! empty($allowedMapelIds)) {
+                $subjects = Subject::query()
+                    ->with('unitPendidikan:id,name,code')
+                    ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code', 'unit_pendidikan_id')
+                    ->where('status', true)
+                    ->whereIn('id', $allowedMapelIds)
+                    ->get();
+            } elseif ($teacherUnitId) {
+                $subjects = Subject::query()
+                    ->with('unitPendidikan:id,name,code')
+                    ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code', 'unit_pendidikan_id')
+                    ->where('status', true)
+                    ->where('unit_pendidikan_id', $teacherUnitId)
+                    ->get();
+            } else {
+                $subjects = collect([]);
+            }
+
             $teachers = Employee::query()
                 ->select('id', 'nama_lengkap', 'niy', 'nik')
                 ->where('id', $employeeId)
                 ->get();
-            $classes = $this->accessScope->accessibleRombels($request->user())
+
+            $classes = $this->accessScope->accessibleRombels($user)
                 ->select('id', 'nama_kelas', 'kode_kelas')
                 ->get();
-            $allowedMapelIds = $this->accessScope->accessibleSchedules($request->user())
-                ->pluck('subject_id')
-                ->filter()
-                ->unique();
-            if ($allowedMapelIds->isNotEmpty()) {
-                $subjects = Subject::query()
-                    ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code')
-                    ->whereIn('id', $allowedMapelIds)
-                    ->get();
+        } elseif (! $canAccessAll) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $targetUnitId = $learningContext['unit_pendidikan_id'] ?? null;
+            $effectiveUnitIds = ($targetUnitId && in_array($targetUnitId, $allowedUnitIds, true))
+                ? [$targetUnitId]
+                : $allowedUnitIds;
+
+            $units = EducationUnit::whereIn('id', $allowedUnitIds)->select('id', 'name', 'code')->get();
+
+            $kurikulums = MasterKurikulum::query()
+                ->select('id', 'nama_kurikulum', 'kode_kurikulum')
+                ->where('status', true)
+                ->whereIn('unit_pendidikan_id', $effectiveUnitIds)
+                ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
+                ->get();
+
+            $subjects = Subject::query()
+                ->with('unitPendidikan:id,name,code')
+                ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code', 'unit_pendidikan_id')
+                ->where('status', true)
+                ->whereIn('unit_pendidikan_id', $effectiveUnitIds)
+                ->when($learningContext['kurikulum_id'] ?? null, fn ($query, $curriculumId) => $query->where('kurikulum_id', $curriculumId))
+                ->get();
+
+            $teachers = Employee::query()
+                ->select('id', 'nama_lengkap', 'niy', 'nik')
+                ->whereIn('unit_id', $effectiveUnitIds)
+                ->get();
+
+            $classes = Kelas::query()
+                ->select('id', 'nama_kelas', 'kode_kelas')
+                ->whereIn('unit_pendidikan_id', $effectiveUnitIds)
+                ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
+                ->when($request->query('semester_id'), fn ($query, $semesterId) => $query->where('semester_id', $semesterId))
+                ->get();
+        } else {
+            $targetUnitId = $learningContext['unit_pendidikan_id'] ?? null;
+            $units = EducationUnit::select('id', 'name', 'code')->get();
+
+            $kurikulums = MasterKurikulum::query()
+                ->select('id', 'nama_kurikulum', 'kode_kurikulum')
+                ->where('status', true)
+                ->when($targetUnitId, fn ($query, $unitId) => $query->where('unit_pendidikan_id', $unitId))
+                ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
+                ->get();
+
+            $subjects = Subject::query()
+                ->with('unitPendidikan:id,name,code')
+                ->select('id', 'nama_mapel', 'kode_mapel', 'name', 'code', 'unit_pendidikan_id')
+                ->where('status', true)
+                ->when($targetUnitId, fn ($query, $unitId) => $query->where('unit_pendidikan_id', $unitId))
+                ->when($learningContext['kurikulum_id'] ?? null, fn ($query, $curriculumId) => $query->where('kurikulum_id', $curriculumId))
+                ->get();
+
+            $teachers = Employee::query()
+                ->select('id', 'nama_lengkap', 'niy', 'nik')
+                ->when($targetUnitId, fn ($query, $unitId) => $query->where('unit_id', $unitId))
+                ->get();
+            if ($teachers->isEmpty()) {
+                $teachers = Teacher::select('id', 'full_name as nama_lengkap', 'employee_number as niy')->get();
             }
+
+            $classes = Kelas::query()
+                ->select('id', 'nama_kelas', 'kode_kelas')
+                ->when($targetUnitId, fn ($query, $unitId) => $query->where('unit_pendidikan_id', $unitId))
+                ->when($learningContext['tahun_ajaran_id'] ?? null, fn ($query, $yearId) => $query->where('tahun_ajaran_id', $yearId))
+                ->when($request->query('semester_id'), fn ($query, $semesterId) => $query->where('semester_id', $semesterId))
+                ->get();
         }
 
         $years = AcademicYear::select('id', 'name')->get()->map(function ($item) {

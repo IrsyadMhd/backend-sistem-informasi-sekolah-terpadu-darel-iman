@@ -45,10 +45,27 @@ class MutabaahAnalyticsController extends Controller
 
         return Excel::download(new MutabaahCrudExport($rows, $columns), $filename.'.xlsx');
     }
-
     private function filters(Request $request): array
     {
-        return $request->validate(['date_from' => ['nullable', 'date'], 'date_to' => ['nullable', 'date', 'after_or_equal:date_from'], 'education_unit_id' => ['nullable', 'uuid'], 'education_level' => ['nullable', 'string', 'max:30'], 'academic_year_id' => ['nullable', 'uuid'], 'semester_id' => ['nullable', 'uuid'], 'kelas_id' => ['nullable', 'uuid'], 'rombel_id' => ['nullable', 'uuid'], 'supervisor_assignment_id' => ['nullable', 'uuid'], 'agenda_item_id' => ['nullable', 'uuid'], 'signature_status' => ['nullable', 'in:signed,unsigned'], 'search' => ['nullable', 'string', 'max:100'], 'page' => ['nullable', 'integer', 'min:1'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:100'], 'sort' => ['nullable', 'in:s.full_name,c.name,progress'], 'direction' => ['nullable', 'in:asc,desc']]);
+        return $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'education_unit_id' => ['nullable', 'uuid'],
+            'education_level' => ['nullable', 'string', 'max:30'],
+            'academic_year_id' => ['nullable', 'uuid'],
+            'semester_id' => ['nullable', 'uuid'],
+            'kelas_id' => ['nullable', 'uuid'],
+            'class_id' => ['nullable', 'uuid'],
+            'rombel_id' => ['nullable', 'uuid'],
+            'supervisor_assignment_id' => ['nullable', 'uuid'],
+            'agenda_item_id' => ['nullable', 'uuid'],
+            'signature_status' => ['nullable', 'in:signed,unsigned'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'sort' => ['nullable', 'in:s.full_name,c.name,progress'],
+            'direction' => ['nullable', 'in:asc,desc'],
+        ]);
     }
 
     private function authorizePermission(Request $request, string $permission): void

@@ -337,11 +337,12 @@ class SimulasiTerpadu2026Seeder extends Seeder
             );
 
             // Sync ke classes legacy table
-            $existingClass = DB::table('classes')->where([
-                'academic_year_id' => $academicYear->id,
-                'semester_id' => $semesterGanjil->id,
-                'name' => $cd['nama'],
-            ])->first();
+            $existingClass = DB::table('classes')->where('id', $kelas->id)->first()
+                ?? DB::table('classes')->where([
+                    'academic_year_id' => $academicYear->id,
+                    'semester_id' => $semesterGanjil->id,
+                    'name' => $cd['nama'],
+                ])->first();
 
             $legacyClassId = $kelas->id;
             if ($existingClass) {

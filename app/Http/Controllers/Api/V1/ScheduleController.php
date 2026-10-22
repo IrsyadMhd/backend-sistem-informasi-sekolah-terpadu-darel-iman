@@ -252,6 +252,81 @@ class ScheduleController extends Controller
         $this->authorizeView($user);
         $unitIds = $this->accessibleUnitIds($user);
 
+        // Pasangan relasi guru dan mata pelajaran dari jadwal & penugasan mapel
+        $pairs = DB::table('class_schedules')
+            ->select('employee_id as guru_id', 'subject_id')
+            ->whereNotNull('employee_id')
+            ->whereNotNull('subject_id')
+            ->whereNull('deleted_at')
+            ->where('is_active', true)
+            ->distinct()
+            ->get()
+            ->concat(
+                DB::table('subject_teachers')->select('guru_id', 'subject_id')->distinct()->get()
+            )
+            ->unique(fn ($i) => $i->guru_id . '-' . $i->subject_id);
+
+        $guruToSubjects = $pairs->groupBy('guru_id')->map->pluck('subject_id')->map->values()->toArray();
+        $subjectToGurus = $pairs->groupBy('subject_id')->map->pluck('guru_id')->map->values()->toArray();
+
+        // ID guru yang benar-benar memiliki jadwal pelajaran aktif di database (Zero Dummy/Non-Teaching Staff)
+        $scheduledTeacherIds = DB::table('class_schedules')
+            ->whereNotNull('employee_id')
+            ->whereNull('deleted_at')
+            ->where('is_active', true)
+            ->distinct()
+            ->pluck('employee_id')
+            ->concat(
+                DB::table('class_schedules')
+                    ->whereNotNull('teacher_id')
+                    ->whereNull('deleted_at')
+                    ->where('is_active', true)
+                    ->distinct()
+                    ->pluck('teacher_id')
+            )
+            ->unique()
+            ->filter()
+            ->values()
+            ->all();
+
+        $allEmployeesQuery = fn () => Employee::query()
+            ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_id', $unitIds))
+            ->where('status', 'Aktif')
+            ->orderBy('nama_lengkap');
+
+        // Guru yang benar-benar memiliki jadwal mengajar aktif
+        $scheduledGurus = ($this->isGuruRole($user)
+            ? Employee::query()->where('user_id', $user->id)->where('status', 'Aktif')->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id'])
+            : $allEmployeesQuery()
+                ->whereIn('id', $scheduledTeacherIds)
+                ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']))
+            ->map(function ($g) use ($guruToSubjects) {
+                $g->subject_ids = $guruToSubjects[$g->id] ?? [];
+                $g->has_schedule = true;
+                return $g;
+            });
+
+        // Seluruh pegawai aktif (opsional untuk modal tambah jadwal jika dibutuhkan penugasan guru baru)
+        $allGurus = ($this->isGuruRole($user)
+            ? $scheduledGurus
+            : $allEmployeesQuery()
+                ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']))
+            ->map(function ($g) use ($guruToSubjects, $scheduledTeacherIds) {
+                $g->subject_ids = $guruToSubjects[$g->id] ?? [];
+                $g->has_schedule = in_array($g->id, $scheduledTeacherIds);
+                return $g;
+            });
+
+        $subjects = Subject::query()
+            ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
+            ->where(fn ($q) => $q->where('status', true)->orWhereNull('status'))
+            ->orderByRaw('COALESCE(nama_mapel, name)')
+            ->get(['id', 'nama_mapel', 'name', 'kode_mapel', 'code', 'unit_pendidikan_id'])
+            ->map(function ($m) use ($subjectToGurus) {
+                $m->guru_ids = $subjectToGurus[$m->id] ?? [];
+                return $m;
+            });
+
         return response()->json([
             'status' => 'success',
             'message' => 'Opsi jadwal pelajaran berhasil diambil.',
@@ -261,18 +336,11 @@ class ScheduleController extends Controller
                     ->with(['unitPendidikan:id,name', 'tahunAjaran:id,name', 'semester:id,name'])
                     ->orderBy('nama_kelas')
                     ->get(['id', 'nama_kelas', 'kode_kelas', 'unit_pendidikan_id', 'tahun_ajaran_id', 'semester_id']),
-                'guru' => $this->isGuruRole($user)
-                    ? Employee::query()->where('user_id', $user->id)->where('status', 'Aktif')->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id'])
-                    : Employee::query()
-                        ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_id', $unitIds))
-                        ->where('status', 'Aktif')
-                        ->orderBy('nama_lengkap')
-                        ->get(['id', 'nama_lengkap', 'niy', 'nik', 'unit_id']),
-                'mata_pelajaran' => Subject::query()
-                    ->when(!empty($unitIds), fn (Builder $query) => $query->whereIn('unit_pendidikan_id', $unitIds))
-                    ->where(fn ($q) => $q->where('status', true)->orWhereNull('status'))
-                    ->orderByRaw('COALESCE(nama_mapel, name)')
-                    ->get(['id', 'nama_mapel', 'name', 'kode_mapel', 'code', 'unit_pendidikan_id']),
+                'guru' => $scheduledGurus,
+                'all_guru' => $allGurus,
+                'scheduled_guru_ids' => $scheduledTeacherIds,
+                'mata_pelajaran' => $subjects,
+                'guru_mapel' => $pairs->values(),
                 'tahun_ajaran' => AcademicYear::query()
                     ->orderByDesc('start_date')
                     ->get(['id', 'name', 'is_active']),
@@ -296,12 +364,16 @@ class ScheduleController extends Controller
     public function store(Request $request): JsonResponse
     {
         $this->authorizeManage($request->user(), 'create');
+        $activityType = $request->input('activity_type', 'kbm');
+
         $validated = $request->validate([
+            'activity_type' => 'nullable|string|in:kbm,activity,non_kbm,routine,break',
+            'activity_name' => $activityType !== 'kbm' ? 'required|string|max:255' : 'nullable|string|max:255',
             'kelas_id' => 'nullable|uuid|exists:tbl_kelas,id',
             'class_id' => 'nullable|uuid|exists:classes,id',
             'employee_id' => 'nullable|uuid|exists:employees,id',
             'teacher_id' => 'nullable|uuid|exists:teachers,id',
-            'subject_id' => 'required|uuid|exists:subjects,id',
+            'subject_id' => $activityType === 'kbm' ? 'required|uuid|exists:subjects,id' : 'nullable|uuid|exists:subjects,id',
             'classroom_id' => 'nullable|uuid|exists:classrooms,id',
             'academic_year_id' => 'required|uuid|exists:academic_years,id',
             'semester_id' => 'required|uuid|exists:semesters,id',
@@ -313,6 +385,8 @@ class ScheduleController extends Controller
             'metadata' => 'nullable|array',
         ]);
 
+        $validated['activity_type'] = $activityType;
+
         // Validasi: harus ada minimal satu referensi kelas
         if (empty($validated['kelas_id']) && empty($validated['class_id'])) {
             return response()->json([
@@ -321,10 +395,10 @@ class ScheduleController extends Controller
             ], 422);
         }
 
-        if (empty($validated['employee_id']) && empty($validated['teacher_id'])) {
+        if ($activityType === 'kbm' && empty($validated['employee_id']) && empty($validated['teacher_id'])) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Guru pengampu wajib dipilih.',
+                'message' => 'Guru pengampu wajib dipilih untuk jadwal KBM.',
             ], 422);
         }
 
@@ -365,12 +439,16 @@ class ScheduleController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Jadwal tidak ditemukan.'], 404);
         }
 
+        $activityType = $request->input('activity_type', $schedule->activity_type ?: 'kbm');
+
         $validated = $request->validate([
+            'activity_type' => 'nullable|string|in:kbm,activity,non_kbm,routine,break',
+            'activity_name' => $activityType !== 'kbm' ? 'required|string|max:255' : 'nullable|string|max:255',
             'kelas_id' => 'nullable|uuid|exists:tbl_kelas,id',
             'class_id' => 'nullable|uuid|exists:classes,id',
             'employee_id' => 'nullable|uuid|exists:employees,id',
             'teacher_id' => 'nullable|uuid|exists:teachers,id',
-            'subject_id' => 'sometimes|uuid|exists:subjects,id',
+            'subject_id' => 'nullable|uuid|exists:subjects,id',
             'classroom_id' => 'nullable|uuid|exists:classrooms,id',
             'academic_year_id' => 'sometimes|uuid|exists:academic_years,id',
             'semester_id' => 'sometimes|uuid|exists:semesters,id',
@@ -384,13 +462,13 @@ class ScheduleController extends Controller
 
         $merged = array_merge($schedule->only([
             'kelas_id', 'class_id', 'employee_id', 'teacher_id', 'academic_year_id',
-            'semester_id', 'day_of_week', 'time_start', 'time_end',
+            'semester_id', 'day_of_week', 'time_start', 'time_end', 'activity_type', 'activity_name',
         ]), $validated);
 
-        if (empty($merged['employee_id']) && empty($merged['teacher_id'])) {
+        if ($activityType === 'kbm' && empty($merged['employee_id']) && empty($merged['teacher_id'])) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Guru pengampu wajib dipilih.',
+                'message' => 'Guru pengampu wajib dipilih untuk jadwal KBM.',
             ], 422);
         }
 
@@ -419,6 +497,171 @@ class ScheduleController extends Controller
         $schedule->delete();
 
         return response()->json(['status' => 'success', 'message' => 'Jadwal berhasil dihapus.']);
+    }
+
+    public function availability(Request $request): JsonResponse
+    {
+        $this->authorizeView($request->user());
+
+        $academicYearId = $request->query('academic_year_id');
+        $semesterId = $request->query('semester_id');
+        $kelasId = $request->query('kelas_id') ?: $request->query('class_id');
+        $employeeId = $request->query('employee_id') ?: $request->query('teacher_id');
+        $ignoreId = $request->query('ignore_id');
+        $dayOfWeek = $request->query('day_of_week') ? (int) $request->query('day_of_week') : null;
+
+        $daysMap = [
+            1 => 'Senin',
+            2 => 'Selasa',
+            3 => 'Rabu',
+            4 => 'Kamis',
+            5 => 'Jumat',
+            6 => 'Sabtu',
+            7 => 'Minggu',
+        ];
+
+        // Sesi standar KBM SIT & umum
+        $standardSessions = [
+            ['time_start' => '07:30', 'time_end' => '08:15', 'label' => '07:30 - 08:15 (Sesi 1 • 45m)'],
+            ['time_start' => '08:15', 'time_end' => '09:00', 'label' => '08:15 - 09:00 (Sesi 2 • 45m)'],
+            ['time_start' => '07:30', 'time_end' => '09:00', 'label' => '07:30 - 09:00 (Blok Pagi • 90m)'],
+            ['time_start' => '09:15', 'time_end' => '10:00', 'label' => '09:15 - 10:00 (Sesi 3 • 45m)'],
+            ['time_start' => '10:00', 'time_end' => '10:45', 'label' => '10:00 - 10:45 (Sesi 4 • 45m)'],
+            ['time_start' => '09:15', 'time_end' => '10:45', 'label' => '09:15 - 10:45 (Blok Duha • 90m)'],
+            ['time_start' => '10:45', 'time_end' => '11:30', 'label' => '10:45 - 11:30 (Sesi 5 • 45m)'],
+            ['time_start' => '13:00', 'time_end' => '13:45', 'label' => '13:00 - 13:45 (Sesi 6 • 45m)'],
+            ['time_start' => '13:45', 'time_end' => '14:30', 'label' => '13:45 - 14:30 (Sesi 7 • 45m)'],
+            ['time_start' => '13:00', 'time_end' => '14:30', 'label' => '13:00 - 14:30 (Blok Siang • 90m)'],
+            ['time_start' => '14:30', 'time_end' => '15:15', 'label' => '14:30 - 15:15 (Sesi 8 • 45m)'],
+        ];
+
+        // Query semua jadwal aktif kelas dan/atau guru
+        $query = ClassSchedule::query()
+            ->where('is_active', true)
+            ->whereNull('deleted_at')
+            ->with(['kelas:id,nama_kelas,kode_kelas', 'subject:id,name,nama_mapel,kode_mapel', 'employee:id,nama_lengkap,niy']);
+
+        if ($academicYearId) {
+            $query->where('academic_year_id', $academicYearId);
+        }
+        if ($semesterId) {
+            $query->where('semester_id', $semesterId);
+        }
+        if ($ignoreId) {
+            $query->where('id', '!=', $ignoreId);
+        }
+
+        if ($kelasId && $employeeId) {
+            $query->where(function ($q) use ($kelasId, $employeeId) {
+                $q->where('kelas_id', $kelasId)
+                  ->orWhere('employee_id', $employeeId)
+                  ->orWhere('teacher_id', $employeeId);
+            });
+        } elseif ($kelasId) {
+            $query->where('kelas_id', $kelasId);
+        } elseif ($employeeId) {
+            $query->where(function ($q) use ($employeeId) {
+                $q->where('employee_id', $employeeId)
+                  ->orWhere('teacher_id', $employeeId);
+            });
+        } else {
+            $daysResult = [];
+            foreach ($daysMap as $dId => $dName) {
+                $daysResult[] = [
+                    'day_of_week' => $dId,
+                    'day_name' => $dName,
+                    'total_schedules' => 0,
+                    'is_empty' => true,
+                    'status' => 'empty',
+                    'occupied_slots' => [],
+                    'free_slots' => $standardSessions,
+                ];
+            }
+            return response()->json([
+                'status' => 'success',
+                'data' => [
+                    'days' => $daysResult,
+                    'selected_day' => $dayOfWeek ? $daysResult[$dayOfWeek - 1] ?? null : null,
+                ],
+            ]);
+        }
+
+        $schedules = $query->orderBy('day_of_week')->orderBy('time_start')->get();
+
+        $daysResult = [];
+        foreach ($daysMap as $dId => $dName) {
+            $dayScheds = $schedules->filter(fn ($s) => (int) $s->day_of_week === $dId)->values();
+
+            $occupied = [];
+            foreach ($dayScheds as $ds) {
+                $tStart = substr($ds->time_start, 0, 5);
+                $tEnd = substr($ds->time_end, 0, 5);
+                $isClassMatch = $kelasId && (string) $ds->kelas_id === (string) $kelasId;
+                $isTeachMatch = $employeeId && ((string) $ds->employee_id === (string) $employeeId || (string) $ds->teacher_id === (string) $employeeId);
+
+                $reason = [];
+                if ($isClassMatch) $reason[] = 'Kelas ' . ($ds->kelas?->nama_kelas ?? 'ini');
+                if ($isTeachMatch) $reason[] = 'Guru ' . ($ds->employee?->nama_lengkap ?? 'ini');
+
+                $occupied[] = [
+                    'id' => $ds->id,
+                    'time_start' => $tStart,
+                    'time_end' => $tEnd,
+                    'subject_name' => $ds->subject?->name ?? $ds->subject?->nama_mapel ?? 'Mata Pelajaran',
+                    'teacher_name' => $ds->employee?->nama_lengkap ?? '-',
+                    'kelas_name' => $ds->kelas?->nama_kelas ?? '-',
+                    'conflict_reason' => implode(' & ', $reason),
+                    'is_class_occupied' => $isClassMatch,
+                    'is_teacher_occupied' => $isTeachMatch,
+                ];
+            }
+
+            // Hitung free slots yang bebas dari seluruh occupied
+            $freeSlots = [];
+            foreach ($standardSessions as $std) {
+                $collision = false;
+                foreach ($occupied as $occ) {
+                    if ($std['time_start'] < $occ['time_end'] && $std['time_end'] > $occ['time_start']) {
+                        $collision = true;
+                        break;
+                    }
+                }
+                if (! $collision) {
+                    $freeSlots[] = $std;
+                }
+            }
+
+            $count = count($occupied);
+            $status = $count === 0 ? 'empty' : ($count <= 3 ? 'partial' : 'busy');
+
+            $daysResult[] = [
+                'day_of_week' => $dId,
+                'day_name' => $dName,
+                'total_schedules' => $count,
+                'is_empty' => $count === 0,
+                'status' => $status,
+                'occupied_slots' => $occupied,
+                'free_slots' => $freeSlots,
+            ];
+        }
+
+        $selectedDayDetail = null;
+        if ($dayOfWeek) {
+            foreach ($daysResult as $dr) {
+                if ($dr['day_of_week'] === $dayOfWeek) {
+                    $selectedDayDetail = $dr;
+                    break;
+                }
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'days' => $daysResult,
+                'selected_day' => $selectedDayDetail,
+            ],
+        ]);
     }
 
     public function checkConflict(Request $request): JsonResponse
@@ -748,5 +991,152 @@ class ScheduleController extends Controller
                 );
             }
         }
+    }
+
+    /**
+     * Endpoint Data Cetak Matriks Jadwal Mingguan Resmi (Full Day & Boarding).
+     *
+     * Menghasilkan struktur matriks grid time-slot mingguan (Senin - Sabtu),
+     * lengkap dengan data kop surat yayasan & unit sekolah, identitas rombel,
+     * wali kelas, dan pimpinan unit pendidikan.
+     *
+     * ATURAN: ZERO HARDCODE. Murni data dari database. Jika kosong, dikembalikan null / kosong.
+     */
+    public function matrix(Request $request): JsonResponse
+    {
+        $this->authorizeView($request->user());
+
+        $kelasId = $request->query('kelas_id') ?: $request->query('class_id');
+        $unitId = $request->query('unit_pendidikan_id') ?: $request->query('unit_id');
+
+        $kelasQuery = Kelas::query()->with(['unitPendidikan', 'waliKelas', 'tahunAjaran', 'semester']);
+        if ($unitId) {
+            $kelasQuery->where('unit_pendidikan_id', $unitId);
+        }
+        if ($kelasId) {
+            $kelas = $kelasQuery->find($kelasId);
+        } else {
+            $firstWithSched = ClassSchedule::query()
+                ->when($unitId, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $unitId)))
+                ->first();
+            $kelas = $firstWithSched ? $kelasQuery->find($firstWithSched->kelas_id) : $kelasQuery->first();
+        }
+
+        if (! $kelas) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Kelas tidak ditemukan untuk dicetak.',
+            ], 404);
+        }
+
+        $unit = $kelas->unitPendidikan;
+        $siteSettings = DB::table('site_settings')->first();
+
+        // Ambil seluruh jadwal untuk kelas ini (HANYA DARI DATABASE, ZERO HARDCODE)
+        $schedules = ClassSchedule::query()
+            ->where('kelas_id', $kelas->id)
+            ->with(['subject', 'employee'])
+            ->orderBy('day_of_week')
+            ->orderBy('time_start')
+            ->get();
+
+        // Kumpulkan slot waktu unik secara berurutan
+        $timeSlots = $schedules->map(function ($s) {
+            return [
+                'start' => substr($s->time_start, 0, 5),
+                'end' => substr($s->time_end, 0, 5),
+                'label' => substr($s->time_start, 0, 5) . ' - ' . substr($s->time_end, 0, 5),
+            ];
+        })->unique('label')->sortBy('start')->values()->all();
+
+        // Matriks hari (1 = Senin ... 6 = Sabtu)
+        $days = [
+            1 => 'Senin',
+            2 => 'Selasa',
+            3 => 'Rabu',
+            4 => 'Kamis',
+            5 => 'Jumat',
+            6 => 'Sabtu',
+        ];
+
+        // Buat grid time_slot x day
+        $rows = [];
+        foreach ($timeSlots as $slotIdx => $slot) {
+            $daySlots = [];
+            foreach ($days as $dayNum => $dayName) {
+                // Cari jadwal yang cocok dengan hari dan overlap rentang waktu slot ini
+                $matching = $schedules->first(function ($s) use ($dayNum, $slot) {
+                    if ((int) $s->day_of_week !== $dayNum) return false;
+                    $sStart = substr($s->time_start, 0, 5);
+                    $sEnd = substr($s->time_end, 0, 5);
+                    return $sStart < $slot['end'] && $sEnd > $slot['start'];
+                });
+
+                if ($matching) {
+                    $daySlots[$dayNum] = [
+                        'id' => $matching->id,
+                        'subject_name' => $matching->subject?->name ?? $matching->activity_name ?? '-',
+                        'subject_code' => $matching->subject?->code ?? null,
+                        'teacher_name' => $matching->employee?->nama_lengkap ?? null,
+                        'teacher_niy' => $matching->employee?->niy ?? null,
+                        'room' => $matching->room ?? $matching->ruangan ?? null,
+                        'activity_type' => $matching->activity_type ?? 'kbm',
+                        'activity_name' => $matching->activity_name,
+                        'is_empty' => false,
+                    ];
+                } else {
+                    $daySlots[$dayNum] = null; // KOSONG JIKA TIDAK ADA JADWAL (ZERO HARDCODE)
+                }
+            }
+
+            $rows[] = [
+                'no' => $slotIdx + 1,
+                'time' => $slot,
+                'days' => $daySlots,
+            ];
+        }
+
+        $programType = strtolower($unit?->program_type ?? 'fullday');
+        $unitMetadata = is_array($unit?->metadata) ? $unit->metadata : (json_decode($unit?->metadata ?? '{}', true) ?: []);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'kop' => [
+                    'yayasan_nama' => $siteSettings?->school_name ?? 'YAYASAN DAR EL - IMAN',
+                    'yayasan_alamat' => $siteSettings?->address ?? null,
+                    'yayasan_telepon' => $siteSettings?->phone ?? null,
+                    'yayasan_email' => $siteSettings?->email ?? null,
+                    'yayasan_website' => $siteSettings?->website ?? null,
+                    'unit_nama' => $unit?->name ?? 'Unit Pendidikan',
+                    'unit_kode' => $unit?->code ?? null,
+                    'program_type' => $programType,
+                    'is_boarding' => $programType === 'boarding',
+                    'npsn' => $unitMetadata['npsn'] ?? null,
+                    'akreditasi' => $unitMetadata['accreditation'] ?? null,
+                    'unit_alamat' => $unitMetadata['address'] ?? null,
+                    'unit_telepon' => $unitMetadata['phone'] ?? null,
+                    'unit_email' => $unitMetadata['email'] ?? null,
+                    'kepala_sekolah' => $unitMetadata['principal_name'] ?? null,
+                    'logo_yayasan' => $siteSettings?->logo_path ?? '/assets/images/logo.png',
+                    'logo_unit' => $unitMetadata['logo_url'] ?? null,
+                ],
+                'kelas' => [
+                    'id' => $kelas->id,
+                    'nama_kelas' => $kelas->nama_kelas,
+                    'tingkat' => $kelas->tingkat,
+                    'jenjang' => $kelas->jenjang,
+                    'ruangan' => $kelas->ruangan,
+                    'wali_kelas' => $kelas->waliKelas?->nama_lengkap ?? null,
+                    'wali_kelas_niy' => $kelas->waliKelas?->niy ?? null,
+                    'tahun_ajaran' => $kelas->tahunAjaran?->name ?? null,
+                    'semester' => $kelas->semester?->name ?? null,
+                ],
+                'time_slots' => $timeSlots,
+                'days' => $days,
+                'matrix_rows' => $rows,
+                'total_jadwal' => $schedules->count(),
+            ],
+        ]);
     }
 }

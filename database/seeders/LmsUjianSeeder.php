@@ -39,14 +39,57 @@ class LmsUjianSeeder extends Seeder
             $kelases = collect([$kelas]);
         }
 
+        $kurikulumId = \Illuminate\Support\Facades\DB::table('master_kurikulum')->value('id');
+
         foreach ($kelases as $kls) {
+            $unitId = $kls->unit_pendidikan_id;
+            
+            // Subjek PAI & Pancasila dinamis sesuai unit rombel
+            $paiSubj = \App\Models\Subject::where('unit_pendidikan_id', $unitId)
+                ->where(fn ($q) => $q->where('name', 'Pendidikan Agama Islam (PAI)')->orWhere('name', 'like', '%Agama Islam%'))
+                ->first() ?? \App\Models\Subject::where('name', 'like', '%Agama Islam%')->first();
+
+            $pancasilaSubj = \App\Models\Subject::where('unit_pendidikan_id', $unitId)
+                ->where(fn ($q) => $q->where('name', 'Pendidikan Pancasila')->orWhere('name', 'like', '%Pancasila%'))
+                ->first() ?? \App\Models\Subject::where('name', 'like', '%Pancasila%')->first();
+
+            $kisiPai = $paiSubj ? LmsKisiKisi::firstOrCreate([
+                'mata_pelajaran_id' => $paiSubj->id,
+                'kelas_id' => $kls->id,
+            ], [
+                'kurikulum_id' => $kurikulumId,
+                'semester_id' => $semester->id,
+                'tahun_ajaran_id' => $academicYear->id,
+                'guru_id' => $guru?->id,
+                'judul_kisi' => 'Kisi-kisi ' . $paiSubj->name . ' — ' . $kls->nama_kelas,
+                'jenis_ujian' => 'UH',
+                'jumlah_soal' => 25,
+                'alokasi_waktu_menit' => 45,
+                'status' => true,
+            ]) : $kisi;
+
+            $kisiPancasila = $pancasilaSubj ? LmsKisiKisi::firstOrCreate([
+                'mata_pelajaran_id' => $pancasilaSubj->id,
+                'kelas_id' => $kls->id,
+            ], [
+                'kurikulum_id' => $kurikulumId,
+                'semester_id' => $semester->id,
+                'tahun_ajaran_id' => $academicYear->id,
+                'guru_id' => $guru?->id,
+                'judul_kisi' => 'Kisi-kisi ' . $pancasilaSubj->name . ' — ' . $kls->nama_kelas,
+                'jenis_ujian' => 'UH',
+                'jumlah_soal' => 25,
+                'alokasi_waktu_menit' => 45,
+                'status' => true,
+            ]) : $kisi;
+
             $ujianPai = LmsUjian::updateOrCreate(
                 [
                     'judul_ujian' => 'Ujian Harian CBT — Pendidikan Agama Islam (PAI) '.$kls->nama_kelas,
                     'kelas_id' => $kls->id,
                 ],
                 [
-                    'kisi_kisi_id' => $kisi->id,
+                    'kisi_kisi_id' => $kisiPai->id,
                     'kelas_id' => $kls->id,
                     'semester_id' => $semester->id,
                     'guru_id' => $guru?->id,
@@ -69,7 +112,7 @@ class LmsUjianSeeder extends Seeder
                     'kelas_id' => $kls->id,
                 ],
                 [
-                    'kisi_kisi_id' => $kisi->id,
+                    'kisi_kisi_id' => $kisiPancasila->id,
                     'kelas_id' => $kls->id,
                     'semester_id' => $semester->id,
                     'guru_id' => $guru?->id,

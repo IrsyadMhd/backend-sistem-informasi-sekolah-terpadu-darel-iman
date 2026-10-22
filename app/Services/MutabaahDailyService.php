@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Mutabaah\RecordStatus;
 use App\Enums\Mutabaah\SupervisorType;
 use App\Models\AcademicYear;
+use App\Models\ClassSchedule;
 use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\MutabaahActivityLog;
@@ -42,12 +43,65 @@ class MutabaahDailyService
 
         abort_unless($employeeId || $isSupervisor, 403, 'Akun tidak terhubung dengan data pembimbing.');
 
-        return MutabaahSupervisorAssignment::query()
+        $assignments = MutabaahSupervisorAssignment::query()
             ->with(['employee:id,nama_lengkap', 'educationUnit:id,name', 'kelas:id,name,level', 'rombel:id,nama_kelas', 'template.items.agendaItem.category'])
             ->active()->byDate($date)
             ->when(! $this->accessScope->hasGlobalScope($user) && ! $isSupervisor, fn (Builder $q) => $q->where('employee_id', $employeeId))
             ->when($isSupervisor && ! $this->accessScope->hasGlobalScope($user) && $unitId, fn (Builder $q) => $q->where('education_unit_id', $unitId))
             ->orderByDesc('is_primary')->get();
+
+        // Auto-provision default bimbingan untuk Guru Mapel jika belum ada assignment manual
+        if ($assignments->isEmpty() && $employeeId) {
+            $classSchedules = ClassSchedule::query()
+                ->where('employee_id', $employeeId)
+                ->whereNotNull('class_id')
+                ->where(fn ($q) => $q->where('is_active', true)->orWhereNull('is_active'))
+                ->get();
+
+            $activeYearId = AcademicYear::where('is_active', true)->value('id');
+            $activeSemId = Semester::where('is_active', true)->value('id');
+
+            foreach ($classSchedules->unique('class_id') as $sched) {
+                $cls = Kelas::find($sched->class_id);
+                $unit = $cls?->unit_pendidikan_id ?: $unitId;
+                if (! $unit || ! $activeYearId || ! $activeSemId) continue;
+
+                $tplId = MutabaahTemplate::query()
+                    ->where(fn ($q) => $q->where('education_unit_id', $unit)->orWhereNull('education_unit_id'))
+                    ->value('id');
+
+                MutabaahSupervisorAssignment::firstOrCreate(
+                    [
+                        'employee_id' => $employeeId,
+                        'rombel_id' => $sched->class_id,
+                        'academic_year_id' => $activeYearId,
+                        'semester_id' => $activeSemId,
+                    ],
+                    [
+                        'supervisor_type' => 'pembimbing',
+                        'education_unit_id' => $unit,
+                        'template_id' => $tplId,
+                        'start_date' => now()->startOfYear()->toDateString(),
+                        'end_date' => now()->endOfYear()->toDateString(),
+                        'is_primary' => false,
+                        'can_input' => true,
+                        'can_edit' => true,
+                        'can_finalize' => true,
+                        'can_view_report' => true,
+                        'status' => 'active',
+                    ]
+                );
+            }
+
+            $assignments = MutabaahSupervisorAssignment::query()
+                ->with(['employee:id,nama_lengkap', 'educationUnit:id,name', 'kelas:id,name,level', 'rombel:id,nama_kelas', 'template.items.agendaItem.category'])
+                ->active()->byDate($date)
+                ->when(! $this->accessScope->hasGlobalScope($user) && ! $isSupervisor, fn (Builder $q) => $q->where('employee_id', $employeeId))
+                ->when($isSupervisor && ! $this->accessScope->hasGlobalScope($user) && $unitId, fn (Builder $q) => $q->where('education_unit_id', $unitId))
+                ->orderByDesc('is_primary')->get();
+        }
+
+        return $assignments;
     }
 
     public function context(User $user, array $filters): array

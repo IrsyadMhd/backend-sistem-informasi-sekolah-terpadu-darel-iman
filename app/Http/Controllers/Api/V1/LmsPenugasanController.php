@@ -22,9 +22,76 @@ class LmsPenugasanController extends Controller
         protected AccessScopeService $accessScope
     ) {}
 
+    private function isSupervisorOrStaff(?User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        return $this->accessScope->hasGlobalScope($user)
+            || $this->accessScope->isSupervisor($user)
+            || $user->hasAnyRole([
+                'Super Admin', 'super_admin', 'super-admin',
+                'Admin', 'admin',
+                'Operator', 'operator',
+                'Tata Usaha', 'tata_usaha', 'TU', 'tu',
+                'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
+                'Yayasan', 'Ketua Yayasan', 'ketua_yayasan', 'Pengurus Yayasan', 'pengurus_yayasan',
+                'Sekretaris Yayasan', 'sekretaris_yayasan', 'Bendahara Yayasan', 'bendahara_yayasan',
+                'Waka Kurikulum', 'waka_kurikulum', 'Waka Kesiswaan', 'waka_kesiswaan',
+                'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Wakil Kesiswaan',
+                'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+            ]);
+    }
+
+    private function isTeacherOnly(?User $user): bool
+    {
+        if (! $user || $this->isSupervisorOrStaff($user)) {
+            return false;
+        }
+
+        return $this->accessScope->isTeacher($user) || $user->hasAnyRole([
+            'Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran',
+            'Wali Kelas', 'wali_kelas', 'wali-kelas',
+            'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah',
+            'Pembimbing', 'pembimbing',
+        ]);
+    }
+
+    private function getTeacherOwnerIds(?User $user): array
+    {
+        if (! $user) {
+            return [];
+        }
+
+        $employee = \App\Models\Employee::where('user_id', $user->id)->first();
+        $teacher = \App\Models\Teacher::where('user_id', $user->id)
+            ->when($employee, fn ($q) => $q->orWhere('employee_id', $employee->id))
+            ->first();
+
+        return array_values(array_unique(array_filter([
+            $teacher?->id,
+            $teacher?->employee_id,
+            $employee?->id,
+            $user->id,
+        ])));
+    }
+
     private function assertCanAccessPenugasan(?User $user, LmsPenugasan $penugasan): void
     {
         if (! $user || $this->accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        if ($this->isTeacherOnly($user)) {
+            $ownerIds = $this->getTeacherOwnerIds($user);
+            abort_unless(
+                in_array($penugasan->guru_id, $ownerIds, true)
+                || in_array($penugasan->teacher_id, $ownerIds, true)
+                || $penugasan->created_by === $user->id,
+                403,
+                'Akses ditolak: Anda hanya dapat mengakses penugasan milik Anda sendiri.'
+            );
             return;
         }
 
@@ -45,12 +112,37 @@ class LmsPenugasanController extends Controller
         abort_unless($match, 403, 'Akses ditolak: Penugasan berada di luar unit wewenang Anda.');
     }
 
+    private function assertCanManagePenugasan(?User $user, LmsPenugasan $penugasan): void
+    {
+        if (! $user || $this->isSupervisorOrStaff($user)) {
+            return;
+        }
+
+        if ($this->isTeacherOnly($user)) {
+            $ownerIds = $this->getTeacherOwnerIds($user);
+
+            abort_unless(
+                in_array($penugasan->guru_id, $ownerIds, true)
+                || in_array($penugasan->teacher_id, $ownerIds, true)
+                || $penugasan->created_by === $user->id,
+                403,
+                'Akses ditolak: Anda hanya dapat mengelola penugasan milik Anda sendiri.'
+            );
+        }
+    }
+
     public function index(Request $request): AnonymousResourceCollection
     {
         $user = $request->user();
         $filters = $request->only(['search', 'modul_ajar_id', 'kelas_id', 'guru_id', 'mata_pelajaran_id', 'tipe', 'status', 'is_published', 'unit_pendidikan_id']);
 
-        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+        if ($this->isTeacherOnly($user)) {
+            $ownerIds = $this->getTeacherOwnerIds($user);
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            $filters['guru_id'] = $employeeId ?: ($ownerIds[0] ?? $user->id);
+            $filters['teacher_owner_ids'] = $ownerIds;
+            $filters['created_by'] = $user->id;
+        } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
             $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
 
@@ -86,7 +178,16 @@ class LmsPenugasanController extends Controller
         $user = $request->user();
         $validated = $request->validated();
 
-        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+        if ($this->isTeacherOnly($user)) {
+            $ownerIds = $this->getTeacherOwnerIds($user);
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            if (! empty($validated['guru_id'])) {
+                abort_unless(in_array($validated['guru_id'], $ownerIds, true), 403, 'Akses ditolak: Anda tidak dapat membuat tugas atas nama guru lain.');
+            } else {
+                $validated['guru_id'] = $employeeId ?: ($ownerIds[0] ?? $user->id);
+            }
+            $validated['created_by'] = $user->id;
+        } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
             if (! empty($validated['kelas_id'])) {
                 abort_unless(in_array($validated['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar cakupan unit Anda.');
@@ -133,6 +234,7 @@ class LmsPenugasanController extends Controller
         }
 
         $this->assertCanAccessPenugasan($request->user(), $penugasan);
+        $this->assertCanManagePenugasan($request->user(), $penugasan);
         $validated = $request->validated();
 
         if ($request->user() && ! $this->accessScope->hasGlobalScope($request->user()) && ! empty($validated['kelas_id'])) {
@@ -160,6 +262,7 @@ class LmsPenugasanController extends Controller
         }
 
         $this->assertCanAccessPenugasan($request->user(), $penugasan);
+        $this->assertCanManagePenugasan($request->user(), $penugasan);
 
         $this->penugasanService->hapus($id);
 
@@ -180,6 +283,7 @@ class LmsPenugasanController extends Controller
         }
 
         $this->assertCanAccessPenugasan($request->user(), $penugasan);
+        $this->assertCanManagePenugasan($request->user(), $penugasan);
 
         $restored = $this->penugasanService->pulihkan($id);
 
@@ -201,6 +305,7 @@ class LmsPenugasanController extends Controller
         }
 
         $this->assertCanAccessPenugasan($request->user(), $penugasan);
+        $this->assertCanManagePenugasan($request->user(), $penugasan);
 
         $updated = $this->penugasanService->togglePublish($id);
 
@@ -245,7 +350,13 @@ class LmsPenugasanController extends Controller
             'tipe',
         ]);
 
-        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+        if ($this->isTeacherOnly($user)) {
+            $ownerIds = $this->getTeacherOwnerIds($user);
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            $filters['guru_id'] = $employeeId ?: ($ownerIds[0] ?? $user->id);
+            $filters['teacher_owner_ids'] = $ownerIds;
+            $filters['created_by'] = $user->id;
+        } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
             $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
 

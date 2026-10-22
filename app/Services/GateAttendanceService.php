@@ -110,6 +110,36 @@ class GateAttendanceService
 
             if ($result['success'] && isset($result['notification'])) {
                 SendParentAttendanceNotification::dispatch(...array_values($result['notification']));
+                
+                // Realtime broadcast ke mobile app orang tua (channel student.{id})
+                try {
+                    $attData = $result['data'] ?? [];
+                    $status = strtolower($result['notification']['status'] ?? 'hadir');
+                    $isHadir = in_array($status, ['hadir', 'tepat_waktu', 'hadir_dalam_toleransi']);
+                    $isLate = in_array($status, ['terlambat', 'late']);
+                    $scanTime = $result['notification']['time'] ?? Carbon::now()->format('H:i');
+                    $attDate = $data['attendance_date'] ?? today()->toDateString();
+
+                    app(\App\Services\RealtimeBroadcastService::class)->broadcastStudentActivity($student->id, [
+                        'id' => 'gate-in-' . ($attData['id'] ?? (string) Str::uuid()),
+                        'student_id' => (string) $student->id,
+                        'type' => 'absensi_gerbang',
+                        'title' => $student->nama_lengkap . ' masuk sekolah',
+                        'subtitle' => 'Gerbang utama (Scan ' . strtoupper($data['attendance_method'] ?? 'QR/RFID') . ')',
+                        'time_label' => $scanTime,
+                        'date_label' => 'Hari ini',
+                        'raw_time' => $attDate . ' ' . $scanTime . ':00',
+                        'badge_label' => $isHadir ? 'Tepat Waktu' : ($isLate ? 'Terlambat' : ucfirst($status)),
+                        'badge_type' => $isHadir ? 'green' : ($isLate ? 'amber' : 'blue'),
+                        'icon' => 'account-circle',
+                        'icon_bg' => '#ECFDF5',
+                        'icon_color' => '#10B981',
+                        'screen' => 'Absensi',
+                        'verifier_role' => 'Petugas Gerbang & Keamanan',
+                        'verifier_name' => 'Petugas Keamanan (RFID Gerbang)',
+                    ]);
+                } catch (\Throwable) {}
+
                 unset($result['notification']);
             }
 
@@ -194,6 +224,10 @@ class GateAttendanceService
                     'check_out_time' => $scanAt,
                     'check_out_status' => $checkOutStatus,
                     'check_out_method' => strtoupper($data['attendance_method'] ?? 'QRCODE'),
+                    'location' => $data['location'] ?? $attendance->location ?? 'Gerbang Utama',
+                    'latitude' => $data['latitude'] ?? $attendance->latitude,
+                    'longitude' => $data['longitude'] ?? $attendance->longitude,
+                    'keterangan' => $data['notes'] ?? $attendance->keterangan,
                     'pickup_person' => $data['pickup_person'] ?? null,
                     'pickup_relation' => $data['pickup_relation'] ?? null,
                     'pickup_verification' => $data['pickup_verification'] ?? null,
@@ -217,6 +251,33 @@ class GateAttendanceService
 
             if ($result['success'] && isset($result['notification'])) {
                 SendParentAttendanceNotification::dispatch(...array_values($result['notification']));
+                
+                // Realtime broadcast ke mobile app orang tua (channel student.{id})
+                try {
+                    $attData = $result['data'] ?? [];
+                    $scanTime = $result['notification']['time'] ?? Carbon::now()->format('H:i');
+                    $attDate = $data['attendance_date'] ?? today()->toDateString();
+
+                    app(\App\Services\RealtimeBroadcastService::class)->broadcastStudentActivity($student->id, [
+                        'id' => 'gate-out-' . ($attData['id'] ?? (string) Str::uuid()),
+                        'student_id' => (string) $student->id,
+                        'type' => 'absensi_gerbang',
+                        'title' => $student->nama_lengkap . ' keluar / pulang sekolah',
+                        'subtitle' => 'Gerbang utama (Scan RFID/QR Kepulangan)',
+                        'time_label' => $scanTime,
+                        'date_label' => 'Hari ini',
+                        'raw_time' => $attDate . ' ' . $scanTime . ':00',
+                        'badge_label' => 'Selesai KBM',
+                        'badge_type' => 'green',
+                        'icon' => 'logout',
+                        'icon_bg' => '#EFF6FF',
+                        'icon_color' => '#2563EB',
+                        'screen' => 'Absensi',
+                        'verifier_role' => 'Petugas Gerbang & Keamanan',
+                        'verifier_name' => 'Petugas Keamanan (RFID Gerbang)',
+                    ]);
+                } catch (\Throwable) {}
+
                 unset($result['notification']);
             }
 

@@ -37,6 +37,8 @@ class LmsPenugasanResource extends JsonResource
             'bobot_persen' => (float) ($this->bobot_persen ?? 0),
             'lampiran' => $this->file_lampiran,
             'file_lampiran' => $this->file_lampiran,
+            'link_lampiran' => $this->link_lampiran,
+            'metadata' => $this->metadata ?? [],
             'status' => $this->is_published ? 'dipublikasikan' : 'draft',
             'is_published' => (bool) $this->is_published,
             'izin_kumpul_terlambat' => (bool) $this->izin_kumpul_terlambat,

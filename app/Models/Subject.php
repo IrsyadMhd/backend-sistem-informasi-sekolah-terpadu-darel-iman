@@ -137,6 +137,11 @@ class Subject extends Model
         return $this->belongsTo(EducationUnit::class, 'unit_pendidikan_id');
     }
 
+    public function educationUnit(): BelongsTo
+    {
+        return $this->belongsTo(EducationUnit::class, 'unit_pendidikan_id');
+    }
+
     public function kurikulum(): BelongsTo
     {
         return $this->belongsTo(MasterKurikulum::class, 'kurikulum_id');

@@ -75,6 +75,16 @@ class MutabaahProgramAndRuleSeeder extends Seeder
             'MURAJAAH-DENGAN-ORTU',
             'BACA-SURAT-ALKAHFI',
             'PUASA-SUNNAH',
+            'BANTU-ORANG-TUA',
+            'TARAWIH',
+            'TARAWIH-WITIR',
+            'PUASA-RAMADAN',
+            'PUASA-RAMADHAN',
+            'TADARUS-RAMADAN',
+            'TADARUS-RAMADHAN',
+            'SEDEKAH-RAMADHAN',
+            'ITIKAF-MALAM',
+            'REFLEKSI',
         ];
 
         // Agenda Sekolah (Diisi Guru / Wali Kelas pada Fullday)
@@ -95,6 +105,8 @@ class MutabaahProgramAndRuleSeeder extends Seeder
             'MURAJAAH',
             'TEPAT-WAKTU',
             'JAGA-KEBERSIHAN',
+            'HALAQAH',
+            'KEBERSIHAN-KAMAR',
         ];
 
         $allAgendas = MutabaahAgendaItem::all()->keyBy('code');

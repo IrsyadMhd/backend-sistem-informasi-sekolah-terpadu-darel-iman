@@ -40,6 +40,11 @@ class LmsMateri extends Model
         'teacher_id',
         'ringkasan',
         'bobot',
+        'status_supervisi',
+        'catatan_koreksi',
+        'supervisor_id',
+        'supervisor_role',
+        'tanggal_supervisi',
     ];
 
     protected $appends = [
@@ -56,6 +61,7 @@ class LmsMateri extends Model
             'urutan' => 'integer',
             'is_published' => 'boolean',
             'tanggal_publish' => 'datetime',
+            'tanggal_supervisi' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
             'deleted_at' => 'datetime',
@@ -184,5 +190,15 @@ class LmsMateri extends Model
     public function deleter(): BelongsTo
     {
         return $this->belongsTo(User::class, 'deleted_by');
+    }
+
+    public function supervisor(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'supervisor_id');
+    }
+
+    public function supervisiLogs(): HasMany
+    {
+        return $this->hasMany(LmsMateriSupervisiLog::class, 'materi_id')->orderBy('created_at', 'desc');
     }
 }

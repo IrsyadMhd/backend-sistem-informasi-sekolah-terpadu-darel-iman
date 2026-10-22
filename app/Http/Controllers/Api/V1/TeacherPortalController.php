@@ -7,9 +7,11 @@ use Carbon\Carbon;
 use App\Models\AcademicYear;
 use App\Models\ClassSchedule;
 use App\Models\EducationUnit;
+use App\Models\DisciplineCategory;
 use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\LessonAttendanceSession;
+use App\Models\StudentPointTransaction;
 use App\Models\LmsMateri;
 use App\Models\LmsModulAjar;
 use App\Models\LmsPengumpulanTugas;
@@ -278,10 +280,7 @@ class TeacherPortalController extends Controller
                 ->where('status', true)
                 ->first();
         }
-        if (! $kurikulum) {
-            $kurikulum = MasterKurikulum::query()->where('status', true)->first();
-        }
-        abort_unless($kurikulum, 422, 'Master kurikulum aktif belum dikonfigurasi untuk unit atau mata pelajaran ini.');
+        abort_unless($kurikulum, 422, 'Master kurikulum aktif belum dikonfigurasi untuk unit, jenjang, atau mata pelajaran ini.');
         $subjectName = $subject->name ?? $subject->nama_mapel;
 
         return LmsModulAjar::create([
@@ -682,7 +681,7 @@ class TeacherPortalController extends Controller
             'topic' => 'required|string',
             'students' => 'required|array',
             'students.*.student_id' => 'required|uuid',
-            'students.*.status' => 'required|string|in:Hadir,Izin,Sakit,Alpha,Terlambat,Belum Dicatat',
+            'students.*.status' => 'required|string|in:Hadir,Izin,Sakit,Alpha,Terlambat,Belum Dicatat,hadir,izin,sakit,alpha,alpa,terlambat,belum dicatat',
             'students.*.notes' => 'nullable|string',
         ]);
 
@@ -1068,32 +1067,7 @@ class TeacherPortalController extends Controller
         }
         abort_unless($teacher || $employee || $this->isSuperAdmin($request), 403, 'Akun belum terhubung dengan data guru.');
 
-        if (! $schedule) {
-            $kelas = Kelas::find($classId) ?: $this->ensureKelas($classId);
-            $subject = Subject::find($subjectId) ?: $this->ensureSubject($subjectId);
-            if ($kelas && $subject) {
-                $activeYear = AcademicYear::where('is_active', true)->first() ?? AcademicYear::first();
-                $activeSemester = Semester::where('is_active', true)->first() ?? Semester::first();
-                $schedule = ClassSchedule::firstOrCreate(
-                    [
-                        'kelas_id' => $kelas->id,
-                        'subject_id' => $subject->id,
-                        'employee_id' => $employee?->id,
-                    ],
-                    [
-                        'class_id' => null,
-                        'academic_year_id' => $activeYear?->id,
-                        'semester_id' => $activeSemester?->id,
-                        'teacher_id' => $teacher?->id,
-                        'day_of_week' => 1,
-                        'time_start' => '07:30',
-                        'time_end' => '09:00',
-                    ]
-                );
-            }
-        }
-
-        abort_unless($schedule, 404, 'Jadwal mengajar guru tidak ditemukan untuk kelas dan mapel ini.');
+        abort_unless($schedule, 403, 'Anda tidak memiliki wewenang atau jadwal mengajar untuk kelas dan mata pelajaran ini.');
         abort_unless($schedule->kelas_id, 403, 'Portal guru membutuhkan rombel primer yang terhubung.');
 
         return [$schedule, $teacher, $employee];
@@ -1277,11 +1251,14 @@ class TeacherPortalController extends Controller
             'jenis_tugas' => 'nullable|string',
         ]);
 
+        $assignment = LmsPenugasan::query()->find($id);
+        abort_unless($assignment, 404, 'Penugasan tidak ditemukan.');
+
         $ownerIds = $this->teacherMaterialOwnerIds($request);
-        $assignment = LmsPenugasan::query()
-            ->whereKey($id)
-            ->whereIn('guru_id', $ownerIds)
-            ->firstOrFail();
+        $isAuthorized = $this->isSuperAdmin($request)
+            || in_array($assignment->guru_id, $ownerIds)
+            || in_array($assignment->teacher_id, $ownerIds);
+        abort_unless($isAuthorized, 403, 'Anda tidak memiliki wewenang untuk mengubah penugasan ini.');
 
         $assignment->judul = $validated['judul'];
         $assignment->judul_tugas = $validated['judul'];
@@ -1356,11 +1333,14 @@ class TeacherPortalController extends Controller
 
     public function deleteAssignment(Request $request, string $id): JsonResponse
     {
+        $assignment = LmsPenugasan::query()->find($id);
+        abort_unless($assignment, 404, 'Penugasan tidak ditemukan.');
+
         $ownerIds = $this->teacherMaterialOwnerIds($request);
-        $assignment = LmsPenugasan::query()
-            ->whereKey($id)
-            ->whereIn('guru_id', $ownerIds)
-            ->firstOrFail();
+        $isAuthorized = $this->isSuperAdmin($request)
+            || in_array($assignment->guru_id, $ownerIds)
+            || in_array($assignment->teacher_id, $ownerIds);
+        abort_unless($isAuthorized, 403, 'Anda tidak memiliki wewenang untuk menghapus penugasan ini.');
 
         $assignment->delete();
 
@@ -1410,9 +1390,14 @@ class TeacherPortalController extends Controller
             'catatan_guru' => 'nullable|string',
         ]);
 
-        $submission = LmsPengumpulanTugas::query()
-            ->whereHas('penugasan', fn (Builder $query) => $query->whereIn('guru_id', $this->teacherMaterialOwnerIds($request)))
-            ->findOrFail($id);
+        $submission = LmsPengumpulanTugas::query()->find($id);
+        abort_unless($submission, 404, 'Pengumpulan tugas tidak ditemukan.');
+
+        $ownerIds = $this->teacherMaterialOwnerIds($request);
+        $assignment = $submission->penugasan;
+        $isAuthorized = $this->isSuperAdmin($request)
+            || ($assignment && (in_array($assignment->guru_id, $ownerIds) || in_array($assignment->teacher_id, $ownerIds)));
+        abort_unless($isAuthorized, 403, 'Anda tidak memiliki wewenang untuk menilai tugas ini.');
         $submission->update([
             'nilai_guru' => $request->nilai,
             'catatan_guru' => $request->catatan_guru,
@@ -1767,7 +1752,19 @@ class TeacherPortalController extends Controller
                 ->active()->byDate($date)
                 ->where('employee_id', $employeeId)
                 ->pluck('id');
-            $query->whereIn('supervisor_assignment_id', $assignmentIds);
+
+            if ($assignmentIds->isNotEmpty()) {
+                $query->whereIn('supervisor_assignment_id', $assignmentIds);
+            } else {
+                // Auto-assignment default untuk Guru Mapel: Mengakses mutabaah siswa di rombel KBM aktif
+                $teacher = $this->getTeacherContext($request);
+                $classIds = $this->teacherClassIds($request, $teacher);
+                if ($classIds->isNotEmpty()) {
+                    $query->whereHas('student', fn ($sq) => $sq->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds));
+                } else {
+                    $query->whereIn('supervisor_assignment_id', $assignmentIds);
+                }
+            }
         }
 
         $headers = $query->paginate($request->query('per_page', 20));
@@ -2429,5 +2426,141 @@ class TeacherPortalController extends Controller
             'message' => 'Pesan berhasil dikirim.',
             'data' => $message->load(['sender:id,name', 'recipient:id,name', 'attachments']),
         ]);
+    }
+
+    /**
+     * Master Kategori Pelanggaran & Prestasi Kedisiplinan untuk Guru
+     */
+    public function disciplineCategories(Request $request): JsonResponse
+    {
+        $categories = DisciplineCategory::where('is_active', true)
+            ->when($request->filled('type'), fn ($q) => $q->where('type', $request->query('type')))
+            ->orderBy('code')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $categories,
+        ]);
+    }
+
+    /**
+     * Riwayat Pelanggaran & Poin Kedisiplinan Siswa di Kelas Guru
+     */
+    public function disciplineViolations(Request $request): JsonResponse
+    {
+        $studentId = $request->query('student_id');
+        $classId = $request->query('class_id');
+        $teacher = $this->getTeacherContext($request);
+        $classIds = $this->teacherClassIds($request, $teacher);
+
+        $query = StudentPointTransaction::with(['student:id,full_name,nis,kelas_id,class_id', 'category', 'reportedBy:id,name'])
+            ->whereHas('student', function ($sq) use ($classIds, $classId) {
+                if ($classId) {
+                    $sq->where(fn ($s) => $s->where('kelas_id', $classId)->orWhere('class_id', $classId));
+                } else {
+                    $sq->where(fn ($s) => $s->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds));
+                }
+            })
+            ->when($studentId, fn ($q) => $q->where('student_id', $studentId))
+            ->orderBy('transaction_date', 'desc')
+            ->latest('created_at');
+
+        return response()->json([
+            'success' => true,
+            'data' => $query->paginate($request->integer('per_page', 15)),
+        ]);
+    }
+
+    /**
+     * Input Catatan Pelanggaran / Poin Kedisiplinan Santri oleh Guru Mapel
+     */
+    public function storeDisciplineViolation(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'student_id' => 'required|uuid|exists:students,id',
+            'category_id' => 'required|uuid|exists:discipline_categories,id',
+            'points' => 'nullable|integer',
+            'custom_points' => 'nullable|integer',
+            'transaction_date' => 'required|date',
+            'description' => 'required|string|max:2000',
+            'status' => 'nullable|in:tercatat,dalam_pengawasan,dirujuk_bk,selesai_sanksi',
+            'follow_up' => 'nullable|string|max:1000',
+        ]);
+
+        $teacher = $this->getTeacherContext($request);
+        $classIds = $this->teacherClassIds($request, $teacher);
+        $student = Student::query()->where(fn ($query) => $query->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds))
+            ->findOrFail($validated['student_id']);
+
+        $category = DisciplineCategory::findOrFail($validated['category_id']);
+        $points = $validated['points'] !== null 
+            ? (int) $validated['points'] 
+            : (isset($validated['custom_points']) ? -(int) abs($validated['custom_points']) : (int) $category->point_weight);
+
+        $transaction = StudentPointTransaction::create([
+            'student_id' => $student->id,
+            'category_id' => $category->id,
+            'reported_by_id' => $request->user()?->id,
+            'points' => $points,
+            'transaction_date' => $validated['transaction_date'],
+            'description' => $validated['description'],
+            'status' => $validated['status'] ?? 'tercatat',
+        ]);
+
+        // Otomatis sinkronkan juga ke StudentNote agar tampak di timeline dan buku penghubung orang tua
+        $activeAcademicYear = AcademicYear::query()->where('is_active', true)->first();
+        $activeSemester = Semester::query()->where('is_active', true)->first();
+        $priority = match ($category->level) {
+            'berat' => 'urgent',
+            'sedang' => 'high',
+            default => 'medium',
+        };
+
+        $note = StudentNote::create([
+            'student_id' => $student->id,
+            'teacher_id' => $teacher?->id,
+            'education_unit_id' => $student->unit_id,
+            'academic_year_id' => $activeAcademicYear?->id,
+            'semester_id' => $activeSemester?->id,
+            'date' => $validated['transaction_date'],
+            'category' => $category->type === 'achievement' ? 'Prestasi' : 'Kedisiplinan',
+            'title' => $category->name . ' (' . ($points > 0 ? "+{$points}" : "{$points}") . ' Poin)',
+            'content' => $validated['description'],
+            'priority' => $priority,
+            'follow_up' => $validated['follow_up'] ?? ($validated['status'] === 'dirujuk_bk' ? 'Dirujuk ke Guru BK / Wali Kelas' : null),
+            'visible_to_parent' => true,
+            'visible_to_student' => true,
+        ]);
+
+        // Realtime Broadcast to student & parent
+        try {
+            app(RealtimeBroadcastService::class)->broadcastStudentActivity(
+                $student->id,
+                [
+                    'id' => 'violation-' . $transaction->id,
+                    'type' => 'kedisiplinan',
+                    'title' => $category->type === 'achievement' ? 'Apresiasi Kedisiplinan' : 'Catatan Pelanggaran Siswa',
+                    'subtitle' => $category->name . ' (' . ($points > 0 ? "+{$points}" : "{$points}") . ' Poin): “' . Str::limit($validated['description'], 60) . '”',
+                    'date_label' => 'Hari ini',
+                    'time_label' => now()->format('H:i'),
+                    'badge_label' => $category->type === 'achievement' ? 'Prestasi' : 'Pelanggaran',
+                    'badge_type' => $category->type === 'achievement' ? 'emerald' : 'red',
+                    'has_red_dot' => true,
+                    'icon' => $category->type === 'achievement' ? 'star' : 'alert-octagon',
+                    'icon_bg' => $category->type === 'achievement' ? '#ECFDF5' : '#FEF2F2',
+                    'icon_color' => $category->type === 'achievement' ? '#10B981' : '#EF4444',
+                    'screen' => 'Kedisiplinan',
+                    'verifier_role' => 'Guru Pengampu ' . ($request->user()?->name ?? ''),
+                    'verifier_name' => $request->user()?->name ?? 'Guru Pengajar',
+                ]
+            );
+        } catch (\Throwable $e) {}
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Catatan pelanggaran/kedisiplinan santri berhasil disimpan.',
+            'data' => $transaction->load(['student:id,full_name,nis', 'category', 'reportedBy:id,name']),
+        ], 201);
     }
 }

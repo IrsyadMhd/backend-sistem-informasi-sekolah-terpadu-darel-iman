@@ -200,11 +200,12 @@ class JadwalPelajaranSeeder extends Seeder
                 }
 
                 // DEF-SCOPE-001 FIX: Hanya gunakan guru dari unit yang sama dengan kelas
-                $unitTeachers = $teachersByUnit->get($kelas->unit_pendidikan_id);
-                if (! $unitTeachers || $unitTeachers->isEmpty()) {
-                    $unitTeachers = Employee::where('unit_id', $kelas->unit_pendidikan_id)
-                        ->where('status', 'Aktif')
-                        ->get();
+                $unitTeachers = Employee::where('unit_id', $kelas->unit_pendidikan_id)
+                    ->where('status', 'Aktif')
+                    ->get();
+
+                if ($unitTeachers->isEmpty()) {
+                    $unitTeachers = $guruList;
                 }
 
                 // Exclude Guru Test dari penugasan random agar tidak bentrok dengan GuruTestWorkspaceSeeder
@@ -228,7 +229,11 @@ class JadwalPelajaranSeeder extends Seeder
                         $teacher = $freeTeacher ?: $unitTeachers[($kelasIndex + $scheduleIndex) % $totalUnitTeachers];
                         $assignedPerSlot[$slotKey][] = $teacher->id;
 
-                        $subject = $mapelList[($scheduleIndex + $kelasIndex * 2) % $totalSubjects];
+                        $unitSubjects = Subject::where('unit_pendidikan_id', $kelas->unit_pendidikan_id)->where('status', true)->get();
+                        if ($unitSubjects->isEmpty()) {
+                            $unitSubjects = $mapelList;
+                        }
+                        $subject = $unitSubjects[($scheduleIndex + $kelasIndex * 2) % $unitSubjects->count()];
 
                         // Jadwal Semester Ganjil
                         ClassSchedule::query()->updateOrCreate([

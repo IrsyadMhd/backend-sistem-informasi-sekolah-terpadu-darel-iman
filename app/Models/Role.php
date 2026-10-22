@@ -8,6 +8,8 @@ use Spatie\Permission\PermissionRegistrar;
 
 class Role extends SpatieRole
 {
+    protected $fillable = ['name', 'guard_name', 'level'];
+
     /**
      * A role belongs to some users of the model associated with its guard.
      */

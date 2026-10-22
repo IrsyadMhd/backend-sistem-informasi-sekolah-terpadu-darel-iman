@@ -495,17 +495,6 @@ class RolePermissionSeeder extends Seeder
             ],
             'Guru' => [
                 'dashboard.view',
-                'tahfizh.monitoring_target',
-                'tahfizh.input_setoran_harian',
-                'tahfizh.hitung_baris',
-                'tahfizh.rekap_harian',
-                'tahfizh.rekap_mingguan',
-                'tahfizh.rekap_bulanan',
-                'tahfizh.rekap_tahunan',
-                'tahfizh.mutabaah_yaumiyah',
-                'tahfizh.perhitungan_tercapai',
-                'tahfizh.hafalan_terbanyak',
-                'tahfizh.total_hafalan',
                 'lesson_attendance.view_own',
                 'lesson_attendance.create',
                 'lesson_attendance.update',
@@ -707,7 +696,7 @@ class RolePermissionSeeder extends Seeder
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap['Tata Usaha'] ?? ['dashboard.view'], $tuPermissions)));
         }
         $dailyPermissions = ['mutabaah.daily.view', 'mutabaah.daily.input', 'mutabaah.daily.update', 'mutabaah.daily.finalize', 'mutabaah.recap.view'];
-        foreach (['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran', 'Wali Kelas', 'walas', 'wali_kelas', 'Pembimbing', 'Guru PAI', 'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah'] as $roleName) {
+        foreach (['Pembimbing', 'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'Musyrif / Musyrifah'] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap[$roleName] ?? ['dashboard.view'], $dailyPermissions)));
         }
         foreach (['Guru BK', 'guru_bk'] as $roleName) {
@@ -789,8 +778,6 @@ class RolePermissionSeeder extends Seeder
             'teacher.assignment.view', 'teacher.assignment.create', 'teacher.assignment.update', 'teacher.assignment.delete',
             'teacher.submission.view',
             'teacher.grade.view', 'teacher.grade.create', 'teacher.grade.update',
-            'teacher.tahfizh.view', 'teacher.tahfizh.create', 'teacher.tahfizh.update',
-            'teacher.mutabaah.view', 'teacher.mutabaah.create', 'teacher.mutabaah.update',
             'teacher.student_note.view', 'teacher.student_note.create', 'teacher.student_note.update',
         ];
 

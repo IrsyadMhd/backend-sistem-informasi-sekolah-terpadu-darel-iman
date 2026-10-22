@@ -43,11 +43,29 @@ class SiteSettingController extends Controller
             }
         }
 
+        // 3. Ambil Kustomisasi Label UI dari school_settings jika tersedia
+        $labelsSetting = DB::table('school_settings')->where('setting_key', 'custom_labels')->first();
+        if ($labelsSetting && $labelsSetting->setting_value !== null) {
+            $parsedLabels = is_string($labelsSetting->setting_value) ? json_decode($labelsSetting->setting_value, true) : $labelsSetting->setting_value;
+            if (is_array($parsedLabels)) {
+                $setting['custom_labels'] = $parsedLabels;
+            }
+        }
+
         return response()->json(['data' => $setting]);
     }
 
     public function update(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $roles = $user?->roles?->pluck('name')->map(fn($r) => strtolower(preg_replace('/[\s_-]+/', '', $r)))->toArray() ?? [];
+        $isSuperAdminOrAdmin = in_array('superadmin', $roles) || in_array('admin', $roles) || in_array('administrator', $roles);
+        if (!$isSuperAdminOrAdmin) {
+            return response()->json([
+                'message' => 'Akses ditolak. Pengaturan sistem hanya dapat diubah oleh Super Admin dan Admin.',
+            ], 403);
+        }
+
         $data = $request->validate([
             'application_name' => ['required', 'string', 'max:100'],
             'school_name' => ['required', 'string', 'max:150'],
@@ -62,6 +80,8 @@ class SiteSettingController extends Controller
             'bank_name' => ['nullable', 'string', 'max:100'],
             'bank_account_number' => ['nullable', 'string', 'max:50'],
             'bank_account_name' => ['nullable', 'string', 'max:150'],
+            'bsi_va_prefix' => ['nullable', 'string', 'max:20'],
+            'bsi_va_format' => ['nullable', 'string', 'max:50'],
             'card_rules_student' => ['nullable', 'string'],
             'card_rules_employee' => ['nullable', 'string'],
             'card_footer_motto' => ['nullable', 'string', 'max:255'],
@@ -82,13 +102,15 @@ class SiteSettingController extends Controller
             'mapbox_token' => ['nullable', 'string', 'max:255'],
             'custom_faqs' => ['nullable'],
             'custom_manuals' => ['nullable'],
+            'custom_labels' => ['nullable'],
         ]);
 
         $customFaqsRaw = $data['custom_faqs'] ?? null;
         $customManualsRaw = $data['custom_manuals'] ?? null;
+        $customLabelsRaw = $data['custom_labels'] ?? null;
         $responseData = [];
 
-        DB::transaction(function () use ($request, $data, $customFaqsRaw, $customManualsRaw, &$responseData) {
+        DB::transaction(function () use ($request, $data, $customFaqsRaw, $customManualsRaw, $customLabelsRaw, &$responseData) {
             $setting = SiteSetting::current();
             $oldData = $setting->only(array_keys($data));
 
@@ -105,7 +127,7 @@ class SiteSettingController extends Controller
                 }
             }
 
-            unset($data['logo'], $data['favicon'], $data['remove_logo'], $data['remove_favicon'], $data['custom_faqs'], $data['custom_manuals']);
+            unset($data['logo'], $data['favicon'], $data['remove_logo'], $data['remove_favicon'], $data['custom_faqs'], $data['custom_manuals'], $data['custom_labels']);
 
             $setting->fill($data)->save();
 
@@ -135,12 +157,23 @@ class SiteSettingController extends Controller
                 }
             }
 
-            // 3. Catat audit trail perubahan konfigurasi (token rahasia disanitasi)
+            // 3. Simpan custom_labels jika disertakan
+            $labelsSaved = null;
+            if ($request->has('custom_labels')) {
+                $labels = is_string($customLabelsRaw) ? json_decode($customLabelsRaw, true) : $customLabelsRaw;
+                if (is_array($labels)) {
+                    $this->saveSchoolSetting('custom_labels', $labels, 'Kustomisasi Label dan Terminologi Antarmuka Sistem');
+                    $labelsSaved = $labels;
+                }
+            }
+
+            // 4. Catat audit trail perubahan konfigurasi (token rahasia disanitasi)
             $this->recordSettingAudit($request, $oldData, $data, [
                 'has_faqs_update' => $faqsSaved !== null,
                 'faqs_count' => $faqsSaved !== null ? count($faqsSaved) : null,
                 'has_manuals_update' => $manualsSaved !== null,
                 'manuals_count' => $manualsSaved !== null ? count($manualsSaved) : null,
+                'has_labels_update' => $labelsSaved !== null,
             ]);
 
             $result = $setting->fresh()->toArray();
@@ -159,6 +192,15 @@ class SiteSettingController extends Controller
                 $manualSetting = DB::table('school_settings')->where('setting_key', 'portal_manuals')->first();
                 if ($manualSetting && $manualSetting->setting_value !== null) {
                     $result['custom_manuals'] = is_string($manualSetting->setting_value) ? json_decode($manualSetting->setting_value, true) : $manualSetting->setting_value;
+                }
+            }
+
+            if ($labelsSaved !== null) {
+                $result['custom_labels'] = $labelsSaved;
+            } else {
+                $labelsSetting = DB::table('school_settings')->where('setting_key', 'custom_labels')->first();
+                if ($labelsSetting && $labelsSetting->setting_value !== null) {
+                    $result['custom_labels'] = is_string($labelsSetting->setting_value) ? json_decode($labelsSetting->setting_value, true) : $labelsSetting->setting_value;
                 }
             }
 
