@@ -16,20 +16,34 @@ class LmsRaporSeeder extends Seeder
         if (! $actor) return;
         $service = app(LmsRaporService::class);
         $targetStudentId = env('DEMO_GRADE_STUDENT_ID');
-        Student::query()->with('kelas')->where('is_active', true)->whereNotNull('kelas_id')
+        Student::query()->with(['kelas.unitPendidikan'])->where('is_active', true)->whereNotNull('kelas_id')
             ->when($targetStudentId, fn ($q) => $q->whereKey($targetStudentId))
-            ->when(! $targetStudentId, fn ($q) => $q->where('metadata->is_demo', true))->orderBy('id')
+            ->when(! $targetStudentId, fn ($q) => $q->where(function ($query) {
+                $query->where('metadata->is_demo', true)
+                    ->orWhere('metadata->fixture', 'canonical_role_login');
+            }))->orderBy('id')
             ->chunkById(100, function ($students) use ($actor, $service) {
                 foreach ($students as $student) {
                     $kelas = $student->kelas;
-                    if (! $kelas?->tahun_ajaran_id || ! $kelas?->semester_id) continue;
-                    $rapor = $service->generateStudent($student->id, $kelas->semester_id, $kelas->tahun_ajaran_id, $kelas->id);
-                    if ($rapor->total_mapel < 1) continue;
-                    $rapor->update([
-                        'guru_wali_id' => $kelas->wali_kelas_id, 'status_rapor' => 'diterbitkan',
-                        'tanggal_terbit' => now()->toDateString(), 'created_by' => $actor->id, 'updated_by' => $actor->id,
-                        'catatan_wali_kelas' => 'Pertahankan kebiasaan belajar yang baik dan tingkatkan kompetensi yang belum optimal.',
-                    ]);
+                    if (! $kelas?->tahun_ajaran_id) continue;
+
+                    $semesters = \App\Models\Semester::where('academic_year_id', $kelas->tahun_ajaran_id)->get();
+                    if ($semesters->isEmpty() && $kelas->semester_id) {
+                        $semesters = \App\Models\Semester::whereKey($kelas->semester_id)->get();
+                    }
+
+                    foreach ($semesters as $sem) {
+                        $rapor = $service->generateStudent($student->id, $sem->id, $kelas->tahun_ajaran_id, $kelas->id);
+                        if ($rapor->total_mapel < 1) continue;
+                        $rapor->update([
+                            'guru_wali_id' => $kelas->wali_kelas_id,
+                            'status_rapor' => 'diterbitkan',
+                            'tanggal_terbit' => now()->toDateString(),
+                            'created_by' => $actor->id,
+                            'updated_by' => $actor->id,
+                            'catatan_wali_kelas' => 'Pertahankan kebiasaan belajar yang baik dan tingkatkan kompetensi yang belum optimal.',
+                        ]);
+                    }
                 }
             });
     }

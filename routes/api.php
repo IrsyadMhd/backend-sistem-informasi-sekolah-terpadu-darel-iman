@@ -95,6 +95,7 @@ Route::get('/site-settings', [SiteSettingController::class, 'show']);
 Route::get('/mobile/config', [MobileAppConfigController::class, 'show']);
 Route::get('/equran/surah', [EQuranController::class, 'surahs']);
 Route::get('/equran/surah/{id}', [EQuranController::class, 'show']);
+Route::get('/equran/juz', [EQuranController::class, 'juzCatalog']);
 Route::get('/equran/jadwal-sholat', [EQuranController::class, 'jadwalSholat']);
 
 // Wilayah / Region Endpoints

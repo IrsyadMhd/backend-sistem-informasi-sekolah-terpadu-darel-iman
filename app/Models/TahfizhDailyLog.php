@@ -175,6 +175,13 @@ class TahfizhDailyLog extends Model
         if (! empty($this->hafalan_surah_number)) {
             return self::getJuzFromSurahAndAyah($this->hafalan_surah_number, $this->hafalan_ayah_start ?: 1);
         }
+        $combinedText = ($this->murajaah_text ?: '') . ' ' . ($this->tilawah_text ?: '') . ' ' . ($this->surah ?: '');
+        if (preg_match('/\bJuz\s*([0-9]{1,2})\b/i', $combinedText, $m)) {
+            $num = (int) $m[1];
+            if ($num >= 1 && $num <= 30) {
+                return $num;
+            }
+        }
         return null;
     }
 

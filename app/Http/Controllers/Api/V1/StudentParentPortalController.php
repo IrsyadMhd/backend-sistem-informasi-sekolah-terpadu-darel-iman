@@ -93,15 +93,7 @@ class StudentParentPortalController extends Controller
             return null;
         }
 
-        // Direct student account always resolves to their own active profile
-        if ($user->hasAnyRole(['Siswa', 'siswa', 'student'])) {
-            return Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])
-                ->where('user_id', $user->id)
-                ->where('is_active', true)
-                ->first();
-        }
-
-        // If parent has selected a child id in route/header/query/input
+        // If parent or admin has selected a child id in route/header/query/input, honor it first!
         $selectedChildId = $request->route('studentId')
             ?? $request->route('childId')
             ?? $request->header('X-Child-Id')
@@ -112,6 +104,17 @@ class StudentParentPortalController extends Controller
             ?? $request->input('student_id')
             ?? $request->query('child')
             ?? $request->input('child');
+
+        // Direct student account without explicit child_id selection always resolves to their own active profile
+        if (! $selectedChildId && $user->hasAnyRole(['Siswa', 'siswa', 'student'])) {
+            $selfStudent = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])
+                ->where('user_id', $user->id)
+                ->where('is_active', true)
+                ->first();
+            if ($selfStudent) {
+                return $selfStudent;
+            }
+        }
 
         if ($selectedChildId) {
             if (Str::isUuid($selectedChildId)) {
@@ -247,14 +250,417 @@ class StudentParentPortalController extends Controller
         ];
     }
 
+    /**
+     * Resolusi kategori dan surah tampilan log setoran tahfizh secara dinamis & konsisten (Single Source of Truth).
+     * Mengembalikan tuple: [$category, $displaySurah]
+     * Kategori valid: 'ziyadah' | 'murajaah' | 'tilawah'
+     */
+    private function resolveTahfizhLogCategory(TahfizhDailyLog $log): array
+    {
+        $metaArr = is_array($log->metadata) ? $log->metadata : (is_string($log->metadata) ? json_decode($log->metadata, true) : []);
+        $metaType = strtolower((string) data_get($metaArr, 'type', ''));
+        $isSubmittedByParent = !empty($metaArr['submitted_by_parent']);
+        $isMurajStatus = in_array(strtolower((string) $log->murajaah_status), ['pending_home', 'submitted_by_parent']);
+        $isExplicitMurajaah = in_array($metaType, ['murajaah', "muroja'ah", 'pengulangan']) || $isSubmittedByParent || $isMurajStatus;
+
+        // 1. Prioritas Utama: Eksplisit Murajaah (tugas orang tua / tipe murajaah / pengulangan)
+        if ($isExplicitMurajaah) {
+            $displaySurah = $log->murajaah_required_surah_name ?: ($log->murajaah_text ?: ($log->hafalan_surah_name ?: $log->surah));
+            return ['murajaah', $displaySurah];
+        }
+
+        // 2. Setoran Hafalan Baru (Ziyadah)
+        $hasZiyadah = !empty($log->hafalan_surah_name) && (!empty($log->hafalan_ayah_start) || $metaType === 'ziyadah');
+        if ($hasZiyadah) {
+            return ['ziyadah', $log->hafalan_surah_name];
+        }
+
+        // 3. Setoran Murajaah (jika ada murajaah_text atau lembar murajaah > 0 tanpa hafalan baru)
+        $hasMurajaah = !empty($log->murajaah_text) || (!empty($log->murajaah_lembar) && (float) $log->murajaah_lembar > 0);
+        if ($hasMurajaah) {
+            $displaySurah = $log->murajaah_required_surah_name ?: ($log->murajaah_text ?: ($log->hafalan_surah_name ?: $log->surah));
+            return ['murajaah', $displaySurah];
+        }
+
+        // 4. Setoran Tilawah (murni tilawah tanpa hafalan baru dan tanpa murajaah)
+        $hasTilawah = $metaType === 'tilawah' || !empty($log->tilawah_text) || (!empty($log->tilawah_baris) && (float) $log->tilawah_baris > 0);
+        if ($hasTilawah) {
+            return ['tilawah', $log->tilawah_text ?: ($log->surah ?: "Tilawah Al-Qur'an")];
+        }
+
+        // 5. Fallback Default
+        return ['ziyadah', $log->hafalan_surah_name ?: ($log->surah ?: null)];
+    }
+
+    /**
+     * Menghitung status kehadiran hari ini secara dinamis dan akurat:
+     * - Mendeteksi hari libur (akhir pekan / kalender libur sekolah)
+     * - Mendeteksi catatan kehadiran gerbang / umum (attendances)
+     * - Mendeteksi perizinan resmi (sakit/izin) yang telah disetujui
+     * - Mendeteksi catatan LMS Presensi jika ada
+     * - Memberikan status 'Belum Presensi' jika hari sekolah aktif namun belum diabsen
+     */
+    private function resolveStudentTodayAttendanceStatus(Student $student, ?Carbon $today = null): array
+    {
+        $today = $today ?: now();
+        $todayStr = $today->toDateString();
+        $isWeekend = $today->isWeekend();
+
+        // 1. Cek Record Presensi Gerbang / Harian (tabel attendances)
+        $att = Attendance::query()
+            ->where('student_id', $student->id)
+            ->whereDate('attendance_date', $todayStr)
+            ->first();
+
+        if ($att) {
+            $rawStatus = strtoupper(trim((string) $att->status));
+            $checkIn = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') : null;
+            if (in_array($rawStatus, ['HADIR', 'PRESENT'])) {
+                return [
+                    'status' => 'hadir',
+                    'status_label' => 'Hadir',
+                    'label' => 'Hadir',
+                    'color' => '#10B981',
+                    'time' => $checkIn,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($rawStatus, ['TERLAMBAT', 'LATE'])) {
+                return [
+                    'status' => 'terlambat',
+                    'status_label' => 'Terlambat',
+                    'label' => 'Terlambat',
+                    'color' => '#F59E0B',
+                    'time' => $checkIn,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($rawStatus, ['SAKIT', 'SICK'])) {
+                return [
+                    'status' => 'sakit',
+                    'status_label' => 'Sakit',
+                    'label' => 'Sakit',
+                    'color' => '#38BDF8',
+                    'time' => null,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($rawStatus, ['IZIN', 'PERMIT'])) {
+                return [
+                    'status' => 'izin',
+                    'status_label' => 'Izin',
+                    'label' => 'Izin',
+                    'color' => '#60A5FA',
+                    'time' => null,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($rawStatus, ['ALPHA', 'ALPA', 'ABSENT'])) {
+                return [
+                    'status' => 'tidak_hadir',
+                    'status_label' => 'Tidak Hadir',
+                    'label' => 'Tidak Hadir',
+                    'color' => '#EF4444',
+                    'time' => null,
+                    'is_holiday' => false,
+                ];
+            }
+        }
+
+        // 2. Cek Perizinan Kehadiran Siswa yang Disetujui (StudentAttendancePermission)
+        $permission = StudentAttendancePermission::query()
+            ->where('student_id', $student->id)
+            ->where('start_date', '<=', $todayStr)
+            ->where('end_date', '>=', $todayStr)
+            ->whereIn('status', ['approved', 'disetujui'])
+            ->first();
+
+        if ($permission) {
+            $pType = strtolower((string) $permission->type);
+            $isSick = str_contains($pType, 'sakit');
+            return [
+                'status' => $isSick ? 'sakit' : 'izin',
+                'status_label' => $isSick ? 'Sakit' : 'Izin',
+                'label' => $isSick ? 'Sakit' : 'Izin',
+                'color' => $isSick ? '#38BDF8' : '#60A5FA',
+                'time' => null,
+                'is_holiday' => false,
+            ];
+        }
+
+        // 3. Cek LMS Presensi (Mapel / Kelas)
+        $lms = LmsPresensi::query()
+            ->where('siswa_id', $student->id)
+            ->whereDate('tanggal', $todayStr)
+            ->first();
+
+        if ($lms) {
+            $lmsStatus = strtolower(trim((string) ($lms->status ?? $lms->status_hadir ?? '')));
+            $time = $lms->waktu_presensi ? Carbon::parse($lms->waktu_presensi)->format('H:i') : null;
+            if (in_array($lmsStatus, ['h', 'hadir', 'present'])) {
+                return [
+                    'status' => 'hadir',
+                    'status_label' => 'Hadir',
+                    'label' => 'Hadir',
+                    'color' => '#10B981',
+                    'time' => $time,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($lmsStatus, ['t', 'terlambat', 'late'])) {
+                return [
+                    'status' => 'terlambat',
+                    'status_label' => 'Terlambat',
+                    'label' => 'Terlambat',
+                    'color' => '#F59E0B',
+                    'time' => $time,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($lmsStatus, ['s', 'sakit'])) {
+                return [
+                    'status' => 'sakit',
+                    'status_label' => 'Sakit',
+                    'label' => 'Sakit',
+                    'color' => '#38BDF8',
+                    'time' => null,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($lmsStatus, ['i', 'izin'])) {
+                return [
+                    'status' => 'izin',
+                    'status_label' => 'Izin',
+                    'label' => 'Izin',
+                    'color' => '#60A5FA',
+                    'time' => null,
+                    'is_holiday' => false,
+                ];
+            }
+            if (in_array($lmsStatus, ['a', 'alpa', 'alpha'])) {
+                return [
+                    'status' => 'tidak_hadir',
+                    'status_label' => 'Tidak Hadir',
+                    'label' => 'Tidak Hadir',
+                    'color' => '#EF4444',
+                    'time' => null,
+                    'is_holiday' => false,
+                ];
+            }
+        }
+
+        // 4. Cek Hari Libur Sekolah di PengumumanSekolah (Kalender Akademik)
+        $schoolHoliday = PengumumanSekolah::query()
+            ->where('status_aktif', true)
+            ->where('mulai_tampil', '<=', $todayStr)
+            ->where(function ($sub) use ($todayStr) {
+                $sub->whereNull('selesai_tampil')->orWhere('selesai_tampil', '>=', $todayStr);
+            })
+            ->where(function ($sub) {
+                $sub->whereIn('data_tambahan->kategori', ['libur_sekolah', 'libur_semester', 'libur_nasional', 'cuti_bersama', 'libur'])
+                    ->orWhere('judul_pengumuman', 'like', '%libur%');
+            })
+            ->first();
+
+        if ($schoolHoliday) {
+            $holidayLabel = str_contains(strtolower($schoolHoliday->judul_pengumuman), 'semester') ? 'Libur Semester' : 'Libur Sekolah';
+            return [
+                'status' => 'libur',
+                'status_label' => $holidayLabel,
+                'label' => $holidayLabel,
+                'holiday_title' => $schoolHoliday->judul_pengumuman,
+                'color' => '#F59E0B',
+                'time' => null,
+                'is_holiday' => true,
+            ];
+        }
+
+        // 5. Cek Akhir Pekan (Sabtu / Minggu)
+        if ($isWeekend) {
+            return [
+                'status' => 'libur',
+                'status_label' => 'Libur Akhir Pekan',
+                'label' => 'Libur',
+                'color' => '#F59E0B',
+                'time' => null,
+                'is_holiday' => true,
+            ];
+        }
+
+        // 6. Hari sekolah aktif biasa tetapi belum ada data presensi hari ini
+        return [
+            'status' => 'belum_presensi',
+            'status_label' => 'Belum Presensi',
+            'label' => 'Belum Presensi',
+            'color' => '#94A3B8',
+            'time' => null,
+            'is_holiday' => false,
+        ];
+    }
+
     public function children(Request $request): JsonResponse
     {
         $user = $request->user();
         $parent = ParentModel::query()->where('user_id', $user->id)->first();
 
+        $enrichStudentsBatch = function ($students) use ($user) {
+            if ($students->isEmpty()) return $students;
+
+            $childIds = $students->pluck('id')->filter()->all();
+            $todayStr = now()->toDateString();
+            $isWeekend = now()->isWeekend();
+
+            // 1. Single query untuk libur sekolah
+            $schoolHoliday = PengumumanSekolah::query()
+                ->where('status_aktif', true)
+                ->where('mulai_tampil', '<=', $todayStr)
+                ->where(function ($sub) use ($todayStr) {
+                    $sub->whereNull('selesai_tampil')->orWhere('selesai_tampil', '>=', $todayStr);
+                })
+                ->where(function ($sub) {
+                    $sub->whereIn('data_tambahan->kategori', ['libur_sekolah', 'libur_semester', 'libur_nasional', 'cuti_bersama', 'libur'])
+                        ->orWhere('judul_pengumuman', 'like', '%libur%');
+                })
+                ->first();
+
+            // 2. Batch presensi gerbang/harian
+            $attendances = Attendance::query()
+                ->whereIn('student_id', $childIds)
+                ->whereDate('attendance_date', $todayStr)
+                ->get()
+                ->keyBy('student_id');
+
+            // 3. Batch perizinan disetujui
+            $permissions = StudentAttendancePermission::query()
+                ->whereIn('student_id', $childIds)
+                ->where('start_date', '<=', $todayStr)
+                ->where('end_date', '>=', $todayStr)
+                ->whereIn('status', ['approved', 'disetujui'])
+                ->get()
+                ->keyBy('student_id');
+
+            // 4. Batch presensi LMS
+            $lmsPresensis = LmsPresensi::query()
+                ->whereIn('siswa_id', $childIds)
+                ->whereDate('tanggal', $todayStr)
+                ->get()
+                ->keyBy('siswa_id');
+
+            // 5. Batch pending penugasan
+            $classIds = $students->map(fn ($c) => array_values(array_unique(array_filter([$c->kelas_id, $c->class_id]))))->flatten()->unique()->filter()->values();
+            $activeAssignments = $classIds->isNotEmpty()
+                ? \App\Models\LmsPenugasan::query()
+                    ->whereIn('kelas_id', $classIds)
+                    ->where('is_published', true)
+                    ->where('deadline', '>=', now())
+                    ->get(['id', 'kelas_id'])
+                : collect();
+
+            $submittedGrouped = ($activeAssignments->isNotEmpty() && !empty($childIds))
+                ? \App\Models\LmsPengumpulanTugas::query()
+                    ->whereIn('siswa_id', $childIds)
+                    ->whereIn('penugasan_id', $activeAssignments->pluck('id'))
+                    ->get(['siswa_id', 'penugasan_id'])
+                    ->groupBy('siswa_id')
+                : collect();
+
+            // 6. Batch notifikasi unread user (cukup 1x query, filter di memori)
+            $unreadNotifs = \App\Models\Notification::byUser($user->id)->unread()->get();
+
+            return $students->map(function ($c) use ($user, $todayStr, $isWeekend, $schoolHoliday, $attendances, $permissions, $lmsPresensis, $activeAssignments, $submittedGrouped, $unreadNotifs) {
+                $cidStr = (string) $c->id;
+
+                // Notifikasi unread count di memori
+                $notifCount = $unreadNotifs->filter(function ($n) use ($cidStr, $c) {
+                    $meta = is_array($n->metadata) ? $n->metadata : (is_string($n->metadata) ? json_decode($n->metadata, true) : []);
+                    $targetSid = (string) ($meta['student_id'] ?? $meta['child_id'] ?? '');
+                    if ($targetSid && $targetSid === $cidStr) return true;
+                    if ($n->notifiable_type === Student::class && (string) $n->notifiable_id === $cidStr) return true;
+                    return false;
+                })->count();
+
+                // Hitung pending assignments
+                $classes = array_values(array_unique(array_filter([$c->kelas_id, $c->class_id])));
+                $relevantClassAssignments = $activeAssignments->whereIn('kelas_id', $classes);
+                $doneAssignmentIds = ($submittedGrouped->get($c->id) ?? collect())->pluck('penugasan_id')->all();
+                $pendingAssignments = $relevantClassAssignments->reject(fn ($a) => in_array($a->id, $doneAssignmentIds))->count();
+
+                // Resolusi status presensi hari ini
+                $todayAtt = null;
+                $att = $attendances->get($c->id);
+                if ($att) {
+                    $rawStatus = strtoupper(trim((string) $att->status));
+                    $checkIn = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') : null;
+                    if (in_array($rawStatus, ['HADIR', 'PRESENT'])) {
+                        $todayAtt = ['status' => 'hadir', 'status_label' => 'Hadir', 'label' => 'Hadir', 'color' => '#10B981', 'time' => $checkIn, 'is_holiday' => false];
+                    } elseif (in_array($rawStatus, ['TERLAMBAT', 'LATE'])) {
+                        $todayAtt = ['status' => 'terlambat', 'status_label' => 'Terlambat', 'label' => 'Terlambat', 'color' => '#F59E0B', 'time' => $checkIn, 'is_holiday' => false];
+                    } elseif (in_array($rawStatus, ['SAKIT', 'SICK'])) {
+                        $todayAtt = ['status' => 'sakit', 'status_label' => 'Sakit', 'label' => 'Sakit', 'color' => '#38BDF8', 'time' => null, 'is_holiday' => false];
+                    } elseif (in_array($rawStatus, ['IZIN', 'PERMIT'])) {
+                        $todayAtt = ['status' => 'izin', 'status_label' => 'Izin', 'label' => 'Izin', 'color' => '#60A5FA', 'time' => null, 'is_holiday' => false];
+                    } elseif (in_array($rawStatus, ['ALPHA', 'ALPA', 'ABSENT'])) {
+                        $todayAtt = ['status' => 'tidak_hadir', 'status_label' => 'Tidak Hadir', 'label' => 'Tidak Hadir', 'color' => '#EF4444', 'time' => null, 'is_holiday' => false];
+                    }
+                }
+
+                if (! $todayAtt) {
+                    $perm = $permissions->get($c->id);
+                    if ($perm) {
+                        $isSick = str_contains(strtolower((string) $perm->type), 'sakit');
+                        $todayAtt = ['status' => $isSick ? 'sakit' : 'izin', 'status_label' => $isSick ? 'Sakit' : 'Izin', 'label' => $isSick ? 'Sakit' : 'Izin', 'color' => $isSick ? '#38BDF8' : '#60A5FA', 'time' => null, 'is_holiday' => false];
+                    }
+                }
+
+                if (! $todayAtt) {
+                    $lms = $lmsPresensis->get($c->id);
+                    if ($lms) {
+                        $lmsStatus = strtolower(trim((string) ($lms->status ?? $lms->status_hadir ?? '')));
+                        $time = $lms->waktu_presensi ? Carbon::parse($lms->waktu_presensi)->format('H:i') : null;
+                        if (in_array($lmsStatus, ['h', 'hadir', 'present'])) {
+                            $todayAtt = ['status' => 'hadir', 'status_label' => 'Hadir', 'label' => 'Hadir', 'color' => '#10B981', 'time' => $time, 'is_holiday' => false];
+                        } elseif (in_array($lmsStatus, ['t', 'terlambat', 'late'])) {
+                            $todayAtt = ['status' => 'terlambat', 'status_label' => 'Terlambat', 'label' => 'Terlambat', 'color' => '#F59E0B', 'time' => $time, 'is_holiday' => false];
+                        } elseif (in_array($lmsStatus, ['s', 'sakit'])) {
+                            $todayAtt = ['status' => 'sakit', 'status_label' => 'Sakit', 'label' => 'Sakit', 'color' => '#38BDF8', 'time' => null, 'is_holiday' => false];
+                        } elseif (in_array($lmsStatus, ['i', 'izin'])) {
+                            $todayAtt = ['status' => 'izin', 'status_label' => 'Izin', 'label' => 'Izin', 'color' => '#60A5FA', 'time' => null, 'is_holiday' => false];
+                        } else {
+                            $todayAtt = ['status' => 'tidak_hadir', 'status_label' => 'Tidak Hadir', 'label' => 'Tidak Hadir', 'color' => '#EF4444', 'time' => null, 'is_holiday' => false];
+                        }
+                    }
+                }
+
+                if (! $todayAtt && $schoolHoliday) {
+                    $holidayLabel = str_contains(strtolower($schoolHoliday->judul_pengumuman), 'semester') ? 'Libur Semester' : 'Libur Sekolah';
+                    $todayAtt = ['status' => 'libur', 'status_label' => $holidayLabel, 'label' => $holidayLabel, 'holiday_title' => $schoolHoliday->judul_pengumuman, 'color' => '#F59E0B', 'time' => null, 'is_holiday' => true];
+                }
+
+                if (! $todayAtt && $isWeekend) {
+                    $todayAtt = ['status' => 'libur', 'status_label' => 'Libur Akhir Pekan', 'label' => 'Libur', 'color' => '#F59E0B', 'time' => null, 'is_holiday' => true];
+                }
+
+                if (! $todayAtt) {
+                    $todayAtt = ['status' => 'belum_presensi', 'status_label' => 'Belum Presensi', 'label' => 'Belum Presensi', 'color' => '#94A3B8', 'time' => null, 'is_holiday' => false];
+                }
+
+                $c->unread_notifications_count = $notifCount;
+                $c->unread_count = $notifCount;
+                $c->pending_assignments_count = $pendingAssignments;
+                $c->attendance_status = $todayAtt['status_label'];
+                $c->attendance_today = $todayAtt;
+                $c->presensi_status = $todayAtt['status_label'];
+                $c->status_presensi = $todayAtt['status_label'];
+                $c->is_holiday = $todayAtt['is_holiday'];
+
+                return $c;
+            });
+        };
+
         if (! $parent) {
             if ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan'])) {
                 $adminChildren = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->where('is_active', true)->take(3)->get();
+                $adminChildren = $enrichStudentsBatch($adminChildren);
                 return response()->json([
                     'success' => true,
                     'data' => $adminChildren,
@@ -263,9 +669,10 @@ class StudentParentPortalController extends Controller
 
             // Fallback check if user owns a student directly
             $student = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->where('user_id', $user->id)->first();
+            $result = $student ? $enrichStudentsBatch(collect([$student])) : collect();
             return response()->json([
                 'success' => true,
-                'data' => $student ? [$student] : [],
+                'data' => $result,
             ]);
         }
 
@@ -275,30 +682,7 @@ class StudentParentPortalController extends Controller
             ->orderBy('created_at', 'asc')
             ->get();
 
-        // Hitung notifikasi & pengingat per-masing-masing ananda
-        $children->transform(function ($c) use ($user) {
-            $notifCount = \App\Models\Notification::byUser($user->id)
-                ->unread()
-                ->where(function ($q) use ($c) {
-                    $q->where('metadata->student_id', (string) $c->id)
-                      ->orWhere('metadata->child_id', (string) $c->id)
-                      ->orWhere(fn ($sub) => $sub->where('notifiable_type', Student::class)->where('notifiable_id', $c->id));
-                })
-                ->count();
-
-            $classes = array_values(array_unique(array_filter([$c->kelas_id, $c->class_id])));
-            $pendingAssignments = \App\Models\LmsPenugasan::query()
-                ->whereIn('kelas_id', $classes)
-                ->where('is_published', true)
-                ->where('deadline', '>=', now())
-                ->whereDoesntHave('pengumpulanTugas', fn ($q) => $q->where('siswa_id', $c->id))
-                ->count();
-
-            $c->unread_notifications_count = $notifCount;
-            $c->unread_count = $notifCount;
-            $c->pending_assignments_count = $pendingAssignments;
-            return $c;
-        });
+        $children = $enrichStudentsBatch($children);
 
         return response()->json([
             'success' => true,
@@ -355,11 +739,13 @@ class StudentParentPortalController extends Controller
                 return ($item->day_of_week ?? '').'-'.($item->time_start ?? '').'-'.($item->time_end ?? '').'-'.($item->subject_id ?? '');
             })->values();
 
-        // Attendance status today
-        $attendanceToday = LmsPresensi::query()
-            ->where('siswa_id', $student->id)
-            ->whereDate('tanggal', now()->toDateString())
-            ->first();
+        // Attendance status today (Akurat & Dinamis dari resolveStudentTodayAttendanceStatus)
+        $todayAttendanceStatus = $this->resolveStudentTodayAttendanceStatus($student, now());
+        $student->attendance_status = $todayAttendanceStatus['status_label'];
+        $student->attendance_today = $todayAttendanceStatus;
+        $student->presensi_status = $todayAttendanceStatus['status_label'];
+        $student->status_presensi = $todayAttendanceStatus['status_label'];
+        $student->is_holiday = $todayAttendanceStatus['is_holiday'];
 
         // Active assignments
         $studentClasses = array_values(array_unique(array_filter([$student->kelas_id, $student->class_id])));
@@ -392,7 +778,10 @@ class StudentParentPortalController extends Controller
                 ->where('student_id', $student->id)
                 ->where('academic_year_id', $publishedReport->tahun_ajaran_id)
                 ->where('semester_id', $publishedReport->semester_id)
-                ->where('kelas_id', $publishedReport->kelas_id)
+                ->where(function ($q) use ($publishedReport, $student) {
+                    $q->where('kelas_id', $publishedReport->kelas_id)
+                      ->orWhere('kelas_id', $student->kelas_id);
+                })
                 ->whereNotNull('final_score')
                 ->whereHas('subject', function ($query) use ($unitId, $level) {
                     $query->where('status', true);
@@ -406,6 +795,19 @@ class StudentParentPortalController extends Controller
                     Subject::query()->select('urutan_tampil')->whereColumn('subjects.id', 'student_grades.subject_id')
                 )
                 ->get();
+
+            if ($rawGrades->isEmpty()) {
+                $rawGrades = StudentGrade::query()
+                    ->with(['subject', 'kelas.unitPendidikan', 'academicYear', 'semester'])
+                    ->where('student_id', $student->id)
+                    ->where('academic_year_id', $publishedReport->tahun_ajaran_id)
+                    ->where('semester_id', $publishedReport->semester_id)
+                    ->whereNotNull('final_score')
+                    ->orderBy(
+                        Subject::query()->select('urutan_tampil')->whereColumn('subjects.id', 'student_grades.subject_id')
+                    )
+                    ->get();
+            }
         } else {
             $rawGrades = StudentGrade::query()
                 ->with(['subject', 'kelas.unitPendidikan', 'academicYear', 'semester'])
@@ -417,8 +819,8 @@ class StudentParentPortalController extends Controller
         }
 
         $latestGrades = $rawGrades->map(function (StudentGrade $grade) use ($publishedReport) {
-            $kkm = $grade->subject?->kkm;
-            $score = $grade->final_score !== null ? (float) $grade->final_score : null;
+            $kkm = $grade->subject?->kkm !== null ? round((float) $grade->subject->kkm) : null;
+            $score = $grade->final_score !== null ? round((float) $grade->final_score) : null;
             $isPassed = $score !== null && $kkm !== null ? $score >= $kkm : null;
             $subjectName = $grade->subject?->nama_mapel ?? $grade->subject?->name;
 
@@ -629,20 +1031,38 @@ class StudentParentPortalController extends Controller
                 ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
                 ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
                 ->where('d.daily_header_id', $activeMutabaahHeader->id)
-                ->select('a.name', 'a.code', 'c.name as category_name', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes')
+                ->select(
+                    'a.name', 'a.code',
+                    'c.id as category_id', 'c.name as category_name', 'c.code as category_code',
+                    'c.icon as category_icon', 'c.color as category_color',
+                    'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes'
+                )
+                ->orderBy('c.id')
+                ->orderBy('a.id')
                 ->get();
 
-            $shalatFardhuCodes = ['SUBUH', 'ZUHUR', 'ASHAR', 'MAGHRIB', 'ISYA'];
-            $shalatFardhu = $rawDetails->filter(fn ($it) => in_array($it->code, $shalatFardhuCodes))->values();
+            $dynamicCategories = $rawDetails->groupBy('category_name')->map(function ($items, $catName) {
+                $first = $items->first();
+                $goodCount = $items->where('status_value', 'good')->count();
+                $totalCount = $items->count();
+                return [
+                    'category_id' => $first->category_id ?? null,
+                    'category_name' => $catName,
+                    'category_code' => $first->category_code ?? null,
+                    'category_icon' => $first->category_icon ?? 'Heart',
+                    'category_color' => $first->category_color ?? '#10B981',
+                    'good_count' => $goodCount,
+                    'total_count' => $totalCount,
+                    'rate' => $totalCount > 0 ? round(($goodCount / $totalCount) * 100) : 0,
+                    'items' => $items->values(),
+                ];
+            })->values();
 
-            $shalatSunnahCodes = ['TAHAJUD-WITIR', 'SHOLAT-SUNNAH-FAJAR', 'DHUHA', 'RAWATIB-ZUHUR', 'QOBLIYAH-ASHAR', 'BAKDIYAH-MAGRIB', 'TARAWIH-WITIR'];
-            $shalatSunnah = $rawDetails->filter(fn ($it) => in_array($it->code, $shalatSunnahCodes))->values();
-
-            $tilawahCodes = ['TILAWAH-QURAN', 'ZIKIR-PAGI', 'ZIKIR-PETANG', 'MURAJAAH-DENGAN-ORTU', 'BACA-SURAT-ALKAHFI', 'PUASA-SUNNAH', 'TADARUS-RAMADHAN', 'MURAJAAH'];
-            $tilawahDzikir = $rawDetails->filter(fn ($it) => in_array($it->code, $tilawahCodes))->values();
-
-            $adabCodes = ['WUDHU-SEBELUM-TIDUR', 'DOA-ZIKIR-SEBELUM-TIDUR', 'DOA-BANGUN-TIDUR', 'SALAM-ORANG-TUA', 'DOA-KELUAR-RUMAH', 'DOA-NAIK-KENDARAAN', 'SEDEKAH', 'MENEBAR-SALAM', 'MENDOAKAN-ORTU', 'KAJIAN', 'HAFALAN-DOA', 'HAFALAN-HADIST', 'KOSA-KATA-BAHASA', 'BANTU-ORANG-TUA', 'JAGA-KEBERSIHAN', 'TEPAT-WAKTU'];
-            $adabKarakter = $rawDetails->filter(fn ($it) => in_array($it->code, $adabCodes))->values();
+            $fardhuCodes = ['SUBUH', 'ZUHUR', 'ASHAR', 'MAGHRIB', 'ISYA'];
+            $shalatFardhu = $rawDetails->filter(fn ($it) => in_array($it->code, $fardhuCodes) || str_contains(strtoupper($it->category_code ?? ''), 'FARDHU'))->values();
+            $shalatSunnah = $rawDetails->filter(fn ($it) => ($it->category_code === 'SHALAT' && !in_array($it->code, $fardhuCodes)) || str_contains(strtoupper($it->category_code ?? ''), 'SUNNAH'))->values();
+            $tilawahDzikir = $rawDetails->filter(fn ($it) => in_array($it->category_code, ['TILAWAH', 'TAHFIZH']) || str_contains(strtoupper($it->category_code ?? ''), 'QURAN'))->values();
+            $adabKarakter = $rawDetails->filter(fn ($it) => !in_array($it->category_code, ['SHALAT', 'TILAWAH', 'TAHFIZH']))->values();
 
             $mutabaahMonitoringDetails = [
                 'header_id' => $activeMutabaahHeader->id,
@@ -652,6 +1072,9 @@ class StudentParentPortalController extends Controller
                 'status' => $activeMutabaahHeader->status,
                 'supervisor_notes' => $activeMutabaahHeader->supervisor_notes,
                 'finalized_at' => $activeMutabaahHeader->finalized_at ? Carbon::parse($activeMutabaahHeader->finalized_at)->locale('id')->isoFormat('D MMMM Y HH:mm') : null,
+                'categories' => $dynamicCategories,
+                'dynamic_categories' => $dynamicCategories,
+                'all_items' => $rawDetails->values(),
                 'shalat_fardhu' => $shalatFardhu,
                 'shalat_sunnah' => $shalatSunnah,
                 'tilawah_dzikir' => $tilawahDzikir,
@@ -681,7 +1104,8 @@ class StudentParentPortalController extends Controller
             ? (is_string($targetRow->metadata) ? json_decode($targetRow->metadata, true) : (array) $targetRow->metadata)
             : [];
         $dbTargetAyat = (int) (data_get($targetMeta, 'target_ayat') ?: ($targetRow->target_lines ?? 0));
-        $tahfizhTargetAyat = (int) ($student->educationUnit?->tahfizh_target_ayat ?? ($dbTargetAyat > 0 ? $dbTargetAyat : 0));
+        $targetAyatFromService = (int) ($tahfizhSummaryData['target_ayah'] ?? 0);
+        $tahfizhTargetAyat = (int) ($student->educationUnit?->tahfizh_target_ayat ?? ($dbTargetAyat > 0 ? $dbTargetAyat : $targetAyatFromService));
 
         $recentTahfizhLogs = TahfizhDailyLog::query()
             ->where('student_id', $student->id)
@@ -701,10 +1125,11 @@ class StudentParentPortalController extends Controller
             ]);
 
         $actualAyat = $tahfizhSummaryData['validated_unique_ayah'] ?? $totalAyat;
+        $evalPct = $tahfizhSummaryData['achievement_percentage'] ?? ($tahfizhTargetAyat > 0 ? min(100, max(0, (int) round(($actualAyat / $tahfizhTargetAyat) * 100))) : null);
         $tahfizhEvaluationDetails = [
             'total_ayat_tercapai' => $actualAyat,
             'target_ayat' => $tahfizhTargetAyat ?: null,
-            'persentase' => $tahfizhTargetAyat > 0 ? min(100, max(0, (int) round(($actualAyat / $tahfizhTargetAyat) * 100))) : null,
+            'persentase' => $evalPct,
             'surah_tuntas' => $tahfizhSummaryData['completed_surahs'] ?? [],
             'juz_aktif' => $tahfizhSummaryData['juz_with_validated_ayah'] ?? [],
             'catatan_pembimbing' => $latestLogWithNote?->notes_teacher ?? null,
@@ -724,39 +1149,62 @@ class StudentParentPortalController extends Controller
                         'sunnah' => ['rate' => 0, 'good' => 0, 'total' => 0, 'label' => '-'],
                         'tilawah' => ['rate' => 0, 'good' => 0, 'total' => 0, 'label' => '-'],
                         'adab' => ['rate' => 0, 'good' => 0, 'total' => 0, 'label' => '-'],
+                        'categories' => [],
                     ];
                 }
                 $details = DB::table('mutabaah_daily_details as d')
                     ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
+                    ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
                     ->whereIn('d.daily_header_id', $headerIds)
-                    ->select('a.code', 'd.status_value')
+                    ->select(
+                        'a.code', 'd.status_value',
+                        'c.id as category_id', 'c.name as category_name', 'c.code as category_code',
+                        'c.icon as category_icon', 'c.color as category_color'
+                    )
                     ->get();
 
+                $categories = $details->groupBy('category_name')->map(function ($items, $catName) {
+                    $first = $items->first();
+                    $good = $items->where('status_value', 'good')->count();
+                    $total = $items->count();
+                    $rate = $total > 0 ? round(($good / $total) * 100) : 0;
+                    $label = $total === 0 ? '-' : ($rate >= 90 ? 'Sangat Tertib' : ($rate >= 75 ? 'Tertib' : ($rate >= 60 ? 'Cukup' : 'Perlu Pendampingan')));
+                    return [
+                        'category_id' => $first->category_id ?? null,
+                        'name' => $catName,
+                        'code' => $first->category_code ?? null,
+                        'icon' => $first->category_icon ?? 'Heart',
+                        'color' => $first->category_color ?? '#10B981',
+                        'rate' => $rate,
+                        'good' => $good,
+                        'total' => $total,
+                        'label' => $label,
+                    ];
+                })->values();
+
                 $fardhuCodes = ['SUBUH', 'ZUHUR', 'ASHAR', 'MAGHRIB', 'ISYA'];
-                $fardhu = $details->filter(fn ($d) => in_array($d->code, $fardhuCodes));
+                $fardhu = $details->filter(fn ($d) => in_array($d->code, $fardhuCodes) || str_contains(strtoupper($d->category_code ?? ''), 'FARDHU'));
                 $fardhuGood = $fardhu->where('status_value', 'good')->count();
                 $fardhuTotal = $fardhu->count();
                 $fardhuRate = $fardhuTotal > 0 ? round(($fardhuGood / $fardhuTotal) * 100) : 0;
 
-                $sunnahCodes = ['TAHAJUD-WITIR', 'SHOLAT-SUNNAH-FAJAR', 'DHUHA', 'RAWATIB-ZUHUR', 'QOBLIYAH-ASHAR', 'BAKDIYAH-MAGRIB', 'TARAWIH-WITIR'];
-                $sunnah = $details->filter(fn ($d) => in_array($d->code, $sunnahCodes));
+                $sunnah = $details->filter(fn ($d) => ($d->category_code === 'SHALAT' && !in_array($d->code, $fardhuCodes)) || str_contains(strtoupper($d->category_code ?? ''), 'SUNNAH'));
                 $sunnahGood = $sunnah->where('status_value', 'good')->count();
                 $sunnahTotal = $sunnah->count();
                 $sunnahRate = $sunnahTotal > 0 ? round(($sunnahGood / $sunnahTotal) * 100) : 0;
 
-                $tilawahCodes = ['TILAWAH-QURAN', 'ZIKIR-PAGI', 'ZIKIR-PETANG', 'MURAJAAH-DENGAN-ORTU', 'BACA-SURAT-ALKAHFI', 'PUASA-SUNNAH', 'TADARUS-RAMADHAN', 'MURAJAAH'];
-                $tilawah = $details->filter(fn ($d) => in_array($d->code, $tilawahCodes));
+                $tilawah = $details->filter(fn ($d) => in_array($d->category_code, ['TILAWAH', 'TAHFIZH']) || str_contains(strtoupper($d->category_code ?? ''), 'QURAN'));
                 $tilawahGood = $tilawah->where('status_value', 'good')->count();
                 $tilawahTotal = $tilawah->count();
                 $tilawahRate = $tilawahTotal > 0 ? round(($tilawahGood / $tilawahTotal) * 100) : 0;
 
-                $adabCodes = ['WUDHU-SEBELUM-TIDUR', 'DOA-ZIKIR-SEBELUM-TIDUR', 'DOA-BANGUN-TIDUR', 'SALAM-ORANG-TUA', 'DOA-KELUAR-RUMAH', 'DOA-NAIK-KENDARAAN', 'SEDEKAH', 'MENEBAR-SALAM', 'MENDOAKAN-ORTU', 'KAJIAN', 'HAFALAN-DOA', 'HAFALAN-HADIST', 'KOSA-KATA-BAHASA', 'BANTU-ORANG-TUA', 'JAGA-KEBERSIHAN', 'TEPAT-WAKTU'];
-                $adab = $details->filter(fn ($d) => in_array($d->code, $adabCodes));
+                $adab = $details->filter(fn ($d) => !in_array($d->category_code, ['SHALAT', 'TILAWAH', 'TAHFIZH']));
                 $adabGood = $adab->where('status_value', 'good')->count();
                 $adabTotal = $adab->count();
                 $adabRate = $adabTotal > 0 ? round(($adabGood / $adabTotal) * 100) : 0;
 
                 return [
+                    'categories' => $categories,
                     'fardhu' => ['rate' => $fardhuRate, 'good' => $fardhuGood, 'total' => $fardhuTotal, 'label' => $fardhuTotal > 0 ? ($fardhuRate >= 90 ? 'Sangat Tertib' : 'Tertib') : '-'],
                     'sunnah' => ['rate' => $sunnahRate, 'good' => $sunnahGood, 'total' => $sunnahTotal, 'label' => $sunnahTotal > 0 ? ($sunnahRate >= 80 ? 'Rutin Terjaga' : 'Cukup Rutin') : '-'],
                     'tilawah' => ['rate' => $tilawahRate, 'good' => $tilawahGood, 'total' => $tilawahTotal, 'label' => $tilawahTotal > 0 ? ($tilawahRate >= 85 ? 'Aktif Istiqamah' : 'Aktif') : '-'],
@@ -767,6 +1215,8 @@ class StudentParentPortalController extends Controller
             $buildPeriodItems = function ($headerIds) {
                 if (empty($headerIds) || count($headerIds) === 0) {
                     return [
+                        'categories' => [],
+                        'all_items' => [],
                         'shalat_fardhu' => [],
                         'shalat_sunnah' => [],
                         'tilawah_dzikir' => [],
@@ -774,27 +1224,27 @@ class StudentParentPortalController extends Controller
                     ];
                 }
 
-                $totalDays = count($headerIds);
-
                 $rawDetails = DB::table('mutabaah_daily_details as d')
                     ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
+                    ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
                     ->whereIn('d.daily_header_id', $headerIds)
-                    ->select('a.name', 'a.code', 'd.status_value')
+                    ->select(
+                        'a.id as item_id', 'a.name', 'a.code',
+                        'c.id as category_id', 'c.name as category_name', 'c.code as category_code',
+                        'c.icon as category_icon', 'c.color as category_color',
+                        'd.status_value'
+                    )
                     ->get();
 
-                $grouped = $rawDetails->groupBy('code');
+                $categoriesResult = [];
+                $groupedByCategory = $rawDetails->groupBy('category_name');
 
-                $fardhuCodes = ['SUBUH', 'ZUHUR', 'ASHAR', 'MAGHRIB', 'ISYA'];
-                $sunnahCodes = ['TAHAJUD-WITIR', 'SHOLAT-SUNNAH-FAJAR', 'DHUHA', 'RAWATIB-ZUHUR', 'QOBLIYAH-ASHAR', 'BAKDIYAH-MAGRIB', 'TARAWIH-WITIR'];
-                $tilawahCodes = ['TILAWAH-QURAN', 'ZIKIR-PAGI', 'ZIKIR-PETANG', 'MURAJAAH-DENGAN-ORTU', 'BACA-SURAT-ALKAHFI', 'PUASA-SUNNAH', 'TADARUS-RAMADHAN', 'MURAJAAH'];
-                $adabCodes = ['WUDHU-SEBELUM-TIDUR', 'DOA-ZIKIR-SEBELUM-TIDUR', 'DOA-BANGUN-TIDUR', 'SALAM-ORANG-TUA', 'DOA-KELUAR-RUMAH', 'DOA-NAIK-KENDARAAN', 'SEDEKAH', 'MENEBAR-SALAM', 'MENDOAKAN-ORTU', 'KAJIAN', 'HAFALAN-DOA', 'HAFALAN-HADIST', 'KOSA-KATA-BAHASA', 'BANTU-ORANG-TUA', 'JAGA-KEBERSIHAN', 'TEPAT-WAKTU'];
+                foreach ($groupedByCategory as $catName => $catItems) {
+                    $first = $catItems->first();
+                    $groupedByItem = $catItems->groupBy('code');
+                    $formattedItems = [];
 
-                $formatGroup = function ($codes) use ($grouped, $totalDays) {
-                    $result = [];
-                    foreach ($codes as $code) {
-                        $items = $grouped->get($code);
-                        if (!$items || $items->isEmpty()) continue;
-
+                    foreach ($groupedByItem as $code => $items) {
                         $name = $items->first()->name ?? $code;
                         $goodCount = $items->where('status_value', 'good')->count();
                         $itemTotal = $items->count();
@@ -814,7 +1264,7 @@ class StudentParentPortalController extends Controller
                             $statusColor = 'rose';
                         }
 
-                        $result[] = [
+                        $formattedItems[] = [
                             'code' => $code,
                             'name' => $name,
                             'good_count' => $goodCount,
@@ -824,14 +1274,49 @@ class StudentParentPortalController extends Controller
                             'status_color' => $statusColor,
                         ];
                     }
-                    return $result;
-                };
+
+                    $catGood = $catItems->where('status_value', 'good')->count();
+                    $catTotal = $catItems->count();
+                    $catRate = $catTotal > 0 ? round(($catGood / $catTotal) * 100) : 0;
+
+                    $categoriesResult[] = [
+                        'category_id' => $first->category_id,
+                        'category_name' => $catName,
+                        'category_code' => $first->category_code,
+                        'category_icon' => $first->category_icon,
+                        'category_color' => $first->category_color,
+                        'rate' => $catRate,
+                        'good_count' => $catGood,
+                        'total_count' => $catTotal,
+                        'items' => $formattedItems,
+                    ];
+                }
+
+                $allItems = [];
+                foreach ($categoriesResult as $cat) {
+                    foreach ($cat['items'] as $item) {
+                        $allItems[] = array_merge($item, [
+                            'category_name' => $cat['category_name'],
+                            'category_code' => $cat['category_code'],
+                            'category_icon' => $cat['category_icon'],
+                            'category_color' => $cat['category_color'],
+                        ]);
+                    }
+                }
+
+                $fardhuCodes = ['SUBUH', 'ZUHUR', 'ASHAR', 'MAGHRIB', 'ISYA'];
+                $shalatFardhu = collect($allItems)->filter(fn ($it) => in_array($it['code'], $fardhuCodes) || str_contains(strtoupper($it['category_code'] ?? ''), 'FARDHU'))->values()->all();
+                $shalatSunnah = collect($allItems)->filter(fn ($it) => ($it['category_code'] === 'SHALAT' && !in_array($it['code'], $fardhuCodes)) || str_contains(strtoupper($it['category_code'] ?? ''), 'SUNNAH'))->values()->all();
+                $tilawahDzikir = collect($allItems)->filter(fn ($it) => in_array($it['category_code'], ['TILAWAH', 'TAHFIZH']) || str_contains(strtoupper($it['category_code'] ?? ''), 'QURAN'))->values()->all();
+                $adabKarakter = collect($allItems)->filter(fn ($it) => !in_array($it['category_code'], ['SHALAT', 'TILAWAH', 'TAHFIZH']))->values()->all();
 
                 return [
-                    'shalat_fardhu' => $formatGroup($fardhuCodes),
-                    'shalat_sunnah' => $formatGroup($sunnahCodes),
-                    'tilawah_dzikir' => $formatGroup($tilawahCodes),
-                    'adab_karakter' => $formatGroup($adabCodes),
+                    'categories' => $categoriesResult,
+                    'all_items' => $allItems,
+                    'shalat_fardhu' => $shalatFardhu,
+                    'shalat_sunnah' => $shalatSunnah,
+                    'tilawah_dzikir' => $tilawahDzikir,
+                    'adab_karakter' => $adabKarakter,
                 ];
             };
 
@@ -940,6 +1425,9 @@ class StudentParentPortalController extends Controller
                     'date_display' => Carbon::parse($activeMutabaahHeader->activity_date)->locale('id')->isoFormat('dddd, D MMMM Y'),
                     'score' => $activeMutabaahHeader->score !== null ? (float) $activeMutabaahHeader->score : null,
                     'status' => $activeMutabaahHeader->status,
+                    'categories' => $dynamicCategories,
+                    'dynamic_categories' => $dynamicCategories,
+                    'all_items' => $rawDetails->values(),
                     'shalat_fardhu' => $shalatFardhu,
                     'shalat_sunnah' => $shalatSunnah,
                     'tilawah_dzikir' => $tilawahDzikir,
@@ -957,6 +1445,9 @@ class StudentParentPortalController extends Controller
                     'days_total' => 7,
                     'daily_trend' => $weeklyTrend,
                     'category_stats' => $weeklyCatStats,
+                    'categories' => $weeklyItems['categories'],
+                    'dynamic_categories' => $weeklyItems['categories'],
+                    'all_items' => $weeklyItems['all_items'],
                     'shalat_fardhu' => $weeklyItems['shalat_fardhu'],
                     'shalat_sunnah' => $weeklyItems['shalat_sunnah'],
                     'tilawah_dzikir' => $weeklyItems['tilawah_dzikir'],
@@ -980,6 +1471,9 @@ class StudentParentPortalController extends Controller
                     'days_active' => $monthlyHeaders->count(),
                     'days_total' => Carbon::parse($monthlyStart)->diffInDays(Carbon::parse($monthlyEnd)) + 1,
                     'category_stats' => $monthlyCatStats,
+                    'categories' => $monthlyItems['categories'],
+                    'dynamic_categories' => $monthlyItems['categories'],
+                    'all_items' => $monthlyItems['all_items'],
                     'shalat_fardhu' => $monthlyItems['shalat_fardhu'],
                     'shalat_sunnah' => $monthlyItems['shalat_sunnah'],
                     'tilawah_dzikir' => $monthlyItems['tilawah_dzikir'],
@@ -996,11 +1490,15 @@ class StudentParentPortalController extends Controller
                     'key' => 'semester',
                     'label' => 'Semester',
                     'badge' => $semesterLabel,
+                    'semester_name' => $semesterLabel,
                     'sub_label' => $semesterRange,
                     'date_range' => $semesterRange,
                     'score' => $semesterAvg,
                     'days_active' => $semesterHeaders->count(),
                     'category_stats' => $semesterCatStats,
+                    'categories' => $semesterItems['categories'],
+                    'dynamic_categories' => $semesterItems['categories'],
+                    'all_items' => $semesterItems['all_items'],
                     'shalat_fardhu' => $semesterItems['shalat_fardhu'],
                     'shalat_sunnah' => $semesterItems['shalat_sunnah'],
                     'tilawah_dzikir' => $semesterItems['tilawah_dzikir'],
@@ -1051,7 +1549,8 @@ class StudentParentPortalController extends Controller
                     'semester' => $activeSemester?->name ?? null,
                     'date' => now()->translatedFormat('l, d F Y'),
                 ],
-                'attendance_today' => $attendanceToday?->status_label ?? null,
+                'attendance_today' => $todayAttendanceStatus['status_label'],
+                'attendance_today_detail' => $todayAttendanceStatus,
                 'latest_tahfizh' => $latestTahfizhData,
                 'latest_note' => $latestNote ? [
                     'id' => $latestNote->id,
@@ -1097,15 +1596,18 @@ class StudentParentPortalController extends Controller
                 'status' => $pendingHome->murajaah_status,
                 'record_date' => $pendingHome->record_date,
             ] : null,
-            'tahfizh_target' => (function () use ($student, $totalAyat) {
+            'tahfizh_target' => (function () use ($student, $totalAyat, $tahfizhSummaryData, $tahfizhTargetAyat) {
                     $targetRow = DB::table('memorization_targets')->where('student_id', $student->id)->whereNull('deleted_at')->latest('target_date')->first();
                     $targetMeta = $targetRow?->metadata ?? [];
                     if (is_string($targetMeta)) $targetMeta = json_decode($targetMeta, true) ?: [];
                     $targetAyatVal = (int) (data_get($targetMeta, 'target_ayat') ?: ($targetRow->target_lines ?? 0));
                     $targetSurahVal = data_get($targetMeta, 'target_surah') ?: ($targetRow->target_name ?? null);
+                    $finalTargetAyat = $targetAyatVal ?: ($tahfizhTargetAyat > 0 ? $tahfizhTargetAyat : (int) ($tahfizhSummaryData['target_ayah'] ?? 0));
+                    $targetJuzLabel = data_get($targetMeta, 'target_juz') ?: ($tahfizhSummaryData['target_juz'] ?? null);
+                    $targetNameLabel = $targetSurahVal ?: ($targetJuzLabel && $finalTargetAyat > 0 ? "Target {$targetJuzLabel} ({$finalTargetAyat} Ayat)" : ($finalTargetAyat > 0 ? "Target {$finalTargetAyat} Ayat" : null));
                     return [
-                        'surah_target' => $targetSurahVal ?: ($targetAyatVal > 0 ? "Target {$targetAyatVal} Ayat" : null),
-                        'target_ayat' => $targetAyatVal ?: ($totalAyat > 0 ? $totalAyat : null),
+                        'surah_target' => $targetNameLabel,
+                        'target_ayat' => $finalTargetAyat > 0 ? $finalTargetAyat : ($totalAyat > 0 ? $totalAyat : null),
                     ];
                 })(),
                 'schedules_today' => $schedulesToday,
@@ -1384,6 +1886,10 @@ class StudentParentPortalController extends Controller
                     'name' => $student->nama_lengkap ?? $student->name,
                     'class' => $student->classroom?->name ?? $student->kelas?->name ?? '',
                     'unit' => $student->educationUnit?->name ?? '',
+                    'unit_id' => $student->educationUnit?->id ?? $student->unit_id,
+                    'program_type' => $student->educationUnit?->program_type ?? $student->kelas?->unitPendidikan?->program_type ?? 'fullday',
+                    'jam_kegiatan' => $student->educationUnit?->jam_kegiatan ?? $student->kelas?->unitPendidikan?->jam_kegiatan ?? null,
+                    'level' => $student->educationUnit?->level ?? $student->kelas?->unitPendidikan?->level ?? null,
                     'foto_url' => $student->foto_url ?? $student->foto ?? $student->photo_url ?? null,
                     'foto' => $student->foto ?? null,
                     'nis' => $student->nis ?? $student->nisn ?? null,
@@ -1949,16 +2455,27 @@ class StudentParentPortalController extends Controller
         }
 
         $perPage = (int) ($request->query('per_page', 30));
-        $assignments = $baseQuery->orderBy('deadline', 'asc')->paginate($perPage);
+        $page = (int) ($request->query('page', 1));
+        $assignments = $baseQuery->orderBy('deadline', 'asc')->paginate($perPage, ['*'], 'page', $page);
 
         return response()->json([
             'success' => true,
             'data' => $assignments,
             'kpi' => [
+                'total_tugas' => $allAssignments->count(),
                 'tugas_aktif' => $tugasAktif,
                 'belum_dikumpulkan' => $belumDikumpulkan,
                 'terlambat' => $terlambat,
                 'sudah_dinilai' => $sudahDinilai,
+                'sudah_dikumpulkan' => max(0, $allAssignments->count() - $belumDikumpulkan - $terlambat),
+            ],
+            'summary' => [
+                'total_tugas' => $allAssignments->count(),
+                'tugas_aktif' => $tugasAktif,
+                'belum_dikumpulkan' => $belumDikumpulkan,
+                'terlambat' => $terlambat,
+                'sudah_dinilai' => $sudahDinilai,
+                'sudah_dikumpulkan' => max(0, $allAssignments->count() - $belumDikumpulkan - $terlambat),
             ],
             'student' => [
                 'id' => $student->id,
@@ -2112,76 +2629,140 @@ class StudentParentPortalController extends Controller
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
-        $publishedReport = LmsRapor::query()
+        // Resolusi filter parameter tahun ajaran
+        $targetAcademicYearId = $request->query('academic_year_id');
+        $academicYearName = $request->query('academic_year');
+        if (! $targetAcademicYearId && $academicYearName) {
+            $targetAcademicYearId = AcademicYear::where('name', $academicYearName)
+                ->orWhere('name', str_replace('-', '/', $academicYearName))
+                ->value('id');
+        }
+
+        // Resolusi filter parameter semester
+        $targetSemesterId = $request->query('semester_id');
+        $semesterName = $request->query('semester');
+        if (! $targetSemesterId && $semesterName) {
+            $semNameClean = trim(strtolower($semesterName));
+            if (str_contains($semNameClean, 'genap') || str_contains($semNameClean, '2')) {
+                $targetSemesterId = Semester::where('name', 'Genap')
+                    ->when($targetAcademicYearId, fn ($q) => $q->where('academic_year_id', $targetAcademicYearId))
+                    ->value('id');
+            } elseif (str_contains($semNameClean, 'ganjil') || str_contains($semNameClean, '1')) {
+                $targetSemesterId = Semester::where('name', 'Ganjil')
+                    ->when($targetAcademicYearId, fn ($q) => $q->where('academic_year_id', $targetAcademicYearId))
+                    ->value('id');
+            }
+        }
+
+        // Cari published report sesuai filter periode jika ada
+        $raporQuery = LmsRapor::query()
             ->with(['kelas.unitPendidikan', 'semester', 'tahunAjaran'])
             ->where('siswa_id', $student->id)
-            ->whereIn('status_rapor', ['published', 'diterbitkan', 'terbit'])
-            ->orderByDesc('tanggal_terbit')
+            ->whereIn('status_rapor', ['published', 'diterbitkan', 'terbit']);
+
+        if ($targetAcademicYearId) {
+            $raporQuery->where('tahun_ajaran_id', $targetAcademicYearId);
+        }
+        if ($targetSemesterId) {
+            $raporQuery->where('semester_id', $targetSemesterId);
+        }
+
+        $publishedReport = $raporQuery->orderByDesc('tanggal_terbit')
             ->orderByDesc('created_at')
             ->first();
 
-        $studentContext = $this->resolveStudentGradeAndLevel($student, $publishedReport?->kelas);
-        $emptyResponse = [
-            'items' => [],
-            'summary' => [
-                'average_score' => null,
-                'highest_score' => null,
-                'passed_subjects' => 0,
-                'remedial_subjects' => 0,
-                'total_subjects' => 0,
-            ],
-            'student' => [
-                'id' => $student->id,
-                'name' => $student->full_name ?? $student->name,
-                'nis' => $student->nis ?? $student->nisn,
-                'class_name' => $studentContext['class_name'],
-                'unit_name' => $studentContext['unit_name'],
-            ],
-            'period' => null,
-            'publication' => null,
-        ];
+        // Tentukan semester & tahun ajaran aktif untuk query nilai
+        $selectedYearId = $publishedReport?->tahun_ajaran_id ?? $targetAcademicYearId;
+        $selectedSemesterId = $publishedReport?->semester_id ?? $targetSemesterId;
 
-        if (! $publishedReport) {
-            return response()->json(['success' => true, 'data' => $emptyResponse]);
+        if (! $selectedYearId || ! $selectedSemesterId) {
+            // Cek nilai terakhir siswa di student_grades
+            $latestGrade = StudentGrade::where('student_id', $student->id)
+                ->when($selectedYearId, fn ($q) => $q->where('academic_year_id', $selectedYearId))
+                ->when($selectedSemesterId, fn ($q) => $q->where('semester_id', $selectedSemesterId))
+                ->orderByDesc('updated_at')
+                ->first();
+
+            if ($latestGrade) {
+                $selectedYearId = $selectedYearId ?: $latestGrade->academic_year_id;
+                $selectedSemesterId = $selectedSemesterId ?: $latestGrade->semester_id;
+            } else {
+                $activeAy = AcademicYear::where('is_active', true)->first();
+                $selectedYearId = $selectedYearId ?: $activeAy?->id;
+                $activeSem = Semester::where('is_active', true)
+                    ->when($selectedYearId, fn ($q) => $q->where('academic_year_id', $selectedYearId))
+                    ->first();
+                $selectedSemesterId = $selectedSemesterId ?: $activeSem?->id;
+            }
         }
 
-        $reportClass = $publishedReport->kelas;
+        $studentContext = $this->resolveStudentGradeAndLevel($student, $publishedReport?->kelas ?? $student->kelas);
+        $reportClass = $publishedReport?->kelas ?? $student->kelas;
         $unitId = $reportClass?->unit_pendidikan_id ?? $student->unit_id;
         $level = $studentContext['level'];
 
-        $grades = StudentGrade::query()
-            ->with(['subject', 'kelas.unitPendidikan'])
+        // Query nilai dari student_grades
+        $gradesQuery = StudentGrade::query()
+            ->with(['subject', 'kelas.unitPendidikan', 'academicYear', 'semester'])
             ->where('student_id', $student->id)
-            ->where('academic_year_id', $publishedReport->tahun_ajaran_id)
-            ->where('semester_id', $publishedReport->semester_id)
-            ->where('kelas_id', $publishedReport->kelas_id)
-            ->whereNotNull('final_score')
-            ->whereHas('subject', function ($query) use ($unitId, $level) {
-                $query->where('status', true);
-                if ($unitId) {
-                    $query->where('unit_pendidikan_id', $unitId);
-                } elseif ($level) {
-                    $query->where('jenjang', $level);
-                }
-            })
-            ->orderBy(
+            ->whereNotNull('final_score');
+
+        if ($selectedYearId) {
+            $gradesQuery->where('academic_year_id', $selectedYearId);
+        }
+        if ($selectedSemesterId) {
+            $gradesQuery->where('semester_id', $selectedSemesterId);
+        }
+
+        if ($publishedReport) {
+            $gradesQuery->where(function ($q) use ($publishedReport, $student) {
+                $q->where('kelas_id', $publishedReport->kelas_id)
+                  ->orWhere('kelas_id', $student->kelas_id);
+            });
+        }
+
+        $grades = (clone $gradesQuery)->whereHas('subject', function ($query) use ($unitId, $level) {
+            $query->where('status', true);
+            if ($unitId) {
+                $query->where('unit_pendidikan_id', $unitId);
+            } elseif ($level) {
+                $query->where('jenjang', $level);
+            }
+        })->orderBy(
+            Subject::query()->select('urutan_tampil')->whereColumn('subjects.id', 'student_grades.subject_id')
+        )->get();
+
+        // Fallback jika relasi subject unit_id tidak cocok karena perbedaan jenjang/unit di rapor
+        if ($grades->isEmpty()) {
+            $grades = $gradesQuery->orderBy(
                 Subject::query()->select('urutan_tampil')->whereColumn('subjects.id', 'student_grades.subject_id')
-            )
-            ->get();
+            )->get();
+        }
+
+        // Jika masih kosong dan tidak ada filter spesifik, cari nilai terbaru apapun periode
+        if ($grades->isEmpty() && ! $targetSemesterId && ! $targetAcademicYearId) {
+            $grades = StudentGrade::query()
+                ->with(['subject', 'kelas.unitPendidikan', 'academicYear', 'semester'])
+                ->where('student_id', $student->id)
+                ->whereNotNull('final_score')
+                ->orderByDesc('updated_at')
+                ->take(15)
+                ->get();
+        }
 
         $items = $grades->map(function (StudentGrade $grade) {
-            $kkm = $grade->subject?->kkm;
-            $score = $grade->final_score;
+            $kkm = $grade->subject?->kkm !== null ? round((float) $grade->subject->kkm) : null;
+            $score = $grade->final_score !== null ? round((float) $grade->final_score) : null;
             $isPassed = $score !== null && $kkm !== null ? $score >= $kkm : null;
 
             return [
                 'id' => $grade->id,
                 'subject_name' => $grade->subject?->nama_mapel ?? $grade->subject?->name ?? null,
                 'final_score' => $score,
-                'score_assignment' => $grade->score_assignment,
-                'score_quiz' => $grade->score_quiz,
-                'score_mid' => $grade->score_mid,
-                'score_final' => $grade->score_final,
+                'score_assignment' => $grade->score_assignment !== null ? round((float) $grade->score_assignment) : null,
+                'score_quiz' => $grade->score_quiz !== null ? round((float) $grade->score_quiz) : null,
+                'score_mid' => $grade->score_mid !== null ? round((float) $grade->score_mid) : null,
+                'score_final' => $grade->score_final !== null ? round((float) $grade->score_final) : null,
                 'grade_letter' => $grade->grade_letter,
                 'predicate' => $grade->grade_letter ?? null,
                 'is_passed' => $isPassed,
@@ -2199,34 +2780,64 @@ class StudentParentPortalController extends Controller
 
         $scores = $items->pluck('final_score')->filter(fn ($score) => $score !== null);
         $summary = [
-            'average_score' => $scores->isNotEmpty() ? round((float) $scores->average(), 2) : null,
-            'highest_score' => $scores->isNotEmpty() ? (float) $scores->max() : null,
+            'average_score' => $scores->isNotEmpty() ? round((float) $scores->average()) : null,
+            'highest_score' => $scores->isNotEmpty() ? round((float) $scores->max()) : null,
             'passed_subjects' => $items->where('is_passed', true)->count(),
             'remedial_subjects' => $items->where('is_passed', false)->count(),
             'total_subjects' => $items->count(),
         ];
+
+        // Resolusi periode
+        $firstGrade = $grades->first();
+        $periodAy = $publishedReport?->tahunAjaran ?? $firstGrade?->academicYear ?? ($selectedYearId ? AcademicYear::find($selectedYearId) : null);
+        $periodSem = $publishedReport?->semester ?? $firstGrade?->semester ?? ($selectedSemesterId ? Semester::find($selectedSemesterId) : null);
+        $periodClass = $publishedReport?->kelas ?? $firstGrade?->kelas ?? $student->kelas;
+        $periodUnit = $periodClass?->unitPendidikan ?? $student->educationUnit;
+
+        $period = [
+            'academic_year_id' => $periodAy?->id ?? $selectedYearId,
+            'academic_year' => $periodAy?->name,
+            'semester_id' => $periodSem?->id ?? $selectedSemesterId,
+            'semester' => $periodSem?->name,
+            'class_id' => $periodClass?->id,
+            'class_name' => $periodClass?->nama_kelas,
+            'unit_id' => $periodUnit?->id ?? $student->unit_id,
+            'unit_name' => $periodUnit?->name,
+        ];
+
+        // Resolusi status publikasi
+        if ($publishedReport) {
+            $publication = [
+                'report_id' => $publishedReport->id,
+                'status' => $publishedReport->status_rapor,
+                'published_at' => $publishedReport->tanggal_terbit?->toDateString(),
+                'notes' => $publishedReport->catatan_wali_kelas,
+            ];
+        } else {
+            $publication = [
+                'report_id' => null,
+                'status' => $items->isNotEmpty() ? 'dalam_proses' : 'belum_tersedia',
+                'published_at' => null,
+                'notes' => $items->isNotEmpty()
+                    ? 'Nilai formatif dan sumatif berjalan (rapor semester resmi belum diterbitkan).'
+                    : 'Belum ada data nilai pada periode ini.',
+            ];
+        }
 
         return response()->json([
             'success' => true,
             'data' => [
                 'items' => $items,
                 'summary' => $summary,
-                'student' => $emptyResponse['student'],
-                'period' => [
-                    'academic_year_id' => $publishedReport->tahun_ajaran_id,
-                    'academic_year' => $publishedReport->tahunAjaran?->name,
-                    'semester_id' => $publishedReport->semester_id,
-                    'semester' => $publishedReport->semester?->name,
-                    'class_id' => $publishedReport->kelas_id,
-                    'class_name' => $reportClass?->nama_kelas,
-                    'unit_id' => $unitId,
-                    'unit_name' => $reportClass?->unitPendidikan?->name,
+                'student' => [
+                    'id' => $student->id,
+                    'name' => $student->full_name ?? $student->name,
+                    'nis' => $student->nis ?? $student->nisn,
+                    'class_name' => $periodClass?->nama_kelas ?? $studentContext['class_name'],
+                    'unit_name' => $periodUnit?->name ?? $studentContext['unit_name'],
                 ],
-                'publication' => [
-                    'report_id' => $publishedReport->id,
-                    'status' => $publishedReport->status_rapor,
-                    'published_at' => $publishedReport->tanggal_terbit?->toDateString(),
-                ],
+                'period' => $period,
+                'publication' => $publication,
             ],
         ]);
     }
@@ -2260,34 +2871,9 @@ class StudentParentPortalController extends Controller
                 ?? $log->teacher?->name
                 ?? ($log->signature_teacher ?: null);
 
-            // Prioritas deteksi kategori:
-            // 1. Jika log berasal dari parent (submitted_by_parent) atau status tugas murojaah rumah -> murajaah
-            // 2. Jika tipe eksplisit murajaah -> murajaah
-            // 3. Jika hafalan baru (hafalan_surah_name & hafalan_ayah_start) -> ziyadah
-            // 4. Jika tilawah_text tanpa hafalan baru -> tilawah
-            // 5. Jika ada murajaah_text tanpa hafalan baru -> murajaah
+            // Resolusi Single Source of Truth kategori dan nama surat setoran
+            [$logCategory, $displaySurah] = $this->resolveTahfizhLogCategory($log);
             $metaArr = is_array($log->metadata) ? $log->metadata : (is_string($log->metadata) ? json_decode($log->metadata, true) : []);
-            $metaType = strtolower((string) data_get($metaArr, 'type', ''));
-            $isSubmittedByParent = !empty($metaArr['submitted_by_parent']);
-            $isMurajStatus = in_array(strtolower((string) $log->murajaah_status), ['pending_home', 'submitted_by_parent']);
-            $isExplicitMurajaah = in_array($metaType, ['murajaah', "muroja'ah", 'pengulangan']) || $isSubmittedByParent || $isMurajStatus;
-
-            if ($isExplicitMurajaah) {
-                $logCategory = 'murajaah';
-                $displaySurah = $log->murajaah_required_surah_name ?: ($log->murajaah_text ?: ($log->hafalan_surah_name ?: $log->surah));
-            } elseif (!empty($log->hafalan_surah_name) && (!empty($log->hafalan_ayah_start) || $metaType === 'ziyadah')) {
-                $logCategory = 'ziyadah';
-                $displaySurah = $log->hafalan_surah_name;
-            } elseif ($metaType === 'tilawah' || (!empty($log->tilawah_text) && empty($log->hafalan_surah_name))) {
-                $logCategory = 'tilawah';
-                $displaySurah = $log->tilawah_text;
-            } elseif (!empty($log->murajaah_text) || (!empty($log->murajaah_lembar) && (float) $log->murajaah_lembar > 0)) {
-                $logCategory = 'murajaah';
-                $displaySurah = $log->murajaah_text ?: ($log->hafalan_surah_name ?: $log->surah);
-            } else {
-                $logCategory = 'ziyadah';
-                $displaySurah = $log->hafalan_surah_name ?: ($log->surah ?: null);
-            }
 
             // Ekstraksi Unit Pendidikan Fullday & Jenjang Tingkat (TK, SD, SMP, SMA)
             $classObj = $log->classModel ?? $student->kelas;
@@ -2342,6 +2928,8 @@ class StudentParentPortalController extends Controller
 
             $logArr['nilai'] = $predikatVal;
             $logArr['predikat'] = $predikatVal;
+            $logArr['calculated_juz'] = $log->calculated_juz;
+            $logArr['juz'] = $log->calculated_juz;
             $logArr['kelancaran'] = $log->kelancaran_label ?? data_get($metaArr, 'kelancaran');
             $logArr['tajwid'] = $log->tajwid_label ?? data_get($metaArr, 'tajwid');
             $logArr['makhraj'] = $log->makhraj_label ?? data_get($metaArr, 'makhraj');
@@ -2375,32 +2963,27 @@ class StudentParentPortalController extends Controller
             return $dt->isCurrentMonth() && $dt->isCurrentYear();
         })->count();
 
-        $ziyadahCount = $allLogs->filter(function ($l) {
-            $meta = is_array($l->metadata) ? $l->metadata : (is_string($l->metadata) ? json_decode($l->metadata, true) : []);
-            $metaType = strtolower((string) data_get($meta, 'type', ''));
-            $isParent = !empty($meta['submitted_by_parent']);
-            $isMurajStatus = in_array(strtolower((string) $l->murajaah_status), ['pending_home', 'submitted_by_parent']);
-            if (in_array($metaType, ['murajaah', "muroja'ah", 'pengulangan']) || $isParent || $isMurajStatus) return false;
-            return !empty($l->hafalan_surah_name) && (!empty($l->hafalan_ayah_start) || $metaType === 'ziyadah');
-        })->count();
+        $ziyadahCount = 0;
+        $murajaahCount = 0;
+        $tilawahCount = 0;
 
-        $tilawahCount = $allLogs->filter(function ($l) {
-            $meta = is_array($l->metadata) ? $l->metadata : (is_string($l->metadata) ? json_decode($l->metadata, true) : []);
-            $metaType = strtolower((string) data_get($meta, 'type', ''));
-            if ($metaType === 'tilawah') return true;
-            $hasZiyadah = !empty($l->hafalan_surah_name) && (!empty($l->hafalan_ayah_start) || $metaType === 'ziyadah');
-            return ! $hasZiyadah && (!empty($l->tilawah_text) || !empty($l->tilawah_baris));
-        })->count();
+        foreach ($allLogs as $l) {
+            [$cat] = $this->resolveTahfizhLogCategory($l);
+            if ($cat === 'ziyadah') {
+                $ziyadahCount++;
+            } elseif ($cat === 'murajaah') {
+                $murajaahCount++;
+            } elseif ($cat === 'tilawah') {
+                $tilawahCount++;
+            }
+        }
 
-        $murajaahCount = $allLogs->filter(function ($l) {
-            $meta = is_array($l->metadata) ? $l->metadata : (is_string($l->metadata) ? json_decode($l->metadata, true) : []);
-            $isParent = !empty($meta['submitted_by_parent']);
-            $metaType = strtolower((string) data_get($meta, 'type', ''));
-            $isMurajStatus = in_array(strtolower((string) $l->murajaah_status), ['pending_home', 'submitted_by_parent']);
-            if (in_array($metaType, ['murajaah', "muroja'ah", 'pengulangan']) || $isParent || $isMurajStatus) return true;
-            $hasZiyadah = !empty($l->hafalan_surah_name) && (!empty($l->hafalan_ayah_start) || $metaType === 'ziyadah');
-            return ! $hasZiyadah && (!empty($l->murajaah_text) || (!empty($l->murajaah_lembar) && (float) $l->murajaah_lembar > 0));
-        })->count();
+        // Deteksi unit dan tingkat kelas ananda secara akurat dari data kelas aktual
+        $resolved = $this->resolveStudentGradeAndLevel($student);
+        $classObj = $resolved['class_obj'];
+        $unitName = $resolved['unit_name'];
+        $normalizedLevel = $resolved['level'];
+        $currentGradeNum = $resolved['grade'];
 
         // Tarik target hafalan dinamis langsung dari database tabel memorization_targets
         $targetRecord = DB::table('memorization_targets')
@@ -2419,12 +3002,42 @@ class StudentParentPortalController extends Controller
         $surahTarget = $metaTarget['surah_target'] ?? null;
         $targetAyat = (int) ($metaTarget['target_ayat'] ?? ($targetRecord->target_lines ?? 0));
 
-        // Deteksi unit dan tingkat kelas ananda secara akurat dari data kelas aktual
-        $resolved = $this->resolveStudentGradeAndLevel($student);
-        $classObj = $resolved['class_obj'];
-        $unitName = $resolved['unit_name'];
-        $normalizedLevel = $resolved['level'];
-        $currentGradeNum = $resolved['grade'];
+        // Jika belum ada target individual di memorization_targets, gunakan target kurikulum dari tahfizh_kpi_targets
+        if ($targetAyat <= 0) {
+            $eduUnitId = $student->education_unit_id ?? $student->unit_id ?? $resolved['edu_unit']?->id;
+            $actualUnitLevel = $resolved['edu_unit']?->level ?? $resolved['class_obj']?->jenjang ?? $normalizedLevel;
+
+            $levels = array_filter([$actualUnitLevel, $normalizedLevel]);
+            if (in_array(strtoupper((string) $actualUnitLevel), ['MAHAD', "MA'HAD", 'PONPES', 'PESANTREN', 'BOARDING'])) {
+                $levels = array_unique(array_merge($levels, ['PONPES', 'MAHAD', 'PESANTREN', 'BOARDING']));
+            }
+            if (in_array(strtoupper((string) $actualUnitLevel), ['TAUD', 'TKIT', 'TK'])) {
+                $levels = array_unique(array_merge($levels, ['TKIT', 'TAUD', 'TK']));
+            }
+
+            $gradeVariants = $currentGradeNum !== null ? [(string) $currentGradeNum, 'ALL'] : ['ALL'];
+            if ((int) $currentGradeNum === 4) $gradeVariants[] = '3';
+            if ((int) $currentGradeNum === 6) $gradeVariants[] = '5';
+
+            $kpiTarget = DB::table('tahfizh_kpi_targets')
+                ->where('is_active', true)
+                ->where(function ($q) use ($levels, $eduUnitId) {
+                    if (!empty($levels)) {
+                        $q->whereIn('unit_level', $levels);
+                    }
+                    if ($eduUnitId) {
+                        $q->orWhere('education_unit_id', $eduUnitId);
+                    }
+                })
+                ->whereIn('grade_level', $gradeVariants)
+                ->orderByRaw("CASE WHEN grade_level = ? THEN 1 WHEN grade_level IN ('3','5') THEN 2 WHEN grade_level = 'ALL' THEN 3 ELSE 4 END", [(string) ($currentGradeNum ?? 0)])
+                ->first();
+
+            if ($kpiTarget) {
+                $surahTarget = $kpiTarget->target_juz ? "{$kpiTarget->target_juz} ({$kpiTarget->target_ayats} Ayat)" : $kpiTarget->target_name;
+                $targetAyat = (int) ($kpiTarget->target_ayats ?? 0);
+            }
+        }
 
         // Only expose grades represented by actual database records, plus the
         // student's current class. Do not synthesize missing historical grades.
@@ -2801,7 +3414,16 @@ class StudentParentPortalController extends Controller
             $counts[$type] = $items->where('type', $type)->count();
         }
 
+        $eduUnit = $student?->educationUnit ?: $student?->kelas?->unitPendidikan;
+        if (! $eduUnit && $student && ($student->education_unit_id || $student->unit_id)) {
+            $eduUnit = \App\Models\EducationUnit::find($student->education_unit_id ?: $student->unit_id);
+        }
+        if (! $eduUnit && $student && $student->kelas_id) {
+            $eduUnit = \App\Models\Kelas::with('unitPendidikan')->find($student->kelas_id)?->unitPendidikan;
+        }
+
         return response()->json(['success' => true, 'data' => [
+            'unit' => $eduUnit,
             'important' => $items->filter(fn ($item) => in_array($item['priority'], ['mendesak', 'penting'], true))->take(3)->values(),
             'counts' => $counts,
             'upcoming_events' => $items->filter(fn ($i) => $i['type'] === 'event' || $i['type'] === 'calendar' || !empty($i['event']))->take(6)->values(),
@@ -2887,7 +3509,7 @@ class StudentParentPortalController extends Controller
             }
         }
 
-        $isFullAccess = $user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus']);
+        $isFullAccess = $user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus']) && ! $student;
 
         return PengumumanSekolah::query()
             ->where('status_aktif', true)
@@ -2916,25 +3538,42 @@ class StudentParentPortalController extends Controller
                     $target->orWhereJsonContains('target_peran', $role);
                 });
             })
-            ->when(! $isFullAccess, function ($q) use ($unitIds, $unitName) {
-                $q->where(function ($sub) use ($unitIds, $unitName) {
-                    $sub->where(function ($nullSub) {
-                        $nullSub->whereNull('data_tambahan->unit_id')
-                                ->whereNull('data_tambahan->education_unit_id');
-                    })
-                    ->orWhere('data_tambahan->unit_id', 'all')
-                    ->orWhere('data_tambahan->education_unit_id', 'all')
-                        ->orWhere('data_tambahan->is_public', true)
-                        ->orWhere('data_tambahan->target_unit', 'all')
-                        ->orWhere('data_tambahan->target_unit_name', 'like', '%Semua%')
-                        ->orWhere('data_tambahan->target_unit_name', 'like', '%Yayasan%')
-                        ->orWhere('data_tambahan->unit_name', 'like', '%Semua%')
-                        ->orWhere('data_tambahan->unit_name', 'like', '%Yayasan%');
-                    if (! empty($unitIds)) {
-                        $sub->orWhereIn('data_tambahan->unit_id', $unitIds)
-                            ->orWhereIn('data_tambahan->education_unit_id', $unitIds);
+            ->when(! $isFullAccess, function ($q) use ($request, $unitIds, $unitName) {
+                $strictUnit = $request->boolean('strict_unit');
+                $q->where(function ($sub) use ($strictUnit, $unitIds, $unitName) {
+                    if (! $strictUnit) {
+                        $sub->where(function ($yayasanSub) {
+                            $yayasanSub->where('data_tambahan->unit_id', 'all')
+                                ->orWhere('data_tambahan->education_unit_id', 'all')
+                                ->orWhere('data_tambahan->is_public', true)
+                                ->orWhere('data_tambahan->target_unit', 'all')
+                                ->orWhere('data_tambahan->target_unit_name', 'like', '%Semua%')
+                                ->orWhere('data_tambahan->target_unit_name', 'like', '%Yayasan%')
+                                ->orWhere('data_tambahan->unit_name', 'like', '%Semua%')
+                                ->orWhere('data_tambahan->unit_name', 'like', '%Yayasan%')
+                                ->orWhere(function ($nullSub) {
+                                    $nullSub->whereNull('data_tambahan->unit_id')
+                                        ->whereNull('data_tambahan->education_unit_id')
+                                        ->whereNull('data_tambahan->unit_name');
+                                });
+                        });
                     }
-                    if ($unitName) {
+                    if (! empty($unitIds)) {
+                        if ($strictUnit) {
+                            $sub->where(function ($strictSub) use ($unitIds, $unitName) {
+                                $strictSub->whereIn('data_tambahan->unit_id', $unitIds)
+                                    ->orWhereIn('data_tambahan->education_unit_id', $unitIds);
+                                if ($unitName) {
+                                    $strictSub->orWhere('data_tambahan->unit_name', $unitName)
+                                        ->orWhere('data_tambahan->education_unit', $unitName);
+                                }
+                            });
+                        } else {
+                            $sub->orWhereIn('data_tambahan->unit_id', $unitIds)
+                                ->orWhereIn('data_tambahan->education_unit_id', $unitIds);
+                        }
+                    }
+                    if (! $strictUnit && $unitName) {
                         $sub->orWhere('data_tambahan->unit_name', $unitName)
                             ->orWhere('data_tambahan->education_unit', $unitName);
                     }
@@ -3056,11 +3695,22 @@ class StudentParentPortalController extends Controller
 
     public function bills(Request $request): JsonResponse
     {
+        $user = $request->user();
+        if ($user) {
+            $isParent = \App\Models\ParentModel::query()->where('user_id', $user->id)->exists()
+                || $user->hasAnyRole(['Orang Tua', 'orang_tua', 'Parent', 'parent', 'wali', 'Wali Murid']);
+            $isPrivilegedStaff = $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Tata Usaha', 'tu', 'Operator', 'operator']);
+
+            if (! $isParent && ! $isPrivilegedStaff) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akses ditolak. Informasi tagihan dan SPP khusus untuk akun Orang Tua/Wali Murid.',
+                ], 403);
+            }
+        }
+
         $student = $this->getStudentContext($request);
         if (! $student) return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
-
-        $bills = StudentBill::query()->with(['feeCategory', 'academicYear', 'payments'])
-            ->where('student_id', $student->id)->orderBy('due_date', 'desc')->paginate(20);
 
         $unit = $student->educationUnit;
         $unitMeta = is_array($unit?->metadata) ? $unit->metadata : [];
@@ -3085,8 +3735,81 @@ class StudentParentPortalController extends Controller
             'va_biller_code' => $bsiPrefix,
         ];
 
+        // Cek integrasi SIPDEI Billing (Pihak Ketiga)
+        $nisPembayaran = $studentMeta['nis_pembayaran'] ?? $studentMeta['no_pendaftaran'] ?? $student->nis ?? null;
+        $sipdeiService = app(\App\Services\SipdeiBillingService::class);
+
+        if ($nisPembayaran && $sipdeiService->isConfigured()) {
+            $filters = [];
+            if ($request->filled('status_tagihan')) {
+                $filters['status_tagihan'] = (string) $request->query('status_tagihan');
+            }
+            if ($request->filled('id_tahun_ajaran')) {
+                $filters['id_tahun_ajaran'] = (int) $request->query('id_tahun_ajaran');
+            }
+            if ($request->filled('bulan_tagihan')) {
+                $filters['bulan_tagihan'] = (string) $request->query('bulan_tagihan');
+            }
+            if ($request->filled('bulan_tagihan_end')) {
+                $filters['bulan_tagihan_end'] = (string) $request->query('bulan_tagihan_end');
+            }
+            if ($request->filled('limit')) {
+                $filters['limit'] = min(100, max(1, (int) $request->query('limit', 20)));
+            } else {
+                $filters['limit'] = 20;
+            }
+            if ($request->filled('page')) {
+                $filters['page'] = max(1, (int) $request->query('page', 1));
+            }
+
+            $forceRefresh = $request->boolean('refresh', false);
+            $sipdeiResult = $sipdeiService->getBillingHistory((string) $nisPembayaran, $filters, $forceRefresh);
+
+            if (!empty($sipdeiResult['success']) && !empty($sipdeiResult['data']['tagihan'])) {
+                $sipdeiBills = $sipdeiService->formatBillsForPortal($sipdeiResult['data']['tagihan'], $student);
+                $pagination = $sipdeiResult['pagination'] ?? [];
+                $currentPage = (int) ($pagination['page'] ?? 1);
+                $perPage = (int) ($pagination['limit'] ?? count($sipdeiBills));
+                $total = (int) ($pagination['total'] ?? count($sipdeiBills));
+                $lastPage = (int) ($pagination['pages'] ?? 1);
+
+                $billsPayload = [
+                    'current_page' => $currentPage,
+                    'data' => $sipdeiBills,
+                    'first_page_url' => $request->url() . '?page=1',
+                    'from' => count($sipdeiBills) > 0 ? (($currentPage - 1) * $perPage) + 1 : null,
+                    'last_page' => $lastPage,
+                    'last_page_url' => $request->url() . '?page=' . $lastPage,
+                    'links' => [],
+                    'next_page_url' => $currentPage < $lastPage ? $request->url() . '?page=' . ($currentPage + 1) : null,
+                    'path' => $request->url(),
+                    'per_page' => $perPage,
+                    'prev_page_url' => $currentPage > 1 ? $request->url() . '?page=' . ($currentPage - 1) : null,
+                    'to' => count($sipdeiBills) > 0 ? min($total, $currentPage * $perPage) : null,
+                    'total' => $total,
+                ];
+
+                return response()->json([
+                    'success' => true,
+                    'source' => 'sipdei',
+                    'data' => $billsPayload,
+                    'payment_info' => $paymentInfo,
+                    'sipdei_meta' => [
+                        'nis_pembayaran' => $nisPembayaran,
+                        'nama_lengkap' => $sipdeiResult['data']['nama_lengkap'] ?? $student->full_name,
+                        'from_cache' => $sipdeiResult['from_cache'] ?? false,
+                    ],
+                ]);
+            }
+        }
+
+        // Fallback ke data lokal StudentBill jika SIPDEI belum terhubung / kosong
+        $bills = StudentBill::query()->with(['feeCategory', 'academicYear', 'payments'])
+            ->where('student_id', $student->id)->orderBy('due_date', 'desc')->paginate(20);
+
         return response()->json([
             'success' => true,
+            'source' => 'local',
             'data' => $bills,
             'payment_info' => $paymentInfo,
         ]);
@@ -3146,6 +3869,58 @@ class StudentParentPortalController extends Controller
         ]);
 
         $stale = $signedVersion !== null && $signedVersion !== $currentHash;
+
+        // Notifikasi balik ke Guru pembuat catatan
+        try {
+            $note->loadMissing(['teacher.employee']);
+            $teacherUserId = $note->teacher?->user_id ?? $note->teacher?->employee?->user_id;
+            if ($teacherUserId) {
+                $parentName = $parent->full_name ?? $user->name ?? 'Orang Tua / Wali';
+                $studentName = $student->full_name ?? 'Santri';
+                $title = 'Buku Penghubung Ditandatangani';
+                $body = "{$parentName} telah menandatangani catatan {$studentName}" . ($parentNotes ? ": \"{$parentNotes}\"" : '.');
+
+                Notification::deliver(
+                    (string) $teacherUserId,
+                    $title,
+                    $body,
+                    'buku_penghubung',
+                    [
+                        'type' => 'student_note_signed',
+                        'note_id' => $note->id,
+                        'student_id' => $student->id,
+                        'follow_up' => $parentNotes,
+                        'signed_at' => now()->toIso8601String(),
+                    ]
+                );
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Gagal mengirimkan notifikasi buku penghubung ke guru: ' . $e->getMessage());
+        }
+
+        // Realtime broadcast ke kanal santri/wali
+        try {
+            app(RealtimeBroadcastService::class)->broadcastStudentActivity(
+                $note->student_id,
+                [
+                    'id' => 'note-signed-' . $note->id,
+                    'type' => 'komentar',
+                    'title' => 'Catatan ditandatangani orang tua',
+                    'subtitle' => '“' . ($parentNotes ?: 'Telah disetujui & ditandatangani') . '”',
+                    'date_label' => 'Hari ini',
+                    'time_label' => now()->format('H:i'),
+                    'badge_label' => 'Disetujui',
+                    'badge_type' => 'emerald',
+                    'has_red_dot' => false,
+                    'icon' => 'check-decagram',
+                    'icon_bg' => '#ECFDF5',
+                    'icon_color' => '#059669',
+                    'screen' => 'Komentar',
+                    'verifier_role' => 'Orang Tua / Wali Santri',
+                    'verifier_name' => $parent->full_name ?? $user->name ?? 'Orang Tua',
+                ]
+            );
+        } catch (\Throwable) {}
 
         return response()->json([
             'success' => true,

@@ -43,15 +43,30 @@ class LmsUjianSeeder extends Seeder
 
         foreach ($kelases as $kls) {
             $unitId = $kls->unit_pendidikan_id;
+            $unitGuru = ($unitId ? Employee::where('unit_id', $unitId)->first() : null) ?? $guru;
             
-            // Subjek PAI & Pancasila dinamis sesuai unit rombel
+            // Subjek PAI & Pancasila dinamis sesuai unit rombel (TIDAK BOLEH lintas unit)
             $paiSubj = \App\Models\Subject::where('unit_pendidikan_id', $unitId)
                 ->where(fn ($q) => $q->where('name', 'Pendidikan Agama Islam (PAI)')->orWhere('name', 'like', '%Agama Islam%'))
-                ->first() ?? \App\Models\Subject::where('name', 'like', '%Agama Islam%')->first();
+                ->first() ?? \App\Models\Subject::where('unit_pendidikan_id', $unitId)->first();
 
             $pancasilaSubj = \App\Models\Subject::where('unit_pendidikan_id', $unitId)
                 ->where(fn ($q) => $q->where('name', 'Pendidikan Pancasila')->orWhere('name', 'like', '%Pancasila%'))
-                ->first() ?? \App\Models\Subject::where('name', 'like', '%Pancasila%')->first();
+                ->first();
+
+            if (! $pancasilaSubj && $unitId) {
+                $pancasilaSubj = \App\Models\Subject::firstOrCreate([
+                    'unit_pendidikan_id' => $unitId,
+                    'name' => 'Pendidikan Pancasila',
+                ], [
+                    'code' => 'MAPEL-PANCASILA-' . substr($unitId, 0, 8),
+                    'kurikulum_id' => $kurikulumId,
+                    'nama_mapel' => 'Pendidikan Pancasila',
+                    'kelompok_mapel' => 'Kelompok A',
+                    'kategori' => 'Wajib',
+                    'status' => true,
+                ]);
+            }
 
             $kisiPai = $paiSubj ? LmsKisiKisi::firstOrCreate([
                 'mata_pelajaran_id' => $paiSubj->id,
@@ -60,7 +75,7 @@ class LmsUjianSeeder extends Seeder
                 'kurikulum_id' => $kurikulumId,
                 'semester_id' => $semester->id,
                 'tahun_ajaran_id' => $academicYear->id,
-                'guru_id' => $guru?->id,
+                'guru_id' => $unitGuru?->id,
                 'judul_kisi' => 'Kisi-kisi ' . $paiSubj->name . ' — ' . $kls->nama_kelas,
                 'jenis_ujian' => 'UH',
                 'jumlah_soal' => 25,
@@ -75,7 +90,7 @@ class LmsUjianSeeder extends Seeder
                 'kurikulum_id' => $kurikulumId,
                 'semester_id' => $semester->id,
                 'tahun_ajaran_id' => $academicYear->id,
-                'guru_id' => $guru?->id,
+                'guru_id' => $unitGuru?->id,
                 'judul_kisi' => 'Kisi-kisi ' . $pancasilaSubj->name . ' — ' . $kls->nama_kelas,
                 'jenis_ujian' => 'UH',
                 'jumlah_soal' => 25,
@@ -92,7 +107,7 @@ class LmsUjianSeeder extends Seeder
                     'kisi_kisi_id' => $kisiPai->id,
                     'kelas_id' => $kls->id,
                     'semester_id' => $semester->id,
-                    'guru_id' => $guru?->id,
+                    'guru_id' => $unitGuru?->id,
                     'instruksi' => 'Kerjakan seluruh butir soal Pendidikan Agama Islam (PAI) dengan jujur dan teliti.',
                     'waktu_mulai' => now()->startOfDay(),
                     'waktu_selesai' => '2026-12-31 23:59:59',
@@ -115,7 +130,7 @@ class LmsUjianSeeder extends Seeder
                     'kisi_kisi_id' => $kisiPancasila->id,
                     'kelas_id' => $kls->id,
                     'semester_id' => $semester->id,
-                    'guru_id' => $guru?->id,
+                    'guru_id' => $unitGuru?->id,
                     'instruksi' => 'Kerjakan seluruh butir soal Pendidikan Pancasila dengan jujur dan teliti.',
                     'waktu_mulai' => now()->startOfDay(),
                     'waktu_selesai' => '2026-12-31 23:59:59',
@@ -128,27 +143,62 @@ class LmsUjianSeeder extends Seeder
                     'status' => 'berlangsung',
                 ]
             );
+
+            // Pastikan kisi-kisi memiliki butir soal lengkap di Bank Soal (dinamis sesuai unit & mapel)
+            foreach ([$kisiPai, $kisiPancasila] as $kisiTarget) {
+                if ($kisiTarget && $kisiTarget->bankSoal()->count() < $kisiTarget->jumlah_soal) {
+                    $needed = $kisiTarget->jumlah_soal - $kisiTarget->bankSoal()->count();
+                    $subjName = $kisiTarget->subject?->name ?? 'Mata Pelajaran';
+                    $batch = [];
+                    for ($i = 1; $i <= $needed; $i++) {
+                        $batch[] = [
+                            'id' => (string) \Illuminate\Support\Str::uuid(),
+                            'kisi_kisi_id' => $kisiTarget->id,
+                            'mata_pelajaran_id' => $kisiTarget->mata_pelajaran_id,
+                            'kode_soal' => 'SOAL-' . strtoupper(\Illuminate\Support\Str::slug($kisiTarget->subject?->code ?? 'MAPEL')) . '-' . str_pad($i, 2, '0', STR_PAD_LEFT),
+                            'pertanyaan' => "Butir Soal #{$i}: Pemahaman materi {$subjName} pada {$kisiTarget->judul_kisi}.",
+                            'tipe_soal' => $i <= 20 ? 'pg' : 'esai',
+                            'opsi_a' => 'Pernyataan A (Jawaban yang tepat)',
+                            'opsi_b' => 'Pernyataan B (Pengecoh)',
+                            'opsi_c' => 'Pernyataan C (Pengecoh)',
+                            'opsi_d' => 'Pernyataan D (Pengecoh)',
+                            'opsi_e' => 'Pernyataan E (Pengecoh)',
+                            'kunci_jawaban' => $i <= 20 ? 'A' : 'Rubrik jawaban esai uraian terstruktur',
+                            'pembahasan' => "Pembahasan butir soal #{$i} terkait materi {$subjName}.",
+                            'poin' => 4.0,
+                            'tingkat_kesulitan' => $i % 3 === 0 ? 'sulit' : ($i % 2 === 0 ? 'sedang' : 'mudah'),
+                            'status' => true,
+                            'created_at' => now(),
+                            'updated_at' => now(),
+                        ];
+                    }
+                    \App\Models\LmsBankSoal::insert($batch);
+                }
+            }
         }
 
-        if ($siswa) {
-            LmsUjianSesi::updateOrCreate(
-                [
-                    'ujian_id' => $ujianPai->id,
-                    'siswa_id' => $siswa->id,
-                ],
-                [
-                    'waktu_mulai' => now()->subMinutes(30),
-                    'waktu_selesai' => now()->subMinutes(5),
-                    'durasi_aktual_detik' => 1500,
-                    'jumlah_benar' => 4,
-                    'jumlah_salah' => 1,
-                    'jumlah_kosong' => 0,
-                    'nilai_raw' => 19.0,
-                    'nilai_final' => 85.0,
-                    'status' => 'selesai',
-                    'ip_address' => '127.0.0.1',
-                ]
-            );
+        if (isset($ujianPai)) {
+            $siswa = Student::where('current_class_id', $ujianPai->kelas_id)->first();
+            if ($siswa) {
+                LmsUjianSesi::updateOrCreate(
+                    [
+                        'ujian_id' => $ujianPai->id,
+                        'siswa_id' => $siswa->id,
+                    ],
+                    [
+                        'waktu_mulai' => now()->subMinutes(30),
+                        'waktu_selesai' => now()->subMinutes(5),
+                        'durasi_aktual_detik' => 1500,
+                        'jumlah_benar' => 4,
+                        'jumlah_salah' => 1,
+                        'jumlah_kosong' => 0,
+                        'nilai_raw' => 19.0,
+                        'nilai_final' => 85.0,
+                        'status' => 'selesai',
+                        'ip_address' => '127.0.0.1',
+                    ]
+                );
+            }
         }
     }
 }

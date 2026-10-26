@@ -70,4 +70,9 @@ class StudentNote extends Model
     {
         return $this->belongsTo(Semester::class, 'semester_id');
     }
+
+    public function signedByUser()
+    {
+        return $this->belongsTo(User::class, 'signed_by_user_id');
+    }
 }

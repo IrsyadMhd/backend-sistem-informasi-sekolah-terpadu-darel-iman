@@ -53,6 +53,19 @@ class EQuranController extends Controller
     }
 
     /**
+     * GET /api/equran/juz
+     * Return 30 Juz metadata catalog (Surah & Ayat Start to End).
+     */
+    public function juzCatalog(): JsonResponse
+    {
+        return response()->json([
+            'success' => true,
+            'message' => 'Metadata 30 Juz Al-Qur\'an berhasil dimuat',
+            'data' => \App\Helpers\QuranJuzHelper::getAllJuzMetadata(),
+        ]);
+    }
+
+    /**
      * POST /api/equran/surah
      * Create a new surah entry
      */

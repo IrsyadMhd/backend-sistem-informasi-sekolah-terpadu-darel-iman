@@ -1813,7 +1813,7 @@ class TeacherPortalController extends Controller
         }
 
         $notes = StudentNote::query()
-            ->with(['student', 'teacher'])
+            ->with(['student', 'teacher', 'signedByUser'])
             ->whereHas('student', fn ($query) => $query->where(fn ($scope) => $scope->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds)))
             ->when($studentId, fn ($q) => $q->where('student_id', $studentId))
             ->when($request->query('category'), fn ($q, $category) => $q->where('category', $category))
@@ -1827,6 +1827,16 @@ class TeacherPortalController extends Controller
             ->orderBy('date', 'desc')
             ->latest('created_at')
             ->paginate($request->query('per_page', 15));
+
+        $notes->getCollection()->transform(function (StudentNote $note) {
+            $hash = $note->signature_content_hash;
+            $signed = $note->signed_by_user_id !== null && $note->signed_at !== null;
+            $stale = $signed && $hash !== null && $hash !== StudentNote::contentHash($note->content);
+            $note->setAttribute('signature_status', $signed ? ($stale ? 'signed_updated' : 'signed') : 'unsigned');
+            $note->setAttribute('signature_stale', $stale);
+
+            return $note;
+        });
 
         return response()->json([
             'success' => true,
@@ -1882,15 +1892,22 @@ class TeacherPortalController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Catatan siswa berhasil disimpan.',
-            'data' => $note->load(['student', 'teacher']),
+            'data' => $note->load(['student', 'teacher', 'signedByUser']),
         ], 201);
     }
 
     public function showStudentNote(Request $request, string $id): JsonResponse
     {
         $note = $this->scopedStudentNote($request, $id, false);
+        $note->load(['student', 'teacher', 'signedByUser']);
 
-        return response()->json(['success' => true, 'data' => $note->load(['student', 'teacher'])]);
+        $hash = $note->signature_content_hash;
+        $signed = $note->signed_by_user_id !== null && $note->signed_at !== null;
+        $stale = $signed && $hash !== null && $hash !== StudentNote::contentHash($note->content);
+        $note->setAttribute('signature_status', $signed ? ($stale ? 'signed_updated' : 'signed') : 'unsigned');
+        $note->setAttribute('signature_stale', $stale);
+
+        return response()->json(['success' => true, 'data' => $note]);
     }
 
     public function updateStudentNote(Request $request, string $id): JsonResponse
@@ -1902,10 +1919,43 @@ class TeacherPortalController extends Controller
         Student::query()->where(fn ($query) => $query->whereIn('kelas_id', $classIds)->orWhereIn('class_id', $classIds))->findOrFail($validated['student_id']);
         $note->update($validated);
 
+        // Realtime Broadcast pembaruan catatan ke kanal santri/wali
+        try {
+            if ($note->visible_to_parent || $note->visible_to_student) {
+                app(RealtimeBroadcastService::class)->broadcastStudentActivity(
+                    $note->student_id,
+                    [
+                        'id' => 'note-updated-' . $note->id,
+                        'type' => 'komentar',
+                        'title' => 'Catatan guru diperbarui',
+                        'subtitle' => '“' . ($note->content ?? $note->title ?? 'Catatan guru') . '”',
+                        'date_label' => 'Hari ini',
+                        'time_label' => now()->format('H:i'),
+                        'badge_label' => 'Revisi',
+                        'badge_type' => 'amber',
+                        'has_red_dot' => true,
+                        'icon' => 'message-text',
+                        'icon_bg' => '#FFFBEB',
+                        'icon_color' => '#D97706',
+                        'screen' => 'Komentar',
+                        'verifier_role' => 'Wali Kelas / Guru Pengampu',
+                        'verifier_name' => $teacher?->name ?? $request->user()?->name ?? 'Guru Pengajar',
+                    ]
+                );
+            }
+        } catch (\Throwable) {}
+
+        $fresh = $note->fresh()->load(['student', 'teacher', 'signedByUser']);
+        $hash = $fresh->signature_content_hash;
+        $signed = $fresh->signed_by_user_id !== null && $fresh->signed_at !== null;
+        $stale = $signed && $hash !== null && $hash !== StudentNote::contentHash($fresh->content);
+        $fresh->setAttribute('signature_status', $signed ? ($stale ? 'signed_updated' : 'signed') : 'unsigned');
+        $fresh->setAttribute('signature_stale', $stale);
+
         return response()->json([
             'success' => true,
             'message' => 'Catatan siswa berhasil diperbarui.',
-            'data' => $note->fresh()->load(['student', 'teacher']),
+            'data' => $fresh,
         ]);
     }
 

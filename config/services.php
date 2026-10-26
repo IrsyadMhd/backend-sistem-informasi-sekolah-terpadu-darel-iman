@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'sipdei' => [
+        'base_url' => rtrim(env('SIPDEI_BASE_URL', 'https://sipdei.dareliman.tech'), '/'),
+        'api_key' => env('SIPDEI_API_KEY'),
+        'cache_ttl' => (int) env('SIPDEI_CACHE_TTL', 600),
+    ],
+
 ];

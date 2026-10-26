@@ -106,14 +106,50 @@ class MutabaahPortalService
             ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
             ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
             ->where('d.daily_header_id', $header->id)->orderBy('ti.sort_order')
-            ->get(['d.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes', 'd.input_source', 'd.input_location', 'd.verification_status', 'a.code as agenda_code', 'a.name', 'a.input_type', 'c.name as category', 'c.code as category_code', 'c.id as category_id'])
+            ->get([
+                'd.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes',
+                'd.input_source', 'd.input_location', 'd.verification_status',
+                'a.code as agenda_code', 'a.name', 'a.input_type',
+                'c.name as category', 'c.code as category_code', 'c.id as category_id',
+                'c.icon as category_icon', 'c.color as category_color',
+            ])
             : collect();
 
-        // Jika belum ada header atau details kosong, inisialisasi otomatis dari template aktif
+        // Jika belum ada header atau details kosong, inisialisasi otomatis dari template aktif tata usaha per unit
         if (! $header || $details->isEmpty()) {
-            $template = \App\Models\MutabaahTemplate::where('code', 'TPL-MUTABAAH-TERPADU')->first()
-                ?? \App\Models\MutabaahTemplate::where('education_unit_id', $student->unit_id)->first()
-                ?? \App\Models\MutabaahTemplate::where('is_active', true)->first();
+            $template = null;
+
+            // 1. Cek Penugasan Template Spesifik dari Tata Usaha (MutabaahTemplateAssignment)
+            if (\Illuminate\Support\Facades\Schema::hasTable('mutabaah_template_assignments')) {
+                $matchedAssignment = \App\Models\MutabaahTemplateAssignment::query()
+                    ->where('education_unit_id', $student->unit_id)
+                    ->where('is_active', true)
+                    ->whereDate('start_date', '<=', $date)
+                    ->where(function ($q) use ($date) {
+                        $q->whereNull('end_date')->orWhereDate('end_date', '>=', $date);
+                    })
+                    ->where(fn ($q) => $q->whereNull('kelas_id')->orWhere('kelas_id', $student->class_id)->orWhere('kelas_id', $student->kelas_id))
+                    ->where(fn ($q) => $q->whereNull('rombel_id')->orWhere('rombel_id', $student->kelas_id))
+                    ->orderByDesc('priority')
+                    ->first();
+
+                if ($matchedAssignment) {
+                    $template = $matchedAssignment->template()->where('is_active', true)->first();
+                }
+            }
+
+            // 2. Template Spesifik Unit Pendidikan yang diinputkan Tata Usaha (TK/RA, SD, SMP, SMA)
+            if (! $template) {
+                $template = \App\Models\MutabaahTemplate::where('education_unit_id', $student->unit_id)
+                    ->where('is_active', true)
+                    ->first();
+            }
+
+            // 3. Fallback ke Template Aktif Terakhir di Database
+            if (! $template) {
+                $template = \App\Models\MutabaahTemplate::where('is_active', true)->orderByDesc('created_at')->first()
+                    ?? \App\Models\MutabaahTemplate::first();
+            }
 
             if ($template) {
                 $academicYear = \App\Models\AcademicYear::where('is_active', true)->first()
@@ -128,7 +164,7 @@ class MutabaahPortalService
                     $templateItems = $template->items()->where('is_active', true)->get();
                     $validUserId = $student->user_id
                         ?? $student->parent?->user_id
-                        ?? \App\Models\User::where('email', 'superadmin@dareliman.sch.id')->value('id')
+                        ?? \App\Models\User::role(['Super Admin', 'super_admin'])->value('id')
                         ?? \App\Models\User::value('id');
 
                     DB::table('mutabaah_daily_headers')->insert([
@@ -160,7 +196,7 @@ class MutabaahPortalService
                 if ($header) {
                     $validUserId = $student->user_id
                         ?? $student->parent?->user_id
-                        ?? \App\Models\User::where('email', 'superadmin@dareliman.sch.id')->value('id')
+                        ?? \App\Models\User::role(['Super Admin', 'super_admin'])->value('id')
                         ?? \App\Models\User::value('id');
 
                     $progSettingInit = DB::table('education_program_settings')
@@ -220,7 +256,13 @@ class MutabaahPortalService
                         ->join('mutabaah_agenda_items as a', 'a.id', '=', 'd.agenda_item_id')
                         ->join('mutabaah_categories as c', 'c.id', '=', 'a.category_id')
                         ->where('d.daily_header_id', $header->id)->orderBy('ti.sort_order')
-                        ->get(['d.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes', 'd.input_source', 'd.input_location', 'd.verification_status', 'a.code as agenda_code', 'a.name', 'a.input_type', 'c.name as category', 'c.code as category_code', 'c.id as category_id']);
+                        ->get([
+                            'd.id', 'd.agenda_item_id', 'd.status_value', 'd.numeric_value', 'd.text_value', 'd.notes',
+                            'd.input_source', 'd.input_location', 'd.verification_status',
+                            'a.code as agenda_code', 'a.name', 'a.input_type',
+                            'c.name as category', 'c.code as category_code', 'c.id as category_id',
+                            'c.icon as category_icon', 'c.color as category_color',
+                        ]);
                 }
             }
         }
@@ -260,51 +302,55 @@ class MutabaahPortalService
                 $d->input_location === 'home'
             );
 
-            // Jika amalan rumah dan input_source bukan 'parent', berarti orang tua BELUM mengisi!
-            $isParentFilled = $d->input_source === 'parent';
-            // Jika amalan sekolah / asrama dan input_source adalah 'system' (placeholder) atau belum diisi guru/musyrif, berarti belum diisi!
-            $isStaffFilled = in_array($d->input_source, ['teacher', 'supervisor', 'school', 'admin', 'guru', 'musyrif']);
-            $effectiveStatus = $isHome
-                ? ($isParentFilled ? $d->status_value : null)
-                : ($isStaffFilled ? $d->status_value : null);
+            // Status riil amalan dari basis data PostgreSQL
+            $realStatus = $d->status_value ?: null;
+            $inputSource = $d->input_source ?: ($isHome ? 'parent' : ($isBoarding ? 'musyrif' : 'teacher'));
+            $isParentFilled = $inputSource === 'parent' && ! empty($realStatus);
+            $isStaffFilled = in_array($inputSource, ['teacher', 'supervisor', 'school', 'admin', 'guru', 'musyrif']) && ! empty($realStatus);
 
             return (object) array_merge((array) $d, [
-                'status_value' => $effectiveStatus,
-                'input_source' => $isParentFilled ? 'parent' : ($isStaffFilled ? $d->input_source : null),
+                'status_value' => $realStatus,
+                'input_source' => $inputSource,
+                'is_parent_filled' => $isParentFilled,
+                'is_staff_filled' => $isStaffFilled,
                 'scope' => $isBoarding ? 'boarding' : ($isHome ? 'home' : 'school'),
                 'responsible_role' => $isBoarding ? 'musyrif' : ($isHome ? 'parent' : 'teacher'),
                 'requires_verification' => (bool) ($rule?->requires_verification ?? false),
-                'can_parent_edit' => $isHome && (! $header || $header->status === 'draft'),
+                'can_parent_edit' => $isHome && (! $header || in_array($header->status, ['draft', 'parent_reviewed', 'open'])),
             ]);
         });
 
-        $enrichedDetails = $enrichedDetails->sortBy(function ($item) {
-            return $item->scope === 'home' ? 0 : 1;
-        })->values();
+        $enrichedDetails = $enrichedDetails->values();
 
         $signature = $header ? MutabaahParentSignature::where('daily_header_id', $header->id)->latest('signed_at')->first() : null;
         $dateCarbon = Carbon::parse($date);
         $weekly = $this->periodSummary($student->id, $dateCarbon->copy()->startOfWeek(), $dateCarbon->copy()->endOfWeek());
         $monthly = $this->periodSummary($student->id, $dateCarbon->copy()->startOfMonth(), $dateCarbon->copy()->endOfMonth());
 
-        $activeSemester = \App\Models\Semester::where('is_active', true)->first();
+        $activeSemester = \App\Models\Semester::with('academicYear')->where('is_active', true)->first()
+            ?? \App\Models\Semester::with('academicYear')->orderByDesc('start_date')->first();
         $semFrom = ($activeSemester && $activeSemester->start_date)
             ? Carbon::parse($activeSemester->start_date)
-            : ($dateCarbon->month >= 7 ? Carbon::create($dateCarbon->year, 7, 1) : Carbon::create($dateCarbon->year, 1, 1));
+            : Carbon::parse($date)->subMonths(6);
         $semTo = ($activeSemester && $activeSemester->end_date)
             ? Carbon::parse($activeSemester->end_date)
-            : ($dateCarbon->month >= 7 ? Carbon::create($dateCarbon->year, 12, 31) : Carbon::create($dateCarbon->year, 6, 30));
+            : Carbon::parse($date);
         $semester = $this->periodSummary($student->id, $semFrom, $semTo);
+        $semesterName = $activeSemester ? ($activeSemester->name ? "Semester {$activeSemester->name}" : "Semester {$activeSemester->sequence}") : 'Semester Aktif';
+        $semester['semester_name'] = $semesterName;
+        $semester['academic_year'] = $activeSemester?->academicYear?->name ?? null;
 
-        $todayGoodCount = $enrichedDetails->filter(fn ($d) => $d->status_value === 'good')->count();
-        $todayLessCount = $enrichedDetails->filter(fn ($d) => $d->status_value === 'less')->count();
-        $todayNotDoneCount = $enrichedDetails->filter(fn ($d) => $d->status_value === 'not_done')->count();
-        $todayNaCount = $enrichedDetails->filter(fn ($d) => $d->status_value === 'na')->count();
+        $todayGoodCount = (int) ($header->good_count ?? $enrichedDetails->filter(fn ($d) => $d->status_value === 'good')->count());
+        $todayLessCount = (int) ($header->less_count ?? $enrichedDetails->filter(fn ($d) => $d->status_value === 'less')->count());
+        $todayNotDoneCount = (int) ($header->not_done_count ?? $enrichedDetails->filter(fn ($d) => $d->status_value === 'not_done')->count());
+        $todayNaCount = (int) ($header->na_count ?? $enrichedDetails->filter(fn ($d) => $d->status_value === 'na')->count());
 
         return [
             'student' => ['id' => $student->id, 'name' => $student->full_name, 'nis' => $student->nis, 'photo' => data_get($student->metadata, 'photo'), 'unit' => $student->educationUnit?->name, 'class_name' => $student->kelas?->nama_kelas ?? $student->kelas?->name ?? $student->schoolClass?->name],
             'date' => $date,
             'program' => $programType,
+            'academic_year' => $activeSemester?->academicYear?->name ?? null,
+            'semester_name' => $semesterName,
             'care_location' => $isBoarding ? 'boarding' : 'home',
             'today' => $header ? [
                 'id' => $header->id, 'status' => $header->status, 'score' => $header->score,
@@ -332,19 +378,25 @@ class MutabaahPortalService
             ->groupBy('h.id', 'h.activity_date', 'h.status', 'h.score', 'h.good_count', 'h.less_count', 'h.not_done_count', 'h.na_count', 'h.supervisor_notes')
             ->orderByDesc('h.activity_date')->paginate(min((int) ($filters['per_page'] ?? 20), 60));
 
-        $activeSemester = \App\Models\Semester::where('is_active', true)->first();
+        $activeSemester = \App\Models\Semester::with('academicYear')->where('is_active', true)->first()
+            ?? \App\Models\Semester::with('academicYear')->orderByDesc('start_date')->first();
         $semFrom = ($activeSemester && $activeSemester->start_date)
             ? Carbon::parse($activeSemester->start_date)
-            : ($until->month >= 7 ? Carbon::create($until->year, 7, 1) : Carbon::create($until->year, 1, 1));
+            : Carbon::parse($until)->subMonths(6);
         $semTo = ($activeSemester && $activeSemester->end_date)
             ? Carbon::parse($activeSemester->end_date)
-            : ($until->month >= 7 ? Carbon::create($until->year, 12, 31) : Carbon::create($until->year, 6, 30));
+            : Carbon::parse($until);
+
+        $semester = $this->periodSummary($student->id, $semFrom, $semTo);
+        $semesterName = $activeSemester ? ($activeSemester->name ? "Semester {$activeSemester->name}" : "Semester {$activeSemester->sequence}") : 'Semester Aktif';
+        $semester['semester_name'] = $semesterName;
+        $semester['academic_year'] = $activeSemester?->academicYear?->name ?? null;
 
         return [
             'rows' => $rows,
             'weekly' => $this->periodSummary($student->id, $until->copy()->startOfWeek(), $until->copy()->endOfWeek()),
             'monthly' => $this->periodSummary($student->id, $until->copy()->startOfMonth(), $until->copy()->endOfMonth()),
-            'semester' => $this->periodSummary($student->id, $semFrom, $semTo),
+            'semester' => $semester,
         ];
     }
 
@@ -389,13 +441,57 @@ class MutabaahPortalService
     {
         $cacheKey = "mutabaah_period_{$studentId}_{$from->toDateString()}_{$to->toDateString()}";
 
-        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function () use ($studentId, $from, $to) {
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 60, function () use ($studentId, $from, $to) {
+            $totalDays = (int) ($from->diffInDays($to) + 1);
             $row = $this->visibleHeaders($studentId)->whereBetween('h.activity_date', [$from->toDateString(), $to->toDateString()])
-                ->selectRaw('ROUND(AVG(h.score),2) score, COUNT(*) days, SUM(h.good_count) good, SUM(h.less_count) less, SUM(h.not_done_count) not_done, SUM(h.na_count) na')->first();
+                ->selectRaw('
+                    ROUND(AVG(h.score), 2) as score,
+                    COUNT(*) as recorded_days,
+                    COUNT(CASE WHEN h.score IS NOT NULL AND (COALESCE(h.good_count, 0) + COALESCE(h.less_count, 0) + COALESCE(h.not_done_count, 0) > 0) THEN 1 END) as filled_days,
+                    SUM(COALESCE(h.good_count, 0)) as good,
+                    SUM(COALESCE(h.less_count, 0)) as less,
+                    SUM(COALESCE(h.not_done_count, 0)) as not_done,
+                    SUM(COALESCE(h.na_count, 0)) as na
+                ')->first();
+
+            $filledDays = (int) ($row->filled_days ?? 0);
+            $score = ($filledDays > 0 && $row->score !== null) ? (float) $row->score : null;
+            $completionRate = $totalDays > 0 ? round(($filledDays / $totalDays) * 100, 1) : 0;
+
+            $statusLabel = 'Belum Ada Evaluasi';
+            $statusDesc = 'Belum ada lembar mutaba\'ah yang diisi pada periode ini.';
+
+            if ($filledDays > 0 && $score !== null) {
+                // Skala representatif proporsional: Pekan (~3 hari), Bulan (~8 hari), Semester (~25 hari)
+                $minRepresentativeDays = max(3, min((int) round($totalDays * 0.25), 30));
+                $isRepresentative = $filledDays >= $minRepresentativeDays;
+
+                if (! $isRepresentative) {
+                    $statusLabel = 'Evaluasi Sedang Berjalan';
+                    $statusDesc = "Baru {$filledDays} dari {$totalDays} hari terisi ({$completionRate}%). Capaian sementara: " . round($score) . '%.';
+                } else {
+                    if ($score >= 85) {
+                        $statusLabel = 'Pencapaian Sangat Baik';
+                        $statusDesc = "Ananda konsisten tertib menjalankan amalan ({$filledDays} dari {$totalDays} hari terisi, rata-rata " . round($score) . '%).';
+                    } elseif ($score >= 70) {
+                        $statusLabel = 'Pencapaian Baik';
+                        $statusDesc = "Ananda rutin menjalankan amalan ({$filledDays} dari {$totalDays} hari terisi, rata-rata " . round($score) . '%).';
+                    } else {
+                        $statusLabel = 'Perlu Pendampingan';
+                        $statusDesc = "Perlu pendampingan berkala ({$filledDays} dari {$totalDays} hari terisi, rata-rata " . round($score) . '%).';
+                    }
+                }
+            }
 
             return [
-                'score' => (float) ($row->score ?? 0),
-                'days' => (int) ($row->days ?? 0),
+                'score' => $score !== null ? $score : 0,
+                'days' => $filledDays,
+                'filled_days' => $filledDays,
+                'total_days' => $totalDays,
+                'recorded_days' => (int) ($row->recorded_days ?? 0),
+                'completion_rate' => $completionRate,
+                'status_label' => $statusLabel,
+                'status_desc' => $statusDesc,
                 'good' => (int) ($row->good ?? 0),
                 'less' => (int) ($row->less ?? 0),
                 'not_done' => (int) ($row->not_done ?? 0),

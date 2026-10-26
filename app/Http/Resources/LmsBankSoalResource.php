@@ -63,6 +63,8 @@ class LmsBankSoalResource extends JsonResource
             'gambar_path' => $this->gambar_path,
             'status' => (bool) $this->status,
 
+            'unit_pendidikan_id' => $this->kisiKisi->kelas->unit_pendidikan_id ?? $this->subject->unit_pendidikan_id ?? null,
+
             'kisi_kisi' => $this->whenLoaded('kisiKisi', function () {
                 return [
                     'id' => $this->kisiKisi->id,
@@ -70,6 +72,7 @@ class LmsBankSoalResource extends JsonResource
                     'jenis_ujian' => $this->kisiKisi->jenis_ujian,
                     'mata_pelajaran' => $this->kisiKisi->subject->name ?? null,
                     'kelas' => $this->kisiKisi->kelas->nama_kelas ?? null,
+                    'unit_pendidikan_id' => $this->kisiKisi->kelas->unit_pendidikan_id ?? $this->kisiKisi->subject->unit_pendidikan_id ?? null,
                     'guru' => $this->kisiKisi->guru->nama_lengkap ?? null,
                 ];
             }),
@@ -79,6 +82,7 @@ class LmsBankSoalResource extends JsonResource
                     'id' => $this->subject->id,
                     'name' => $this->subject->name,
                     'code' => $this->subject->code,
+                    'unit_pendidikan_id' => $this->subject->unit_pendidikan_id ?? null,
                 ];
             }),
 

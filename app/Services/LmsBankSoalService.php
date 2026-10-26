@@ -270,10 +270,12 @@ class LmsBankSoalService
                     'judul_kisi' => $k->judul_kisi,
                     'jenis_ujian' => $k->jenis_ujian,
                     'mata_pelajaran_id' => $k->mata_pelajaran_id,
-                    'unit_pendidikan_id' => $k->subject->unit_pendidikan_id ?? $k->kelas->unit_pendidikan_id ?? null,
+                    'unit_pendidikan_id' => $k->kelas->unit_pendidikan_id ?? $k->subject->unit_pendidikan_id ?? null,
                     'subject_name' => $k->subject->name ?? '',
+                    'mata_pelajaran' => $k->subject->name ?? '',
                     'kelas_id' => $k->kelas_id,
                     'kelas_name' => $k->kelas->nama_kelas ?? '',
+                    'kelas' => $k->kelas->nama_kelas ?? '',
                     'jumlah_soal' => (int) ($k->jumlah_soal ?? 0),
                     'alokasi_waktu_menit' => (int) ($k->alokasi_waktu_menit ?? 0),
                 ];

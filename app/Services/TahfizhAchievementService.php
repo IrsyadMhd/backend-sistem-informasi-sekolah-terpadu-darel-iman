@@ -65,12 +65,57 @@ class TahfizhAchievementService
         $targetMetadata = $target?->metadata ?? [];
         if (is_string($targetMetadata)) $targetMetadata = json_decode($targetMetadata, true) ?: [];
         $targetAyat = (int) (data_get($targetMetadata, 'target_ayat') ?: ($target->target_lines ?? 0));
+        $targetName = data_get($targetMetadata, 'target_name') ?: ($target?->target_name ?? null);
+        $targetJuz = data_get($targetMetadata, 'target_juz');
+
+        if ($targetAyat <= 0) {
+            $cls = $student->kelas;
+            $grade = $cls?->tingkat;
+            $unit = $student->educationUnit ?? $cls?->unitPendidikan;
+            $unitLevel = $unit?->level ?? $cls?->jenjang ?? $unit?->jenjang ?? null;
+            $eduUnitId = $student->education_unit_id ?? $student->unit_id ?? $cls?->unit_pendidikan_id ?? $unit?->id;
+
+            $levels = array_filter([$unitLevel]);
+            if (in_array(strtoupper((string) $unitLevel), ['MAHAD', "MA'HAD", 'PONPES', 'PESANTREN', 'BOARDING'])) {
+                $levels = array_unique(array_merge($levels, ['PONPES', 'MAHAD', 'PESANTREN', 'BOARDING']));
+            }
+            if (in_array(strtoupper((string) $unitLevel), ['TAUD', 'TKIT', 'TK'])) {
+                $levels = array_unique(array_merge($levels, ['TKIT', 'TAUD', 'TK']));
+            }
+
+            $gradeVariants = $grade ? [(string) $grade, 'ALL'] : ['ALL'];
+            if ((int) $grade === 4) $gradeVariants[] = '3';
+            if ((int) $grade === 6) $gradeVariants[] = '5';
+
+            $kpiTarget = DB::table('tahfizh_kpi_targets')
+                ->where('is_active', true)
+                ->where(function ($q) use ($levels, $eduUnitId) {
+                    if (!empty($levels)) {
+                        $q->whereIn('unit_level', $levels);
+                    }
+                    if ($eduUnitId) {
+                        $q->orWhere('education_unit_id', $eduUnitId);
+                    }
+                })
+                ->whereIn('grade_level', $gradeVariants)
+                ->orderByRaw("CASE WHEN grade_level = ? THEN 1 WHEN grade_level IN ('3','5') THEN 2 WHEN grade_level = 'ALL' THEN 3 ELSE 4 END", [(string) ($grade ?? 0)])
+                ->first();
+
+            if ($kpiTarget) {
+                $targetAyat = (int) ($kpiTarget->target_ayats ?? 0);
+                $targetName = $kpiTarget->target_name;
+                $targetJuz = $kpiTarget->target_juz;
+            }
+        }
+
         $achievement = $targetAyat > 0 ? min(100, round(($rows->count() / $targetAyat) * 100, 2)) : null;
         $kelas = $student->kelas;
         $formula = $kelas?->tahun_ajaran_id ? $this->formulas->resolveActive('tahfizh', $kelas->tahun_ajaran_id, $kelas->semester_id, $kelas->unit_pendidikan_id, $kelas->id) : null;
 
         return [
             'student_id' => $student->id,
+            'target_name' => $targetName,
+            'target_juz' => $targetJuz,
             'validated_unique_ayah' => $rows->count(),
             'completed_surahs' => $completedSurahs->keys()->map(fn ($number) => ['number' => (int) $number, 'name' => $surahs->get($number)?->nama_latin])->values(),
             'completed_surah_count' => $completedSurahs->count(),

@@ -35,6 +35,15 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
         $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
         $accessibleRombelIds = $accessScope->accessibleRombels($user)->pluck('id')->all();
 
+        // 1. HARD UNIT BOUNDARY: Never allow any data outside the user's accessible units
+        if (! empty($unitIds)) {
+            $query->where(function ($uq) use ($unitIds) {
+                $uq->whereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds))
+                   ->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $unitIds))
+                   ->orWhereHas('kisiKisi.subject', fn ($qks) => $qks->whereIn('unit_pendidikan_id', $unitIds));
+            });
+        }
+
         $isTeacherOnly = ! $user->hasAnyRole([
             'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan',
             'Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum',
@@ -42,44 +51,29 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
         ]) && $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']);
 
         if ($isTeacherOnly) {
-            return $query->where(function ($q) use ($teacherIds, $user, $unitIds, $accessibleRombelIds) {
-                // 1. Soal yang dibuat langsung oleh user atau soal bawaan sistem (seeder)
+            return $query->where(function ($q) use ($teacherIds, $user, $accessibleRombelIds) {
+                // User's own questions or seeded questions within unit
                 $q->where('created_by', $user->id)
                   ->orWhereNull('created_by');
 
-                // 2. Soal dari kisi-kisi guru bersangkutan atau unit pendidikannya
+                // Questions from teacher's kisi-kisi or teacher's exams
                 if (! empty($teacherIds)) {
-                    $q->orWhereHas('kisiKisi', function ($qk) use ($teacherIds, $user, $unitIds) {
+                    $q->orWhereHas('kisiKisi', function ($qk) use ($teacherIds, $user) {
                         $qk->whereIn('guru_id', $teacherIds)
                            ->orWhere('created_by', $user->id)
                            ->orWhereNull('created_by');
-                        if (! empty($unitIds)) {
-                            $qk->orWhereHas('kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $unitIds))
-                               ->orWhereHas('subject', fn ($qks) => $qks->whereIn('unit_pendidikan_id', $unitIds));
-                        }
                     })
-                    // 3. Soal dari kisi-kisi yang dipakai di paket ujian guru
                     ->orWhereHas('kisiKisi.ujian', fn ($qu) => $qu->whereIn('guru_id', $teacherIds)->orWhere('created_by', $user->id));
-                } elseif (! empty($unitIds)) {
-                    $q->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $unitIds))
-                      ->orWhereHas('kisiKisi.subject', fn ($qks) => $qks->whereIn('unit_pendidikan_id', $unitIds));
                 }
+
                 if (! empty($accessibleRombelIds)) {
                     $q->orWhereHas('kisiKisi', fn ($qk) => $qk->whereIn('kelas_id', $accessibleRombelIds));
                 }
             });
         }
 
-        // Staff / TU / Kepsek / Waka: Strictly scoped to their unit's subjects and rombels
-        return $query->where(function ($q) use ($unitIds, $accessibleRombelIds) {
-            if (! empty($unitIds)) {
-                $q->whereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds))
-                  ->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $unitIds));
-            }
-            if (! empty($accessibleRombelIds)) {
-                $q->orWhereHas('kisiKisi', fn ($qk) => $qk->whereIn('kelas_id', $accessibleRombelIds));
-            }
-        });
+        // Staff / TU / Kepsek / Waka: Already bounded by the hard unit boundary above
+        return $query;
     }
 
     public function getFiltered(array $filters = [], int $perPage = 15, string $orderBy = 'created_at', string $orderDir = 'desc'): LengthAwarePaginator
@@ -96,12 +90,11 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
         if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
             $query->where(function ($q) use ($filters) {
                 $q->whereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $filters['unit_ids']))
-                  ->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $filters['unit_ids']));
-                if (! empty($filters['kelas_ids'])) {
-                    $q->orWhereHas('kisiKisi', fn ($qk) => $qk->whereIn('kelas_id', $filters['kelas_ids']));
-                }
+                  ->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $filters['unit_ids']))
+                  ->orWhereHas('kisiKisi.subject', fn ($qks) => $qks->whereIn('unit_pendidikan_id', $filters['unit_ids']));
             });
-        } elseif (! empty($filters['kelas_ids'])) {
+        }
+        if (! empty($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
             $query->whereHas('kisiKisi', fn ($qk) => $qk->whereIn('kelas_id', $filters['kelas_ids']));
         }
 
@@ -234,6 +227,17 @@ class LmsBankSoalRepository implements LmsBankSoalRepositoryInterface
     {
         $query = LmsBankSoal::query();
         $this->applyTeacherScope($query);
+
+        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+            $query->where(function ($q) use ($filters) {
+                $q->whereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $filters['unit_ids']))
+                  ->orWhereHas('kisiKisi.kelas', fn ($qkk) => $qkk->whereIn('unit_pendidikan_id', $filters['unit_ids']))
+                  ->orWhereHas('kisiKisi.subject', fn ($qks) => $qks->whereIn('unit_pendidikan_id', $filters['unit_ids']));
+            });
+        }
+        if (! empty($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
+            $query->whereHas('kisiKisi', fn ($qk) => $qk->whereIn('kelas_id', $filters['kelas_ids']));
+        }
 
         if (! empty($filters['kisi_kisi_id'])) {
             $query->where('kisi_kisi_id', $filters['kisi_kisi_id']);

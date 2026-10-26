@@ -119,17 +119,26 @@ class AttendanceWorkflowController extends Controller
             ['Guru', 'Wali Kelas', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan', 'Super Admin', 'super_admin']
         );
         $date = ($request->date('date') ?: now())->startOfDay();
-        $schedules = $this->access->teacherSchedules($request->user())
-            ->with(['subject', 'kelas.unitPendidikan', 'kelas.tahunAjaran', 'kelas.semester', 'employee'])
-            ->when($request->filled('date'), fn ($q) => $q->where('day_of_week', $date->dayOfWeekIso))
-            ->where(fn ($q) => $q->where('is_active', true)->orWhereNull('is_active'))
-            ->orderBy('time_start')->get();
+        $dayIso = $date->dayOfWeekIso;
 
-        $schedules = $schedules->map(function (ClassSchedule $schedule) use ($date) {
-            $session = LessonAttendanceSession::query()
-                ->where('schedule_id', $schedule->id)
+        $schedules = $this->access->teacherSchedules($request->user())
+            ->with(['subject', 'kelas.unitPendidikan', 'employee'])
+            ->when(! $request->boolean('all_days'), fn ($q) => $q->where('day_of_week', $dayIso))
+            ->where(fn ($q) => $q->where('is_active', true)->orWhereNull('is_active'))
+            ->orderBy('time_start')
+            ->get();
+
+        $scheduleIds = $schedules->pluck('id')->filter()->values();
+        $sessions = $scheduleIds->isNotEmpty()
+            ? LessonAttendanceSession::query()
+                ->whereIn('schedule_id', $scheduleIds)
                 ->whereDate('attendance_date', $date->toDateString())
-                ->first();
+                ->get()
+                ->keyBy('schedule_id')
+            : collect();
+
+        $schedules = $schedules->map(function (ClassSchedule $schedule) use ($sessions) {
+            $session = $sessions->get($schedule->id);
             $schedule->setAttribute('attendance_session_id', $session?->id);
             $schedule->setAttribute('attendance_status', $session?->status ?? 'not_started');
             $schedule->setAttribute('teaching_session_status', $session?->teaching_session_status);

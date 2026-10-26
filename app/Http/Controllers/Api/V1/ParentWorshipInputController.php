@@ -55,17 +55,17 @@ class ParentWorshipInputController extends Controller
             'header_status' => $header?->status?->value,
             'items' => $rules->map(function ($rule) use ($existing) {
                 $value = $existing->get($rule->agenda_item_id);
-                $isParentFilled = $value && $value->input_source === 'parent';
+                $statusVal = $value?->status_value?->value ?? ($value?->status_value ? (string) $value->status_value : null);
                 return [
                     'agenda_item_id' => $rule->agenda_item_id,
                     'code' => $rule->agendaItem?->code,
                     'name' => $rule->agendaItem?->name,
                     'location' => $rule->location,
                     'requires_verification' => $rule->requires_verification,
-                    'status_value' => $isParentFilled ? $value?->status_value?->value : null,
-                    'numeric_value' => $isParentFilled ? $value?->numeric_value : null,
-                    'notes' => $isParentFilled ? $value?->notes : null,
-                    'verification_status' => $isParentFilled ? $value?->verification_status : 'pending',
+                    'status_value' => $statusVal,
+                    'numeric_value' => $value?->numeric_value,
+                    'notes' => $value?->notes,
+                    'verification_status' => $value?->verification_status ?? 'pending',
                 ];
             })->values(),
         ]]);

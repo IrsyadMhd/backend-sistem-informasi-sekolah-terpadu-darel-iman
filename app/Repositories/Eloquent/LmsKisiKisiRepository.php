@@ -34,6 +34,14 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
         $unitIds = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
         $accessibleRombelIds = $accessScope->accessibleRombels($user)->pluck('id')->all();
 
+        // 1. HARD UNIT BOUNDARY: Never allow any data outside the user's accessible units
+        if (! empty($unitIds)) {
+            $query->where(function ($uq) use ($unitIds) {
+                $uq->whereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds))
+                   ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds));
+            });
+        }
+
         $isTeacherOnly = ! $user->hasAnyRole([
             'Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'Ketua Yayasan',
             'Kepala Sekolah', 'kepala_sekolah', 'Waka Kurikulum', 'waka_kurikulum',
@@ -41,7 +49,7 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
         ]) && $user->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']);
 
         if ($isTeacherOnly) {
-            return $query->where(function ($q) use ($teacherIds, $user, $unitIds, $accessibleRombelIds) {
+            return $query->where(function ($q) use ($teacherIds, $user, $accessibleRombelIds) {
                 $q->where('created_by', $user->id)
                   ->orWhereNull('created_by');
 
@@ -51,22 +59,11 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
                 if (! empty($accessibleRombelIds)) {
                     $q->orWhereIn('kelas_id', $accessibleRombelIds);
                 }
-                if (! empty($unitIds)) {
-                    $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds))
-                      ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds));
-                }
             });
         }
 
-        return $query->where(function ($q) use ($unitIds, $accessibleRombelIds) {
-            if (! empty($accessibleRombelIds)) {
-                $q->whereIn('kelas_id', $accessibleRombelIds);
-            }
-            if (! empty($unitIds)) {
-                $q->orWhereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $unitIds))
-                  ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $unitIds));
-            }
-        });
+        // Staff / TU / Kepsek / Waka: Already bounded by the hard unit boundary above
+        return $query;
     }
 
     public function getFiltered(array $filters = [], int $perPage = 15, string $orderBy = 'created_at', string $orderDir = 'desc'): LengthAwarePaginator
@@ -88,11 +85,9 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
             $query->where(function ($q) use ($filters) {
                 $q->whereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $filters['unit_ids']))
                   ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $filters['unit_ids']));
-                if (! empty($filters['kelas_ids'])) {
-                    $q->orWhereIn('kelas_id', $filters['kelas_ids']);
-                }
             });
-        } elseif (! empty($filters['kelas_ids'])) {
+        }
+        if (! empty($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
             $query->whereIn('kelas_id', $filters['kelas_ids']);
         }
 

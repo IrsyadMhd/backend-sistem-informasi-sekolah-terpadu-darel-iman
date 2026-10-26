@@ -35,16 +35,43 @@ class LmsBankSoalController extends Controller
             'with_trashed',
         ]);
 
+        $requestedUnitId = $request->get('unit_pendidikan_id') ?? $request->get('unit_id');
+
         if ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
             $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
-            $filters['unit_ids'] = $allowedUnitIds;
+
+            if ($requestedUnitId) {
+                abort_unless(in_array($requestedUnitId, $allowedUnitIds, true), 403, 'Akses ditolak: Unit di luar cakupan wewenang Anda.');
+                $filters['unit_ids'] = [$requestedUnitId];
+            } else {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
 
             if (! empty($filters['kelas_id'])) {
                 abort_unless(in_array($filters['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar cakupan unit Anda.');
             } else {
                 $filters['kelas_ids'] = $accessibleRombelIds;
             }
+
+            if (! empty($filters['kisi_kisi_id'])) {
+                $kisi = \App\Models\LmsKisiKisi::with(['kelas', 'subject'])->find($filters['kisi_kisi_id']);
+                if ($kisi) {
+                    $kisiUnit = $kisi->kelas?->unit_pendidikan_id ?? $kisi->subject?->unit_pendidikan_id;
+                    if ($kisiUnit) {
+                        abort_unless(in_array($kisiUnit, $allowedUnitIds, true), 403, 'Akses ditolak: Kisi-kisi di luar cakupan unit Anda.');
+                    }
+                }
+            }
+
+            if (! empty($filters['mata_pelajaran_id'])) {
+                $subj = \App\Models\Subject::find($filters['mata_pelajaran_id']);
+                if ($subj && $subj->unit_pendidikan_id) {
+                    abort_unless(in_array($subj->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses ditolak: Mata pelajaran di luar cakupan unit Anda.');
+                }
+            }
+        } elseif ($requestedUnitId) {
+            $filters['unit_ids'] = [$requestedUnitId];
         }
 
         $perPage = (int) $request->get('per_page', 15);
@@ -59,6 +86,7 @@ class LmsBankSoalController extends Controller
     public function store(StoreLmsBankSoalRequest $request): JsonResponse
     {
         $validated = $request->validated();
+        $this->assertCanManageBankSoalPayload($request->user(), $validated);
         $soal = $this->bankSoalService->simpan($validated);
 
         return response()->json([
@@ -99,6 +127,7 @@ class LmsBankSoalController extends Controller
 
         $this->assertCanAccessSoal($request->user(), $soal);
         $validated = $request->validated();
+        $this->assertCanManageBankSoalPayload($request->user(), $validated);
         $updated = $this->bankSoalService->ubah($id, $validated);
 
         return response()->json([
@@ -171,7 +200,30 @@ class LmsBankSoalController extends Controller
 
     public function stats(Request $request): JsonResponse
     {
+        $user = $request->user();
         $filters = $request->only(['kisi_kisi_id', 'mata_pelajaran_id', 'kelas_id']);
+        $requestedUnitId = $request->get('unit_pendidikan_id') ?? $request->get('unit_id');
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+            $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+
+            if ($requestedUnitId) {
+                abort_unless(in_array($requestedUnitId, $allowedUnitIds, true), 403, 'Akses ditolak: Unit di luar cakupan wewenang Anda.');
+                $filters['unit_ids'] = [$requestedUnitId];
+            } else {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
+
+            if (! empty($filters['kelas_id'])) {
+                abort_unless(in_array($filters['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar cakupan unit Anda.');
+            } else {
+                $filters['kelas_ids'] = $accessibleRombelIds;
+            }
+        } elseif ($requestedUnitId) {
+            $filters['unit_ids'] = [$requestedUnitId];
+        }
+
         $stats = $this->bankSoalService->statistik($filters);
 
         return response()->json([
@@ -226,5 +278,31 @@ class LmsBankSoalController extends Controller
         }
 
         abort_unless($match, 403, 'Akses ditolak: Butir soal berada di luar unit wewenang Anda.');
+    }
+
+    private function assertCanManageBankSoalPayload(?User $user, array $data): void
+    {
+        if (! $user || $this->accessScope->hasGlobalScope($user)) {
+            return;
+        }
+
+        $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+
+        if (! empty($data['kisi_kisi_id'])) {
+            $kisi = \App\Models\LmsKisiKisi::with(['kelas', 'subject'])->find($data['kisi_kisi_id']);
+            if ($kisi) {
+                $kisiUnit = $kisi->kelas?->unit_pendidikan_id ?? $kisi->subject?->unit_pendidikan_id;
+                if ($kisiUnit) {
+                    abort_unless(in_array($kisiUnit, $allowedUnitIds, true), 403, 'Akses ditolak: Kisi-kisi di luar cakupan unit Anda.');
+                }
+            }
+        }
+
+        if (! empty($data['mata_pelajaran_id'])) {
+            $subj = \App\Models\Subject::find($data['mata_pelajaran_id']);
+            if ($subj && $subj->unit_pendidikan_id) {
+                abort_unless(in_array($subj->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses ditolak: Mata pelajaran di luar cakupan unit Anda.');
+            }
+        }
     }
 }
