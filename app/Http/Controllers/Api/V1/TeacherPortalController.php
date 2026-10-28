@@ -425,9 +425,198 @@ class TeacherPortalController extends Controller
             ->orderBy('mulai_tampil')
             ->get();
 
+        $mapped = $events->map(function ($se) {
+            $meta = $se->data_tambahan ?? [];
+            $evDate = $meta['tanggal'] ?? $se->mulai_tampil?->format('Y-m-d') ?? now()->format('Y-m-d');
+            $cat = \Illuminate\Support\Str::lower($meta['kategori'] ?? $meta['tipe'] ?? 'kegiatan');
+
+            $badgeCat = 'Kegiatan Sekolah';
+            $color = '#0284C7';
+            $colorName = 'sky';
+
+            if (str_contains($cat, 'ujian') || str_contains($cat, 'formatif') || str_contains($cat, 'sumatif')) {
+                $badgeCat = 'Ujian & Penilaian';
+                $color = '#7C3AED';
+                $colorName = 'purple';
+            } elseif (str_contains($cat, 'libur')) {
+                $badgeCat = 'Libur Sekolah & Nasional';
+                $color = '#E11D48';
+                $colorName = 'rose';
+            } elseif (str_contains($cat, 'rapor') || str_contains($cat, 'wisuda')) {
+                $badgeCat = 'Penerimaan Rapor';
+                $color = '#D97706';
+                $colorName = 'amber';
+            } elseif (str_contains($cat, 'akademik') || str_contains($cat, 'kbm') || str_contains($cat, 'mpls') || str_contains($cat, 'masuk')) {
+                $badgeCat = 'Kegiatan Akademik';
+                $color = '#059669';
+                $colorName = 'emerald';
+            } elseif (str_contains($cat, 'ekskul') || str_contains($cat, 'meeting')) {
+                $badgeCat = 'Ekstrakurikuler';
+                $color = '#EA580C';
+                $colorName = 'orange';
+            }
+
+            $startD = $se->mulai_tampil?->format('Y-m-d') ?? \Carbon\Carbon::parse($evDate)->format('Y-m-d');
+            $endD = $se->selesai_tampil?->format('Y-m-d') ?? $startD;
+
+            return [
+                'id' => (string) $se->id,
+                'judul_pengumuman' => $se->judul_pengumuman,
+                'isi_pengumuman' => $se->isi_pengumuman,
+                'title' => $se->judul_pengumuman,
+                'description' => $se->isi_pengumuman,
+                'notes' => strip_tags($se->isi_pengumuman ?? ''),
+                'category' => $badgeCat,
+                'kategori' => $meta['kategori'] ?? 'kegiatan',
+                'color' => $meta['color'] ?? $color,
+                'color_name' => $colorName,
+                'date' => \Carbon\Carbon::parse($evDate)->format('Y-m-d'),
+                'start_date' => $startD,
+                'end_date' => $endD,
+                'time_start' => $meta['jam_mulai'] ?? null,
+                'time_end' => $meta['jam_selesai'] ?? null,
+                'time_display' => (!empty($meta['jam_mulai']) && !empty($meta['jam_selesai']))
+                    ? ($meta['jam_mulai'] . ' - ' . $meta['jam_selesai'])
+                    : ($meta['jam_mulai'] ?? 'Sepanjang Hari'),
+                'location' => $meta['lokasi'] ?? ($meta['target_unit_name'] ?? 'Kampus Sekolah'),
+                'room' => $meta['ruang'] ?? null,
+                'target_unit' => $meta['target_unit'] ?? 'all',
+                'target_unit_name' => $meta['target_unit_name'] ?? 'Semua Unit Terpadu',
+                'prioritas' => $se->prioritas ?? 1,
+                'status_aktif' => (bool) $se->status_aktif,
+                'data_tambahan' => $meta,
+            ];
+        });
+
         return response()->json([
             'success' => true,
-            'data' => $events,
+            'data' => $mapped,
+        ]);
+    }
+
+    public function storeAcademicCalendar(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'judul_pengumuman' => 'required|string|max:255',
+            'isi_pengumuman' => 'nullable|string',
+            'kategori' => 'nullable|string',
+            'mulai_tampil' => 'required|date',
+            'selesai_tampil' => 'nullable|date|after_or_equal:mulai_tampil',
+            'prioritas' => 'nullable|integer|min:1|max:3',
+            'color' => 'nullable|string',
+            'target_unit' => 'nullable|string',
+            'target_unit_name' => 'nullable|string',
+            'jam_mulai' => 'nullable|string',
+            'jam_selesai' => 'nullable|string',
+            'lokasi' => 'nullable|string',
+        ]);
+
+        $startDateStr = Carbon::parse($validated['mulai_tampil'])->format('Y-m-d');
+        $endDateStr = !empty($validated['selesai_tampil']) 
+            ? Carbon::parse($validated['selesai_tampil'])->format('Y-m-d') 
+            : $startDateStr;
+
+        $user = $request->user();
+        $userUnitId = $user?->scope?->unit_id ?? $user?->unit_id ?? ($user?->metadata['unit_id'] ?? null);
+        $userUnit = $userUnitId ? \App\Models\EducationUnit::find($userUnitId) : null;
+        $targetUnit = !empty($validated['target_unit']) ? $validated['target_unit'] : ($userUnit ? (string) $userUnit->id : 'all');
+        $targetUnitName = !empty($validated['target_unit_name']) ? $validated['target_unit_name'] : ($userUnit ? $userUnit->name : 'Semua Unit Terpadu');
+
+        $meta = [
+            'kategori' => $validated['kategori'] ?? 'kegiatan',
+            'color' => $validated['color'] ?? 'emerald',
+            'event' => [
+                'start_at' => $startDateStr,
+                'end_at' => $endDateStr,
+            ],
+            'target_unit' => $targetUnit,
+            'target_unit_name' => $targetUnitName,
+            'jam_mulai' => $validated['jam_mulai'] ?? null,
+            'jam_selesai' => $validated['jam_selesai'] ?? null,
+            'lokasi' => $validated['lokasi'] ?? null,
+        ];
+
+        $event = PengumumanSekolah::create([
+            'judul_pengumuman' => $validated['judul_pengumuman'],
+            'isi_pengumuman' => $validated['isi_pengumuman'] ?? '',
+            'target_peran' => 'all',
+            'mulai_tampil' => $validated['mulai_tampil'],
+            'selesai_tampil' => $validated['selesai_tampil'] ?? $validated['mulai_tampil'],
+            'prioritas' => $validated['prioritas'] ?? 1,
+            'status_aktif' => true,
+            'id_penerbit' => $request->user()?->id,
+            'data_tambahan' => $meta,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Agenda kegiatan berhasil ditambahkan.',
+            'data' => $event,
+        ], 201);
+    }
+
+    public function updateAcademicCalendar(Request $request, string $id): JsonResponse
+    {
+        $event = PengumumanSekolah::findOrFail($id);
+
+        $validated = $request->validate([
+            'judul_pengumuman' => 'sometimes|required|string|max:255',
+            'isi_pengumuman' => 'nullable|string',
+            'kategori' => 'nullable|string',
+            'mulai_tampil' => 'sometimes|required|date',
+            'selesai_tampil' => 'nullable|date',
+            'prioritas' => 'nullable|integer|min:1|max:3',
+            'color' => 'nullable|string',
+            'target_unit' => 'nullable|string',
+            'target_unit_name' => 'nullable|string',
+            'jam_mulai' => 'nullable|string',
+            'jam_selesai' => 'nullable|string',
+            'lokasi' => 'nullable|string',
+        ]);
+
+        $meta = $event->data_tambahan ?? [];
+        if (isset($validated['kategori'])) $meta['kategori'] = $validated['kategori'];
+        if (isset($validated['color'])) $meta['color'] = $validated['color'];
+        if (isset($validated['target_unit'])) $meta['target_unit'] = $validated['target_unit'];
+        if (isset($validated['target_unit_name'])) $meta['target_unit_name'] = $validated['target_unit_name'];
+        if (isset($validated['jam_mulai'])) $meta['jam_mulai'] = $validated['jam_mulai'];
+        if (isset($validated['jam_selesai'])) $meta['jam_selesai'] = $validated['jam_selesai'];
+        if (isset($validated['lokasi'])) $meta['lokasi'] = $validated['lokasi'];
+
+        $mulai = $validated['mulai_tampil'] ?? $event->mulai_tampil;
+        $selesai = $validated['selesai_tampil'] ?? $event->selesai_tampil ?? $mulai;
+
+        $startDateStr = Carbon::parse($mulai)->format('Y-m-d');
+        $endDateStr = Carbon::parse($selesai)->format('Y-m-d');
+        $meta['event'] = [
+            'start_at' => $startDateStr,
+            'end_at' => $endDateStr,
+        ];
+
+        $event->update([
+            'judul_pengumuman' => $validated['judul_pengumuman'] ?? $event->judul_pengumuman,
+            'isi_pengumuman' => array_key_exists('isi_pengumuman', $validated) ? $validated['isi_pengumuman'] : $event->isi_pengumuman,
+            'mulai_tampil' => $mulai,
+            'selesai_tampil' => $selesai,
+            'prioritas' => $validated['prioritas'] ?? $event->prioritas,
+            'data_tambahan' => $meta,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Agenda kegiatan berhasil diperbarui.',
+            'data' => $event->fresh(),
+        ]);
+    }
+
+    public function deleteAcademicCalendar(Request $request, string $id): JsonResponse
+    {
+        $event = PengumumanSekolah::findOrFail($id);
+        $event->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Agenda kegiatan berhasil dihapus.',
         ]);
     }
 

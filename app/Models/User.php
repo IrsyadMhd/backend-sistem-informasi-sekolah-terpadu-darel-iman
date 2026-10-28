@@ -110,5 +110,46 @@ class User extends Authenticatable
     {
         return $this->hasOne(Student::class, 'user_id');
     }
+
+    public function parent()
+    {
+        return $this->hasOne(ParentModel::class, 'user_id');
+    }
+
+    public function getPhotoUrlAttribute(): ?string
+    {
+        $directPhoto = $this->resolvePublicMediaUrl(
+            data_get($this->attributes, 'photo_url')
+            ?? data_get($this->attributes, 'avatar_url')
+            ?? data_get($this->metadata, 'avatar')
+            ?? data_get($this->metadata, 'photo')
+            ?? data_get($this->metadata, 'foto')
+        );
+
+        if ($directPhoto) {
+            return $directPhoto;
+        }
+
+        $employee = $this->relationLoaded('employee')
+            ? $this->employee
+            : $this->employee()->first();
+        if ($employee?->photo_url) {
+            return $employee->photo_url;
+        }
+
+        $student = $this->relationLoaded('student')
+            ? $this->student
+            : $this->student()->first();
+        if ($student?->photo_url) {
+            return $student->photo_url;
+        }
+
+        return null;
+    }
+
+    public function getAvatarUrlAttribute(): ?string
+    {
+        return $this->getPhotoUrlAttribute();
+    }
 }
 

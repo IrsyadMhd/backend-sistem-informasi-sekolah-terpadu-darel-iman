@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AcademicYear;
 use App\Models\Attendance;
+use App\Models\ClassSchedule;
 use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Kelas;
@@ -11,6 +12,7 @@ use App\Models\ParentModel;
 use App\Models\SchoolClass;
 use App\Models\Semester;
 use App\Models\Student;
+use App\Models\StudentGrade;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -61,6 +63,25 @@ class TataUsahaDashboardService
         $today = now()->toDateString();
         $absensiStats = $this->getTodayAttendanceStats($unitIds, $activeStudentQuery, $employeeQuery, $today, $filters, $user);
 
+        // Hitungan permohonan surat / mutasi / perizinan
+        $pengajuanMutasi = class_exists(StudentMutation::class)
+            ? StudentMutation::query()->when(! empty($unitIds), fn ($q) => $q->whereIn('education_unit_id', $unitIds))->whereIn('status', ['diajukan', 'pending', 'proses'])->count()
+            : 0;
+        $pengajuanIzinAsrama = class_exists(DormitoryPermit::class)
+            ? DormitoryPermit::query()->whereIn('status', ['menunggu', 'pending'])->count()
+            : 0;
+        $totalPengajuanSurat = $pengajuanMutasi + $pengajuanIzinAsrama;
+
+        // Pembayaran hari ini
+        $pembayaranHariIni = class_exists(\App\Models\BillPayment::class)
+            ? \App\Models\BillPayment::query()->whereDate('paid_at', $today)->count()
+            : 0;
+
+        // Tugas menunggu verifikasi atau aksi berkas
+        $tugasMenunggu = ($siswaIncomplete > 0 ? min($siswaIncomplete, 5) : 0)
+            + ($pegawaiIncomplete > 0 ? 1 : 0)
+            + $totalPengajuanSurat;
+
         $kpis = [
             'total_siswa' => [
                 'total' => $totalSiswa,
@@ -82,11 +103,24 @@ class TataUsahaDashboardService
                 'total' => $totalTendik,
                 'growth' => 0,
             ],
+            'pengajuan_surat' => [
+                'total' => $totalPengajuanSurat,
+                'growth' => 0,
+            ],
+            'pembayaran_hari_ini' => [
+                'total' => $pembayaranHariIni,
+                'growth' => 0,
+            ],
+            'tugas_menunggu' => [
+                'total' => $tugasMenunggu,
+                'growth' => 0,
+            ],
             'siswa_incomplete' => ['total' => $siswaIncomplete, 'growth' => 0],
             'pegawai_incomplete' => ['total' => $pegawaiIncomplete, 'growth' => 0],
             'absensi_hari_ini' => [
                 'total' => $absensiStats['total_verified'],
                 'siswa_hadir' => $absensiStats['siswa_hadir'],
+                'siswa_izin_sakit' => $absensiStats['siswa_izin_sakit'] ?? 0,
                 'siswa_belum_absen' => $absensiStats['siswa_belum_absen'],
                 'pegawai_hadir' => $absensiStats['pegawai_hadir'],
                 'guru_hadir' => $absensiStats['guru_hadir'],
@@ -109,6 +143,7 @@ class TataUsahaDashboardService
             ],
             'absensi_hari_ini' => [
                 ['name' => 'Siswa Hadir', 'value' => $absensiStats['siswa_hadir'], 'color' => '#0E5C44'],
+                ['name' => 'Izin/Sakit', 'value' => $absensiStats['siswa_izin_sakit'] ?? 0, 'color' => '#0ea5e9'],
                 ['name' => 'Belum Absen', 'value' => $absensiStats['siswa_belum_absen'], 'color' => '#f59e0b'],
                 ['name' => 'Guru Hadir', 'value' => $absensiStats['guru_hadir'], 'color' => '#6366f1'],
             ],
@@ -178,6 +213,11 @@ class TataUsahaDashboardService
             'absensi_hari_ini' => $this->detailAbsensiHariIni($unitIds, $search, $page, $perPage, $tab, $filters, $user),
             'siswa_incomplete' => $this->detailSiswaIncomplete($unitIds, $search, $page, $perPage, $user),
             'pegawai_incomplete' => $this->detailPegawaiIncomplete($unitIds, $search, $page, $perPage, $user),
+            'pengajuan_surat' => $this->detailPengajuanSurat($unitIds, $search, $page, $perPage, $user),
+            'pembayaran_hari_ini' => $this->detailPembayaranHariIni($unitIds, $search, $page, $perPage, $user),
+            'tugas_menunggu' => $this->detailTugasMenunggu($unitIds, $search, $page, $perPage, $user),
+            'jadwal_kbm', 'jadwal' => $this->detailJadwalKbm($unitIds, $search, $page, $perPage, $user),
+            'laporan_nilai', 'nilai' => $this->detailLaporanNilai($unitIds, $search, $page, $perPage, $user),
             default => abort(404, 'Detail KPI tidak ditemukan.'),
         };
     }
@@ -394,7 +434,13 @@ class TataUsahaDashboardService
             }
         }
 
-        $presentStatuses = ['HADIR', 'TERLAMBAT', 'HADIR_DALAM_TOLERANSI', 'hadir', 'present', 'late', 'terlambat'];
+        $presentStatuses = [
+            'HADIR', 'Hadir', 'hadir',
+            'TERLAMBAT', 'Terlambat', 'terlambat',
+            'HADIR_DALAM_TOLERANSI', 'Hadir Dalam Toleransi', 'hadir_dalam_toleransi',
+            'present', 'late', 'Present', 'Late',
+        ];
+        $permitStatuses = ['IZIN', 'Izin', 'izin', 'SAKIT', 'Sakit', 'sakit', 'permit', 'sick', 'Permit', 'Sick'];
 
         $siswaHadirQuery = Attendance::query()
             ->whereDate('attendance_date', $targetDate)
@@ -408,6 +454,19 @@ class TataUsahaDashboardService
         }
 
         $siswaHadir = $siswaHadirQuery->distinct('student_id')->count('student_id');
+
+        $siswaIzinSakitQuery = Attendance::query()
+            ->whereDate('attendance_date', $targetDate)
+            ->whereNotNull('student_id')
+            ->whereIn('status', $permitStatuses);
+
+        if (! empty($studentIds)) {
+            $siswaIzinSakitQuery->whereIn('student_id', $studentIds);
+        } elseif (! empty($unitIds)) {
+            $siswaIzinSakitQuery->whereIn('unit_pendidikan_id', $unitIds);
+        }
+
+        $siswaIzinSakit = $siswaIzinSakitQuery->distinct('student_id')->count('student_id');
 
         $pegawaiHadirQuery = Attendance::query()
             ->whereDate('attendance_date', $targetDate)
@@ -424,9 +483,10 @@ class TataUsahaDashboardService
         $activeStudents = count($studentIds);
 
         return [
-            'total_verified' => $siswaHadir + $pegawaiHadir,
+            'total_verified' => $siswaHadir + $pegawaiHadir + $siswaIzinSakit,
             'siswa_hadir' => $siswaHadir,
-            'siswa_belum_absen' => max($activeStudents - $siswaHadir, 0),
+            'siswa_izin_sakit' => $siswaIzinSakit,
+            'siswa_belum_absen' => max($activeStudents - $siswaHadir - $siswaIzinSakit, 0),
             'pegawai_hadir' => $pegawaiHadir,
             'guru_hadir' => $pegawaiHadir,
             'attendance_date' => $targetDate,
@@ -565,22 +625,26 @@ class TataUsahaDashboardService
         $metaAyah = (clone $parentStudentsQuery)
             ->whereNotNull('metadata->nama_ayah')
             ->distinct()
-            ->pluck('metadata->nama_ayah');
+            ->selectRaw("metadata->>'nama_ayah' as extracted_name")
+            ->pluck('extracted_name');
 
         $metaOrtuAyah = (clone $parentStudentsQuery)
             ->whereNotNull('metadata->orang_tua->nama_ayah')
             ->distinct()
-            ->pluck('metadata->orang_tua->nama_ayah');
+            ->selectRaw("metadata->'orang_tua'->>'nama_ayah' as extracted_name")
+            ->pluck('extracted_name');
 
         $metaIbu = (clone $parentStudentsQuery)
             ->whereNotNull('metadata->nama_ibu')
             ->distinct()
-            ->pluck('metadata->nama_ibu');
+            ->selectRaw("metadata->>'nama_ibu' as extracted_name")
+            ->pluck('extracted_name');
 
         $metaWali = (clone $parentStudentsQuery)
             ->whereNotNull('metadata->nama_wali')
             ->distinct()
-            ->pluck('metadata->nama_wali');
+            ->selectRaw("metadata->>'nama_wali' as extracted_name")
+            ->pluck('extracted_name');
 
         $availableParents = $parentModelNames
             ->concat($metaAyah)
@@ -716,7 +780,12 @@ class TataUsahaDashboardService
             ];
         }
 
-        $presentStatuses = ['HADIR', 'TERLAMBAT', 'HADIR_DALAM_TOLERANSI', 'hadir', 'present', 'late', 'terlambat'];
+        $presentStatuses = [
+            'HADIR', 'Hadir', 'hadir',
+            'TERLAMBAT', 'Terlambat', 'terlambat',
+            'HADIR_DALAM_TOLERANSI', 'Hadir Dalam Toleransi', 'hadir_dalam_toleransi',
+            'present', 'late', 'Present', 'Late',
+        ];
 
         if ($tab === 'pegawai' || $tab === 'guru' || $tab === 'guru_hadir') {
             $query = Attendance::query()
@@ -949,6 +1018,315 @@ class TataUsahaDashboardService
                     'jabatan' => $e->position?->name ?? $e->position?->nama_jabatan ?? '-',
                     'unit' => $e->unit?->nama_unit ?? $e->unit?->name ?? '-',
                     'keterangan' => implode(', ', $missing),
+                ];
+            })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    private function detailPengajuanSurat(array $unitIds, string $search, int $page, int $perPage, $user = null): array
+    {
+        $query = \App\Models\StudentAttendancePermission::query()
+            ->with(['student.kelas', 'student.educationUnit'])
+            ->whereHas('student', function ($sq) use ($unitIds, $user) {
+                if (! empty($unitIds)) {
+                    $sq->where(function ($sub) use ($unitIds) {
+                        $sub->whereIn('unit_id', $unitIds)
+                            ->orWhereHas('kelas', fn ($k) => $k->whereIn('unit_pendidikan_id', $unitIds));
+                    });
+                } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
+                    $sq->whereRaw('1 = 0');
+                }
+            })
+            ->orderByDesc('created_at');
+
+        if ($search !== '') {
+            $likeOp = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $likeOp) {
+                $q->where('reason', $likeOp, "%{$search}%")
+                  ->orWhere('type', $likeOp, "%{$search}%")
+                  ->orWhere('status', $likeOp, "%{$search}%")
+                  ->orWhereHas('student', fn ($sq) => $sq->where('full_name', $likeOp, "%{$search}%"));
+            });
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+
+        return [
+            'summary' => [
+                'total' => $paginator->total(),
+                'menunggu' => (clone $query)->whereIn('status', ['PENDING', 'pending', 'menunggu'])->count(),
+                'disetujui' => (clone $query)->whereIn('status', ['APPROVED', 'approved', 'disetujui'])->count(),
+            ],
+            'items' => collect($paginator->items())->map(function ($p) {
+                return [
+                    'id' => $p->id,
+                    'nama' => $p->student?->full_name ?? 'Santri',
+                    'nis' => $p->student?->nis ?? '-',
+                    'nisn' => $p->student?->nisn ?? '-',
+                    'kelas' => $p->student?->kelas?->nama_kelas ?? $p->student?->kelas?->name ?? '-',
+                    'unit' => $p->student?->educationUnit?->nama_unit ?? $p->student?->educationUnit?->name ?? '-',
+                    'tipe_surat' => $p->type ?? 'Surat Permohonan Izin / Dispensasi',
+                    'alasan' => $p->reason ?? $p->notes ?? 'Pengajuan persuratan santri',
+                    'tanggal' => optional($p->created_at)->format('d M Y') ?? '-',
+                    'status' => strtoupper($p->status ?? 'MENUNGGU'),
+                ];
+            })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    private function detailPembayaranHariIni(array $unitIds, string $search, int $page, int $perPage, $user = null): array
+    {
+        $today = Carbon::today()->toDateString();
+        $query = \App\Models\BillPayment::query()
+            ->with(['bill.student.kelas', 'bill.student.educationUnit', 'bill.feeCategory'])
+            ->where(function ($q) use ($today) {
+                $q->whereDate('paid_at', $today)
+                  ->orWhereDate('created_at', $today);
+            })
+            ->whereHas('bill.student', function ($sq) use ($unitIds, $user) {
+                if (! empty($unitIds)) {
+                    $sq->where(function ($sub) use ($unitIds) {
+                        $sub->whereIn('unit_id', $unitIds)
+                            ->orWhereHas('kelas', fn ($k) => $k->whereIn('unit_pendidikan_id', $unitIds));
+                    });
+                } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
+                    $sq->whereRaw('1 = 0');
+                }
+            })
+            ->orderByDesc('created_at');
+
+        if ($search !== '') {
+            $likeOp = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $likeOp) {
+                $q->where('invoice_number', $likeOp, "%{$search}%")
+                  ->orWhere('payment_method', $likeOp, "%{$search}%")
+                  ->orWhereHas('bill.student', fn ($sq) => $sq->where('full_name', $likeOp, "%{$search}%"));
+            });
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+        $totalNominal = (float) (clone $query)->sum('paid_amount');
+
+        return [
+            'summary' => [
+                'total' => $paginator->total(),
+                'total_nominal' => 'Rp ' . number_format($totalNominal, 0, ',', '.'),
+            ],
+            'items' => collect($paginator->items())->map(function ($p) {
+                $student = $p->bill?->student;
+                return [
+                    'id' => $p->id,
+                    'nama' => $student?->full_name ?? '-',
+                    'nis' => $student?->nis ?? '-',
+                    'kelas' => $student?->kelas?->nama_kelas ?? $student?->kelas?->name ?? '-',
+                    'unit' => $student?->educationUnit?->nama_unit ?? $student?->educationUnit?->name ?? '-',
+                    'invoice' => $p->invoice_number ?? '-',
+                    'pos_tagihan' => $p->bill?->feeCategory?->name ?? $p->bill?->title ?? 'SPP / Pendidikan',
+                    'nominal' => 'Rp ' . number_format((float) ($p->paid_amount ?? 0), 0, ',', '.'),
+                    'metode' => strtoupper($p->payment_method ?? 'TUNAI / KAS'),
+                    'status' => strtoupper($p->status ?? 'LUNAS'),
+                    'jam' => optional($p->paid_at ?? $p->created_at)->format('H:i') ?? '-',
+                ];
+            })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    private function detailTugasMenunggu(array $unitIds, string $search, int $page, int $perPage, $user = null): array
+    {
+        $incompleteStudents = $this->detailSiswaIncomplete($unitIds, $search, 1, 100, $user);
+        $incompleteEmployees = $this->detailPegawaiIncomplete($unitIds, $search, 1, 100, $user);
+        $pendingPermits = $this->detailPengajuanSurat($unitIds, $search, 1, 100, $user);
+
+        $tasks = collect([]);
+
+        foreach ($incompleteStudents['items'] as $s) {
+            $tasks->push([
+                'id' => 'siswa_' . $s['id'],
+                'kategori' => 'Kelengkapan Siswa',
+                'nama' => $s['nama'],
+                'subjudul' => 'Kelas: ' . $s['kelas'] . ' · NIS: ' . $s['nis'],
+                'keterangan' => 'Perlu dilengkapi: ' . $s['keterangan'],
+                'tipe' => 'siswa',
+                'priority' => 'Tinggi',
+            ]);
+        }
+
+        foreach ($incompleteEmployees['items'] as $e) {
+            $tasks->push([
+                'id' => 'pegawai_' . $e['id'],
+                'kategori' => 'Kelengkapan Pegawai',
+                'nama' => $e['nama'],
+                'subjudul' => 'Jabatan: ' . $e['jabatan'] . ' · Unit: ' . $e['unit'],
+                'keterangan' => 'Perlu dilengkapi: ' . $e['keterangan'],
+                'tipe' => 'pegawai',
+                'priority' => 'Sedang',
+            ]);
+        }
+
+        foreach ($pendingPermits['items'] as $p) {
+            if ($p['status'] === 'MENUNGGU' || $p['status'] === 'PENDING') {
+                $tasks->push([
+                    'id' => 'surat_' . $p['id'],
+                    'kategori' => 'Verifikasi Surat',
+                    'nama' => $p['nama'],
+                    'subjudul' => $p['tipe_surat'] . ' · ' . $p['kelas'],
+                    'keterangan' => 'Alasan: ' . $p['alasan'],
+                    'tipe' => 'surat',
+                    'priority' => 'Tinggi',
+                ]);
+            }
+        }
+
+        $totalTasks = $tasks->count();
+        $slicedTasks = $tasks->forPage($page, $perPage)->values();
+
+        return [
+            'summary' => [
+                'total' => $totalTasks,
+                'siswa' => count($incompleteStudents['items']),
+                'pegawai' => count($incompleteEmployees['items']),
+            ],
+            'items' => $slicedTasks,
+            'meta' => [
+                'current_page' => $page,
+                'last_page' => (int) ceil($totalTasks / $perPage),
+                'per_page' => $perPage,
+                'total' => $totalTasks,
+            ],
+        ];
+    }
+
+    private function detailJadwalKbm(array $unitIds, string $search, int $page, int $perPage, $user = null): array
+    {
+        $query = ClassSchedule::query()
+            ->with(['kelas.unitPendidikan', 'teacher', 'employee', 'subject'])
+            ->where('is_active', true)
+            ->whereHas('kelas', function ($sq) use ($unitIds, $user) {
+                if (! empty($unitIds)) {
+                    $sq->whereIn('unit_pendidikan_id', $unitIds);
+                } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
+                    $sq->whereRaw('1 = 0');
+                }
+            })
+            ->orderBy('day_of_week')
+            ->orderBy('time_start');
+
+        if ($search !== '') {
+            $likeOp = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $likeOp) {
+                $q->where('activity_name', $likeOp, "%{$search}%")
+                  ->orWhereHas('subject', fn ($sq) => $sq->where('name', $likeOp, "%{$search}%"))
+                  ->orWhereHas('teacher', fn ($sq) => $sq->where('full_name', $likeOp, "%{$search}%"))
+                  ->orWhereHas('employee', fn ($sq) => $sq->where('nama_lengkap', $likeOp, "%{$search}%"))
+                  ->orWhereHas('kelas', fn ($sq) => $sq->where('nama_kelas', $likeOp, "%{$search}%"));
+            });
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+        $todayIso = Carbon::now()->dayOfWeekIso;
+        $totalHariIni = (clone $query)->where('day_of_week', $todayIso)->count();
+
+        return [
+            'summary' => [
+                'total' => $paginator->total(),
+                'hari_ini' => $totalHariIni,
+            ],
+            'items' => collect($paginator->items())->map(function ($s) {
+                $teacherName = $s->teacher?->full_name
+                    ?? $s->employee?->nama_lengkap
+                    ?? $s->employee?->name
+                    ?? 'Guru Pengampu';
+
+                $timeStart = $s->time_start ? substr($s->time_start, 0, 5) : '-';
+                $timeEnd = $s->time_end ? substr($s->time_end, 0, 5) : '-';
+
+                return [
+                    'id' => $s->id,
+                    'hari' => $s->nama_hari ?? "Hari {$s->day_of_week}",
+                    'jam' => "{$timeStart} - {$timeEnd}",
+                    'mapel' => $s->subject?->name ?? $s->subject?->nama_mapel ?? $s->activity_name ?? 'Pelajaran Umum',
+                    'guru' => $teacherName,
+                    'kelas' => $s->kelas?->nama_kelas ?? $s->kelas?->name ?? '-',
+                    'ruang' => $s->kelas?->ruangan ?? 'Ruang Kelas',
+                ];
+            })->values(),
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ];
+    }
+
+    private function detailLaporanNilai(array $unitIds, string $search, int $page, int $perPage, $user = null): array
+    {
+        $query = StudentGrade::query()
+            ->with(['student.kelas', 'student.educationUnit', 'subject', 'kelas'])
+            ->whereHas('student', function ($sq) use ($unitIds, $user) {
+                if (! empty($unitIds)) {
+                    $sq->where(function ($sub) use ($unitIds) {
+                        $sub->whereIn('unit_id', $unitIds)
+                            ->orWhereHas('kelas', fn ($k) => $k->whereIn('unit_pendidikan_id', $unitIds));
+                    });
+                } elseif ($user && ! $this->accessScope->hasGlobalScope($user)) {
+                    $sq->whereRaw('1 = 0');
+                }
+            })
+            ->orderByDesc('created_at');
+
+        if ($search !== '') {
+            $likeOp = DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $query->where(function ($q) use ($search, $likeOp) {
+                $q->whereHas('student', fn ($sq) => $sq->where('full_name', $likeOp, "%{$search}%")->orWhere('nis', $likeOp, "%{$search}%"))
+                  ->orWhereHas('subject', fn ($sq) => $sq->where('name', $likeOp, "%{$search}%"))
+                  ->orWhere('grade_letter', $likeOp, "%{$search}%");
+            });
+        }
+
+        $paginator = $query->paginate($perPage, ['*'], 'page', $page);
+        $total = $paginator->total();
+        $tuntas = (clone $query)->where('is_passed', true)->count();
+
+        return [
+            'summary' => [
+                'total' => $total,
+                'tuntas' => $tuntas,
+                'belum_tuntas' => max(0, $total - $tuntas),
+            ],
+            'items' => collect($paginator->items())->map(function ($g) {
+                return [
+                    'id' => $g->id,
+                    'nama' => $g->student?->full_name ?? $g->student?->name ?? '-',
+                    'nis' => $g->student?->nis ?? '-',
+                    'kelas' => $g->kelas?->nama_kelas ?? $g->student?->kelas?->nama_kelas ?? '-',
+                    'unit' => $g->student?->educationUnit?->name ?? $g->student?->educationUnit?->nama_unit ?? '-',
+                    'mapel' => $g->subject?->name ?? $g->subject?->nama_mapel ?? 'Mata Pelajaran',
+                    'nilai_akhir' => $g->final_score !== null ? (string) $g->final_score : '-',
+                    'predikat' => $g->grade_letter ?? '-',
+                    'status' => $g->is_passed ? 'TUNTAS' : 'REMIDIAL',
+                    'nilai_tugas' => $g->score_assignment !== null ? (string) $g->score_assignment : '-',
+                    'nilai_uts' => $g->score_midterm !== null ? (string) $g->score_midterm : '-',
+                    'nilai_uas' => $g->score_final !== null ? (string) $g->score_final : '-',
+                    'catatan' => $g->notes ?? 'Hasil evaluasi belajar reguler.',
                 ];
             })->values(),
             'meta' => [

@@ -25,7 +25,7 @@ class AttendanceCaptureController extends Controller
     private function teacher(Request $request, LessonAttendanceSession $session, string $permission): void
     {
         abort_unless(
-            $request->user()?->hasAnyRole(['Guru', 'Super Admin', 'Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah'])
+            $request->user()?->hasAnyRole(['Guru', 'Super Admin', 'Wali Kelas', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Divisi Pendidikan', 'divisi_pendidikan'])
                 || $request->user()?->hasPermissionTo($permission)
                 || $request->user()?->hasPermissionTo('kehadiran.siswa.absensi_digital'),
             403,

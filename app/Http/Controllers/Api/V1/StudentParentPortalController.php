@@ -1889,10 +1889,10 @@ class StudentParentPortalController extends Controller
                     'unit_id' => $student->educationUnit?->id ?? $student->unit_id,
                     'program_type' => $student->educationUnit?->program_type ?? $student->kelas?->unitPendidikan?->program_type ?? 'fullday',
                     'jam_kegiatan' => $student->educationUnit?->jam_kegiatan ?? $student->kelas?->unitPendidikan?->jam_kegiatan ?? null,
-                    'level' => $student->educationUnit?->level ?? $student->kelas?->unitPendidikan?->level ?? null,
-                    'foto_url' => $student->foto_url ?? $student->foto ?? $student->photo_url ?? null,
-                    'foto' => $student->foto ?? null,
-                    'nis' => $student->nis ?? $student->nisn ?? null,
+                    'foto_url' => $student->photo_url ?? $student->avatar_url ?? ($student->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($student->photo) : null),
+                    'photo_url' => $student->photo_url ?? $student->avatar_url ?? ($student->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($student->photo) : null),
+                    'foto' => $student->photo ?? $student->foto ?? null,
+                    'photo' => $student->photo ?? null,
                 ],
             ],
         ]);
@@ -2401,11 +2401,11 @@ class StudentParentPortalController extends Controller
                 'id' => $student->id,
                 'name' => $student->nama_lengkap ?? $student->full_name ?? $student->name,
                 'class' => $student->kelas?->name ?? $student->kelas?->nama_kelas ?? null,
-                'unit' => $student->educationUnit?->name ?? null,
                 'nis' => $student->nis ?? $student->nisn ?? null,
-                'foto_url' => $student->photo ?? $student->foto_url ?? $student->foto ?? null,
+                'foto_url' => $student->photo_url ?? $student->avatar_url ?? ($student->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($student->photo) : null),
+                'photo_url' => $student->photo_url ?? $student->avatar_url ?? ($student->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($student->photo) : null),
                 'photo' => $student->photo ?? null,
-                'foto' => $student->foto ?? $student->photo ?? null,
+                'foto' => $student->photo ?? $student->foto ?? null,
                 'gender' => $student->gender ?? $student->jenis_kelamin ?? null,
                 'jenis_kelamin' => $student->jenis_kelamin ?? $student->gender ?? null,
             ],
@@ -2481,11 +2481,11 @@ class StudentParentPortalController extends Controller
                 'id' => $student->id,
                 'name' => $student->nama_lengkap ?? $student->full_name ?? $student->name,
                 'class' => $student->kelas?->name ?? $student->kelas?->nama_kelas ?? null,
-                'unit' => $student->educationUnit?->name ?? null,
                 'nis' => $student->nis ?? $student->nisn ?? null,
-                'foto_url' => $student->photo ?? $student->foto_url ?? $student->foto ?? null,
+                'foto_url' => $student->photo_url ?? $student->avatar_url ?? ($student->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($student->photo) : null),
+                'photo_url' => $student->photo_url ?? $student->avatar_url ?? ($student->photo ? \Illuminate\Support\Facades\Storage::disk('public')->url($student->photo) : null),
                 'photo' => $student->photo ?? null,
-                'foto' => $student->foto ?? $student->photo ?? null,
+                'foto' => $student->photo ?? $student->foto ?? null,
                 'gender' => $student->gender ?? $student->jenis_kelamin ?? null,
                 'jenis_kelamin' => $student->jenis_kelamin ?? $student->gender ?? null,
             ],
@@ -3271,8 +3271,8 @@ class StudentParentPortalController extends Controller
         }
 
         $achievements = RekapPrestasiSiswa::query()
-            ->where('student_id', $student->id)
-            ->orderBy('tanggal', 'desc')
+            ->where('id_siswa', $student->id)
+            ->orderBy('tanggal_prestasi', 'desc')
             ->get();
 
         return response()->json([
@@ -3307,9 +3307,19 @@ class StudentParentPortalController extends Controller
      */
     public function schoolInformation(Request $request): JsonResponse
     {
-        $student = $this->getStudentContext($request);
         $user = $request->user();
-        if (! $student && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif']))) {
+        $isParentUser = $user && $user->hasAnyRole(['Orang Tua', 'orang_tua', 'Parent', 'parent', 'wali_murid']);
+        $hasSpecificChildRequested = $request->filled('child_id') || $request->filled('student_id') || $request->header('X-Child-Id');
+
+        $student = null;
+        if ($hasSpecificChildRequested || ! $isParentUser) {
+            $student = $this->getStudentContext($request);
+            if ($hasSpecificChildRequested && ! $student) {
+                return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+            }
+        }
+
+        if (! $student && ! $isParentUser && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
@@ -3398,9 +3408,19 @@ class StudentParentPortalController extends Controller
 
     public function schoolInformationSummary(Request $request): JsonResponse
     {
-        $student = $this->getStudentContext($request);
         $user = $request->user();
-        if (! $student && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif']))) {
+        $isParentUser = $user && $user->hasAnyRole(['Orang Tua', 'orang_tua', 'Parent', 'parent', 'wali_murid']);
+        $hasSpecificChildRequested = $request->filled('child_id') || $request->filled('student_id') || $request->header('X-Child-Id');
+
+        $student = null;
+        if ($hasSpecificChildRequested || ! $isParentUser) {
+            $student = $this->getStudentContext($request);
+            if ($hasSpecificChildRequested && ! $student) {
+                return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+            }
+        }
+
+        if (! $student && ! $isParentUser && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
@@ -3420,6 +3440,12 @@ class StudentParentPortalController extends Controller
         }
         if (! $eduUnit && $student && $student->kelas_id) {
             $eduUnit = \App\Models\Kelas::with('unitPendidikan')->find($student->kelas_id)?->unitPendidikan;
+        }
+        if (! $eduUnit && $user?->employee?->education_unit_id) {
+            $eduUnit = \App\Models\EducationUnit::find($user->employee->education_unit_id);
+        }
+        if (! $eduUnit && ($user?->education_unit_id ?? $user?->unit_id)) {
+            $eduUnit = \App\Models\EducationUnit::find($user->education_unit_id ?? $user->unit_id);
         }
 
         return response()->json(['success' => true, 'data' => [
@@ -3442,11 +3468,13 @@ class StudentParentPortalController extends Controller
             return response()->json(['success' => false, 'message' => 'Informasi tidak ditemukan.'], 404);
         }
 
+        $user = $request->user();
+        $isStaffOrTeacher = $user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']);
         $student = $this->getStudentContext($request);
-        abort_unless($student, 404, 'Data siswa tidak ditemukan.');
+        abort_unless($student || $isStaffOrTeacher, 404, 'Data pengguna atau siswa tidak ditemukan.');
+
         $item = $this->schoolInformationQuery($request, $student)->whereKey($informationId)->firstOrFail();
         $payload = $request->validate(['action' => ['required', 'in:read,bookmark,unbookmark,acknowledge']]);
-        $user = $request->user();
         $metadata = $user->metadata ?? [];
         $portalState = $metadata['portal_school_information'] ?? [];
         $key = $payload['action'] === 'bookmark' || $payload['action'] === 'unbookmark' ? 'bookmarks' : ($payload['action'] === 'acknowledge' ? 'acknowledgements' : 'read');
@@ -3468,9 +3496,11 @@ class StudentParentPortalController extends Controller
 
     public function markAllSchoolInformationRead(Request $request): JsonResponse
     {
-        $student = $this->getStudentContext($request);
-        abort_unless($student, 404, 'Data siswa tidak ditemukan.');
         $user = $request->user();
+        $isStaffOrTeacher = $user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']);
+        $student = $this->getStudentContext($request);
+        abort_unless($student || $isStaffOrTeacher, 404, 'Data pengguna atau siswa tidak ditemukan.');
+
         $metadata = $user->metadata ?? [];
         $state = $metadata['portal_school_information'] ?? [];
         foreach ($this->schoolInformationQuery($request, $student)->pluck('id') as $id) {
@@ -3491,7 +3521,7 @@ class StudentParentPortalController extends Controller
 
         $unitIds = [];
         $classIds = [];
-        $unitName = null;
+        $unitNames = [];
         if ($student) {
             $unitIds = array_values(array_unique(array_filter([
                 $student->education_unit_id,
@@ -3501,11 +3531,44 @@ class StudentParentPortalController extends Controller
                 $student->educationUnit?->id ?? null,
             ])));
             $classIds = array_values(array_unique(array_filter([$student->class_id, $student->kelas_id])));
-            $unitName = $student->unit_name ?: ($student->educationUnit?->nama_unit ?: ($student->educationUnit?->name ?: ($student->kelas?->unitPendidikan?->nama_unit ?: $student->kelas?->unitPendidikan?->name)));
+            $uName = $student->unit_name ?: ($student->educationUnit?->nama_unit ?: ($student->educationUnit?->name ?: ($student->kelas?->unitPendidikan?->nama_unit ?: $student->kelas?->unitPendidikan?->name)));
+            if ($uName) {
+                $unitNames[] = $uName;
+            }
+        } elseif ($user && $user->hasAnyRole(['Orang Tua', 'orang_tua', 'Parent', 'parent', 'wali_murid'])) {
+            $parent = ParentModel::query()->where('user_id', $user->id)->first();
+            if ($parent) {
+                $parentStudents = $this->parentStudentsQuery($parent)->with(['kelas.unitPendidikan', 'educationUnit'])->where('is_active', true)->get();
+                foreach ($parentStudents as $c) {
+                    $uIds = array_filter([
+                        $c->education_unit_id,
+                        $c->unit_id ?? null,
+                        $c->kelas?->unit_pendidikan_id ?? null,
+                        $c->kelas?->education_unit_id ?? null,
+                        $c->educationUnit?->id ?? null,
+                    ]);
+                    foreach ($uIds as $uid) {
+                        $unitIds[] = $uid;
+                    }
+                    if ($c->class_id) $classIds[] = $c->class_id;
+                    if ($c->kelas_id) $classIds[] = $c->kelas_id;
+                    $cUnit = $c->unit_name ?: ($c->educationUnit?->nama_unit ?: ($c->educationUnit?->name ?: ($c->kelas?->unitPendidikan?->nama_unit ?: $c->kelas?->unitPendidikan?->name)));
+                    if ($cUnit) {
+                        $unitNames[] = $cUnit;
+                    }
+                }
+                $unitIds = array_values(array_unique(array_filter($unitIds)));
+                $classIds = array_values(array_unique(array_filter($classIds)));
+                $unitNames = array_values(array_unique(array_filter($unitNames)));
+            }
         } elseif ($user && $user->hasAnyRole(['Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif'])) {
             $empUnit = $user->employee?->education_unit_id ?? $user->education_unit_id ?? $user->unit_id ?? null;
             if ($empUnit) {
                 $unitIds = [$empUnit];
+            }
+            $uName = $user->employee?->unit_name ?? $user->employee?->educationUnit?->name ?? null;
+            if ($uName) {
+                $unitNames[] = $uName;
             }
         }
 
@@ -3526,21 +3589,33 @@ class StudentParentPortalController extends Controller
             ->when($isCalendar, function ($q) {
                 $q->where(fn ($sub) => $sub->whereNull('selesai_tampil')->orWhere('selesai_tampil', '>=', now()->subYear()));
             })
-            ->when($role && ! $isFullAccess, function ($q) use ($role) {
+            ->when($user && ! $isFullAccess, function ($q) use ($user) {
                 $driver = DB::connection()->getDriverName();
-                $q->where(function ($target) use ($driver, $role) {
+                $userRoles = $user->getRoleNames()->toArray();
+                $q->where(function ($target) use ($driver, $userRoles) {
                     $target->whereNull('target_peran');
                     if ($driver === 'pgsql') {
                         $target->orWhereRaw("target_peran::text ILIKE '%all%'");
                     } else {
                         $target->orWhere('target_peran', 'like', '%all%');
                     }
-                    $target->orWhereJsonContains('target_peran', $role);
+                    foreach ($userRoles as $r) {
+                        $target->orWhereJsonContains('target_peran', $r);
+                        $rLower = strtolower($r);
+                        if (in_array($rLower, ['tata usaha', 'tu', 'tata_usaha', 'operator'], true)) {
+                            $target->orWhereJsonContains('target_peran', 'Tata Usaha')
+                                ->orWhereJsonContains('target_peran', 'tata_usaha')
+                                ->orWhereJsonContains('target_peran', 'TU')
+                                ->orWhereJsonContains('target_peran', 'tu')
+                                ->orWhereJsonContains('target_peran', 'Staff')
+                                ->orWhereJsonContains('target_peran', 'staff');
+                        }
+                    }
                 });
             })
-            ->when(! $isFullAccess, function ($q) use ($request, $unitIds, $unitName) {
+            ->when(! $isFullAccess, function ($q) use ($request, $unitIds, $unitNames) {
                 $strictUnit = $request->boolean('strict_unit');
-                $q->where(function ($sub) use ($strictUnit, $unitIds, $unitName) {
+                $q->where(function ($sub) use ($strictUnit, $unitIds, $unitNames) {
                     if (! $strictUnit) {
                         $sub->where(function ($yayasanSub) {
                             $yayasanSub->where('data_tambahan->unit_id', 'all')
@@ -3560,22 +3635,26 @@ class StudentParentPortalController extends Controller
                     }
                     if (! empty($unitIds)) {
                         if ($strictUnit) {
-                            $sub->where(function ($strictSub) use ($unitIds, $unitName) {
+                            $sub->where(function ($strictSub) use ($unitIds, $unitNames) {
                                 $strictSub->whereIn('data_tambahan->unit_id', $unitIds)
                                     ->orWhereIn('data_tambahan->education_unit_id', $unitIds);
-                                if ($unitName) {
-                                    $strictSub->orWhere('data_tambahan->unit_name', $unitName)
-                                        ->orWhere('data_tambahan->education_unit', $unitName);
+                                if (! empty($unitNames)) {
+                                    foreach ($unitNames as $uName) {
+                                        $strictSub->orWhere('data_tambahan->unit_name', 'like', '%'.$uName.'%')
+                                            ->orWhere('data_tambahan->education_unit', 'like', '%'.$uName.'%');
+                                    }
                                 }
                             });
                         } else {
                             $sub->orWhereIn('data_tambahan->unit_id', $unitIds)
                                 ->orWhereIn('data_tambahan->education_unit_id', $unitIds);
+                            if (! empty($unitNames)) {
+                                foreach ($unitNames as $uName) {
+                                    $sub->orWhere('data_tambahan->unit_name', 'like', '%'.$uName.'%')
+                                        ->orWhere('data_tambahan->education_unit', 'like', '%'.$uName.'%');
+                                }
+                            }
                         }
-                    }
-                    if (! $strictUnit && $unitName) {
-                        $sub->orWhere('data_tambahan->unit_name', $unitName)
-                            ->orWhere('data_tambahan->education_unit', $unitName);
                     }
                 });
             })
@@ -3801,16 +3880,41 @@ class StudentParentPortalController extends Controller
                     ],
                 ]);
             }
+
+            // Murni dari API SIPDEI: jika tidak ditemukan tagihan di SIPDEI, kembalikan tagihan kosong
+            return response()->json([
+                'success' => true,
+                'source' => 'sipdei',
+                'message' => $sipdeiResult['message'] ?? 'Belum ada data tagihan di sistem SIPDEI.',
+                'data' => [
+                    'current_page' => 1,
+                    'data' => [],
+                    'from' => null,
+                    'last_page' => 1,
+                    'per_page' => 20,
+                    'to' => null,
+                    'total' => 0,
+                ],
+                'payment_info' => $paymentInfo,
+                'sipdei_meta' => [
+                    'nis_pembayaran' => $nisPembayaran,
+                    'status_code' => $sipdeiResult['status_code'] ?? 404,
+                    'message' => $sipdeiResult['message'] ?? 'NIS Pembayaran tidak ditemukan di SIPDEI.',
+                ],
+            ]);
         }
 
-        // Fallback ke data lokal StudentBill jika SIPDEI belum terhubung / kosong
-        $bills = StudentBill::query()->with(['feeCategory', 'academicYear', 'payments'])
-            ->where('student_id', $student->id)->orderBy('due_date', 'desc')->paginate(20);
-
+        // Jika SIPDEI belum dikonfigurasi, kembalikan data kosong murni
         return response()->json([
             'success' => true,
-            'source' => 'local',
-            'data' => $bills,
+            'source' => 'sipdei',
+            'message' => 'Layanan SIPDEI belum dikonfigurasi atau NIS pembayaran belum terdaftar.',
+            'data' => [
+                'current_page' => 1,
+                'data' => [],
+                'total' => 0,
+                'last_page' => 1,
+            ],
             'payment_info' => $paymentInfo,
         ]);
     }
@@ -4676,6 +4780,8 @@ class StudentParentPortalController extends Controller
                 ->where('recipient_user_id', $user->id)
                 ->whereIn('sender_user_id', $teacherUserIdsStr)
                 ->whereNull('read_at')
+                ->whereNotNull('message')
+                ->where('message', '!=', '')
                 ->selectRaw('sender_user_id, count(*) as total')
                 ->groupBy('sender_user_id')
                 ->pluck('total', 'sender_user_id')

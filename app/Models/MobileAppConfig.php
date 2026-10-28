@@ -99,6 +99,26 @@ class MobileAppConfig extends Model
                 'force_update' => false,
                 'update_url' => 'https://play.google.com/store/apps/details?id=id.sch.dareliman.sims.mobile',
             ],
+            'onboarding' => [
+                'enabled' => true,
+                'slides' => [
+                    [
+                        'title' => 'Sistem Sekolah Terpadu',
+                        'desc' => 'Akses informasi akademik, jadwal pembelajaran, dan pengumuman sekolah dalam satu genggaman.',
+                        'image_url' => null,
+                    ],
+                    [
+                        'title' => 'Mutaba\'ah & Tahfizh Mandiri',
+                        'desc' => 'Pantau amalan yaumiyyah, hafalan Al-Qur\'an, dan capaian adab ananda secara transparan.',
+                        'image_url' => null,
+                    ],
+                    [
+                        'title' => 'Presensi & Layanan Digital',
+                        'desc' => 'Notifikasi kehadiran kelas & gerbang otomatis terhubung langsung ke gawai orang tua.',
+                        'image_url' => null,
+                    ],
+                ],
+            ],
         ];
     }
 

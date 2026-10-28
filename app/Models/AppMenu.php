@@ -18,16 +18,22 @@ class AppMenu extends Model
         'id',
         'module_id',
         'name',
+        'name_mobile',
         'path',
         'icon',
+        'icon_mobile',
         'required_permissions',
+        'target_roles',
         'sort_order',
         'platform',
+        'metadata',
         'is_active',
     ];
 
     protected $casts = [
         'required_permissions' => 'array',
+        'target_roles' => 'array',
+        'metadata' => 'array',
         'sort_order' => 'integer',
         'is_active' => 'boolean',
     ];

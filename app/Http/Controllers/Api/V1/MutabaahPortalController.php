@@ -59,6 +59,48 @@ class MutabaahPortalController extends Controller
         return $this->ok('Riwayat siswa berhasil dimuat.', $this->service->history($this->service->ownStudent($request->user()), $this->historyFilters($request)));
     }
 
+    public function exportWeeklyPdf(Request $request, string $studentId)
+    {
+        $this->allow($request, 'mutabaah.daily.view');
+        $student = $this->service->parentStudent($request->user(), $studentId);
+        $data = $this->service->buildWeeklyPdfData($student, $request->query('date'));
+        $filename = 'mutabaah-pekanan-' . \Illuminate\Support\Str::slug($student->full_name) . '-' . now()->format('Ymd') . '.pdf';
+
+        return \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.mutabaah-weekly-report', $data)
+            ->setPaper('a4', 'portrait')
+            ->download($filename);
+    }
+
+    public function exportOwnWeeklyPdf(Request $request)
+    {
+        $this->allow($request, 'mutabaah.daily.view');
+        $student = $this->service->ownStudent($request->user());
+        $data = $this->service->buildWeeklyPdfData($student, $request->query('date'));
+        $filename = 'mutabaah-pekanan-' . \Illuminate\Support\Str::slug($student->full_name) . '-' . now()->format('Ymd') . '.pdf';
+
+        return \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.mutabaah-weekly-report', $data)
+            ->setPaper('a4', 'portrait')
+            ->download($filename);
+    }
+
+    public function exportPortalWeeklyPdf(Request $request)
+    {
+        $this->allow($request, 'mutabaah.daily.view');
+        $studentId = $request->query('student_id') ?: $request->query('child_id');
+        if ($studentId) {
+            $student = $this->service->parentStudent($request->user(), $studentId);
+        } else {
+            $student = $this->service->ownStudent($request->user());
+        }
+        $data = $this->service->buildWeeklyPdfData($student, $request->query('date'));
+        $filename = 'mutabaah-pekanan-' . \Illuminate\Support\Str::slug($student->full_name) . '-' . now()->format('Ymd') . '.pdf';
+
+        return \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.mutabaah-weekly-report', $data)
+            ->setPaper('a4', 'portrait')
+            ->download($filename);
+    }
+
+
     private function historyFilters(Request $request): array
     {
         return $request->validate(['from' => ['nullable', 'date'], 'until' => ['nullable', 'date', 'after_or_equal:from'], 'page' => ['nullable', 'integer', 'min:1'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:60']]);
@@ -74,3 +116,4 @@ class MutabaahPortalController extends Controller
         abort_unless($request->user()->hasRole('Super Admin') || $request->user()->can($permission), 403);
     }
 }
+

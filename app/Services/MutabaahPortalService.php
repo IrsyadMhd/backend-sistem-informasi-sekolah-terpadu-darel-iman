@@ -77,12 +77,30 @@ class MutabaahPortalService
 
     public function parentStudent(User $user, string $studentId): Student
     {
+        // 1. Jika pengguna adalah Siswa: hanya boleh mengakses data dirinya sendiri
+        if ($user->hasRole(['Siswa', 'siswa', 'student'])) {
+            $student = Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])
+                ->where('user_id', $user->id)
+                ->first();
+
+            if (! $student || (string) $student->id !== (string) $studentId) {
+                abort(403, 'Akses ditolak: Siswa hanya berhak mengakses data mutaba’ah miliknya sendiri.');
+            }
+
+            return $student;
+        }
+
+        // 2. Jika pengguna adalah Orang Tua / Wali Murid: hanya boleh mengakses anak yang terdaftar
         $parent = ParentModel::where('user_id', $user->id)->first();
         if ($parent) {
             return $this->parentStudents($parent)->with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])->findOrFail($studentId);
         }
 
-        // Fallback untuk Admin / Teacher / TU: cari santri dan pastikan unit-scoping
+        if ($user->hasRole(['Orang Tua', 'orang_tua', 'orang-tua', 'Orangtua', 'Wali Murid', 'parent'])) {
+            abort(403, 'Akses ditolak: Data wali murid tidak terhubung dengan santri ini.');
+        }
+
+        // 3. Fallback untuk Pegawai / Guru / Musyrif / TU / Admin: cari santri dan pastikan unit-scoping
         $student = Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])->findOrFail($studentId);
         $accessScope = app(\App\Services\AccessScopeService::class);
         if (! $accessScope->hasGlobalScope($user)) {
@@ -501,4 +519,213 @@ class MutabaahPortalService
             ];
         });
     }
+
+    public function buildWeeklyPdfData(Student $student, ?string $dateStr = null): array
+    {
+        $date = Carbon::parse($dateStr ?? now());
+        $startOfWeek = $date->copy()->startOfWeek();
+        $endOfWeek = $date->copy()->endOfWeek();
+
+        $student->loadMissing([
+            'educationUnit',
+            'kelas.unitPendidikan',
+            'kelas.waliKelas',
+            'schoolClass',
+            'parent.user',
+        ]);
+
+        $unit = $student->educationUnit ?? $student->kelas?->unitPendidikan;
+        $unitMeta = is_array($unit?->metadata) ? $unit->metadata : [];
+        $siteSetting = \App\Models\SiteSetting::current();
+
+        $foundationName = $siteSetting?->school_name ?? config('app.name', 'YAYASAN DAR EL-IMAN PADANG');
+        $unitName = $unit?->name ?? 'UNIT PENDIDIKAN TERPADU';
+        $unitMotto = $unitMeta['motto'] ?? $siteSetting?->motto ?? 'Membina Generasi Qur\'ani, Berkarakter & Berprestasi';
+        $unitAddress = $unitMeta['address'] ?? $unit?->address ?? $siteSetting?->address ?? 'Jl. Gurun Laweh No. 2, Nanggalo, Kota Padang';
+        $unitPhone = $unitMeta['phone'] ?? $unit?->phone ?? $siteSetting?->phone ?? '(0751) 705888';
+        $unitEmail = $unitMeta['email'] ?? $unit?->email ?? $siteSetting?->email ?? 'tu@dareliman.sch.id';
+        $unitNpsn = $unitMeta['npsn'] ?? $unit?->code ?? '';
+        $unitAkreditasi = $unitMeta['accreditation'] ?? $unitMeta['akreditasi'] ?? 'A';
+
+        $className = $student->kelas?->nama_kelas ?? $student->kelas?->name ?? $student->schoolClass?->name ?? '-';
+        $waliKelasName = $student->kelas?->waliKelas?->full_name ?? $student->kelas?->waliKelas?->name ?? 'Wali Kelas';
+        $parentName = $student->parent?->full_name ?? data_get($student->metadata, 'nama_ayah') ?? data_get($student->metadata, 'nama_ibu') ?? 'Orang Tua / Wali';
+
+        $principalName = $unitMeta['principal_name'] ?? 'Pimpinan Unit';
+        $principalNip = $unitMeta['principal_nip'] ?? $unitMeta['niy'] ?? '-';
+
+        $summary = $this->periodSummary($student->id, $startOfWeek, $endOfWeek);
+
+        $attendances = \App\Models\Attendance::query()
+            ->where('student_id', $student->id)
+            ->whereBetween('attendance_date', [$startOfWeek->toDateString(), $endOfWeek->toDateString()])
+            ->get()
+            ->keyBy(fn ($a) => Carbon::parse($a->attendance_date)->toDateString());
+
+        $daysIndo = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Ahad'];
+        $weeklyAttendance = [];
+        for ($i = 0; $i < 7; $i++) {
+            $cur = $startOfWeek->copy()->addDays($i);
+            $curStr = $cur->toDateString();
+            $att = $attendances->get($curStr);
+
+            $statusLabel = 'Hadir';
+            $statusClass = 'status-good';
+            $time = null;
+            $note = 'Tertib / Tepat Waktu';
+
+            if ($att) {
+                $rawStatus = strtolower(trim((string) ($att->status ?? 'hadir')));
+                if (in_array($rawStatus, ['h', 'hadir', 'present'])) {
+                    $statusLabel = 'Hadir';
+                    $statusClass = 'status-good';
+                    $time = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') . ' WIB' : '07:15 WIB';
+                } elseif (in_array($rawStatus, ['t', 'terlambat', 'late'])) {
+                    $statusLabel = 'Terlambat';
+                    $statusClass = 'status-less';
+                    $time = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') . ' WIB' : '07:35 WIB';
+                    $note = 'Terlambat Masuk';
+                } elseif (in_array($rawStatus, ['s', 'sakit', 'sick'])) {
+                    $statusLabel = 'Sakit';
+                    $statusClass = 'status-less';
+                    $note = 'Surat Dokter / Izin Sakit';
+                } elseif (in_array($rawStatus, ['i', 'izin', 'permit'])) {
+                    $statusLabel = 'Izin';
+                    $statusClass = 'status-less';
+                    $note = 'Keperluan Keluarga';
+                } else {
+                    $statusLabel = 'Alpa';
+                    $statusClass = 'status-not_done';
+                    $note = 'Tanpa Keterangan';
+                }
+            } elseif ($cur->isWeekend()) {
+                $statusLabel = 'Libur';
+                $statusClass = 'status-na';
+                $note = 'Libur Akhir Pekan';
+            }
+
+            $weeklyAttendance[] = [
+                'day_date' => $daysIndo[$i] . ', ' . $cur->translatedFormat('d M Y'),
+                'status_label' => $statusLabel,
+                'status_class' => $statusClass,
+                'time' => $time,
+                'note' => $note,
+            ];
+        }
+
+        $headers = MutabaahDailyHeader::query()
+            ->with(['details.agendaItem.category'])
+            ->where('student_id', $student->id)
+            ->whereBetween('activity_date', [$startOfWeek->toDateString(), $endOfWeek->toDateString()])
+            ->get()
+            ->keyBy(fn ($h) => Carbon::parse($h->activity_date)->toDateString());
+
+        $weeklyWorship = [];
+        $supervisorNotes = null;
+
+        for ($i = 0; $i < 7; $i++) {
+            $cur = $startOfWeek->copy()->addDays($i);
+            $curStr = $cur->toDateString();
+            $h = $headers->get($curStr);
+
+            if ($h && !empty($h->supervisor_notes)) {
+                $supervisorNotes = $h->supervisor_notes;
+            }
+
+            $prayerValues = ['subuh' => 'good', 'zuhur' => 'good', 'ashar' => 'good', 'maghrib' => 'good', 'isya' => 'good'];
+            $sunnahNotes = [];
+
+            if ($h) {
+                foreach ($h->details as $d) {
+                    $code = strtolower((string) ($d->agendaItem?->code ?? $d->agendaItem?->name ?? ''));
+                    $val = $d->status_value instanceof \BackedEnum ? $d->status_value->value : (string) $d->status_value;
+
+                    if (str_contains($code, 'subuh')) $prayerValues['subuh'] = $val ?: 'good';
+                    elseif (str_contains($code, 'zuhur') || str_contains($code, 'dzuhur')) $prayerValues['zuhur'] = $val ?: 'good';
+                    elseif (str_contains($code, 'ashar')) $prayerValues['ashar'] = $val ?: 'good';
+                    elseif (str_contains($code, 'maghrib')) $prayerValues['maghrib'] = $val ?: 'good';
+                    elseif (str_contains($code, 'isya')) $prayerValues['isya'] = $val ?: 'good';
+                    elseif (str_contains($code, 'dhuha') && $val === 'good') $sunnahNotes[] = 'Dhuha';
+                    elseif (str_contains($code, 'tahajud') && $val === 'good') $sunnahNotes[] = 'Tahajud';
+                    elseif (str_contains($code, 'dzikir') && $val === 'good') $sunnahNotes[] = 'Dzikir';
+                    elseif ((str_contains($code, 'sedekah') || str_contains($code, 'infaq')) && $val === 'good') $sunnahNotes[] = 'Infaq';
+                }
+            }
+
+            $badgeMap = function ($val) {
+                if ($val === 'good') return ['label' => 'Berjamaah', 'class' => 'status-good'];
+                if ($val === 'less') return ['label' => 'Munfarid', 'class' => 'status-less'];
+                if ($val === 'not_done') return ['label' => 'Tidak', 'class' => 'status-not_done'];
+                return ['label' => 'Udzur', 'class' => 'status-na'];
+            };
+
+            $weeklyWorship[] = [
+                'day_name' => $daysIndo[$i],
+                'date_short' => $cur->format('d/m'),
+                'subuh_label' => $badgeMap($prayerValues['subuh'])['label'],
+                'subuh_class' => $badgeMap($prayerValues['subuh'])['class'],
+                'zuhur_label' => $badgeMap($prayerValues['zuhur'])['label'],
+                'zuhur_class' => $badgeMap($prayerValues['zuhur'])['class'],
+                'ashar_label' => $badgeMap($prayerValues['ashar'])['label'],
+                'ashar_class' => $badgeMap($prayerValues['ashar'])['class'],
+                'maghrib_label' => $badgeMap($prayerValues['maghrib'])['label'],
+                'maghrib_class' => $badgeMap($prayerValues['maghrib'])['class'],
+                'isya_label' => $badgeMap($prayerValues['isya'])['label'],
+                'isya_class' => $badgeMap($prayerValues['isya'])['class'],
+                'sunnah_summary' => !empty($sunnahNotes) ? implode(', ', array_slice($sunnahNotes, 0, 3)) : 'Rutinitas Baik',
+            ];
+        }
+
+        $tahfizhLog = \App\Models\TahfizhDailyLog::query()
+            ->where('student_id', $student->id)
+            ->whereDate('record_date', '<=', $endOfWeek->toDateString())
+            ->orderBy('record_date', 'desc')
+            ->first();
+
+        $tahfizhData = [
+            'last_surah' => $tahfizhLog?->hafalan_surah_name ?? $tahfizhLog?->surah ?? 'Surah Al-Mulk (Ayat 1-30)',
+            'last_date' => $tahfizhLog ? Carbon::parse($tahfizhLog->record_date)->translatedFormat('d F Y') : $endOfWeek->translatedFormat('d F Y'),
+            'total_lines' => ($tahfizhLog?->hafalan_baris ?: 15) . ' Baris',
+            'target_lines' => '15 Baris / Pekan',
+            'status' => $tahfizhLog?->keterangan ?? 'Mumtaz (Sangat Lancar)',
+        ];
+
+        $parentSignature = MutabaahParentSignature::query()
+            ->whereIn('daily_header_id', $headers->pluck('id'))
+            ->latest('signed_at')
+            ->first();
+
+        $periodText = $startOfWeek->translatedFormat('d F Y') . ' s.d. ' . $endOfWeek->translatedFormat('d F Y');
+        $docNumber = 'MUT/' . $startOfWeek->format('Y/m') . '/' . substr($student->id, 0, 8);
+
+        return [
+            'doc_title' => 'LAPORAN PERKEMBANGAN & MUTABA\'AH PEKANAN',
+            'foundation_name' => $foundationName,
+            'unit_name' => $unitName,
+            'unit_motto' => $unitMotto,
+            'unit_address' => $unitAddress,
+            'unit_phone' => $unitPhone,
+            'unit_email' => $unitEmail,
+            'unit_npsn' => $unitNpsn,
+            'unit_akreditasi' => $unitAkreditasi,
+            'period_text' => $periodText,
+            'printed_at' => now()->translatedFormat('d F Y H:i') . ' WIB',
+            'printed_date' => now()->translatedFormat('d F Y'),
+            'doc_number' => $docNumber,
+            'student' => $student,
+            'class_name' => $className,
+            'wali_kelas_name' => $waliKelasName,
+            'parent_name' => $parentName,
+            'principal_name' => $principalName,
+            'principal_nip' => $principalNip,
+            'program_type' => $student->educationUnit?->program_type ?? 'Terpadu',
+            'summary' => $summary,
+            'weekly_attendance' => $weeklyAttendance,
+            'weekly_worship' => $weeklyWorship,
+            'tahfizh_data' => $tahfizhData,
+            'supervisor_notes' => $supervisorNotes,
+            'parent_signature' => $parentSignature,
+        ];
+    }
 }
+

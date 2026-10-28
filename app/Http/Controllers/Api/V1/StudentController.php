@@ -16,6 +16,7 @@ use App\Repositories\Contracts\StudentRepositoryInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -67,6 +68,8 @@ class StudentController extends Controller
         $payload['kelas_id'] = $this->authorizedKelasId($payload['kelas_id'], $payload['unit_id']);
         $student = Student::query()->create($payload);
 
+        $this->syncUserAvatar($student);
+
         return response()->json([
             'message' => 'Data siswa berhasil disimpan.',
             'data' => $student,
@@ -111,6 +114,7 @@ class StudentController extends Controller
         }
 
         $model->update($payload);
+        $this->syncUserAvatar($model->fresh());
 
         return response()->json([
             'message' => 'Data siswa berhasil diperbarui.',
@@ -338,7 +342,10 @@ class StudentController extends Controller
             $metadata['no_va'] = $metadata['nis_pembayaran'];
         }
 
-        return [
+        $photoCandidate = $validated['photo'] ?? $validated['foto'] ?? $metadata['foto_url'] ?? $metadata['photo'] ?? $metadata['foto'] ?? null;
+        $resolvedPhotoPath = $this->handlePhotoData($photoCandidate);
+
+        $payload = [
             'parent_id' => $validated['parent_id'] ?? null,
             'unit_id' => $validated['unit_id'] ?? null,
             'kelas_id' => $validated['kelas_id'] ?? null,
@@ -350,8 +357,78 @@ class StudentController extends Controller
             'birth_place' => $validated['birth_place'] ?? null,
             'address' => $validated['address'] ?? null,
             'is_active' => Arr::get($validated, 'is_active', true),
-            'metadata' => $metadata,
         ];
+
+        if ($resolvedPhotoPath !== null) {
+            $payload['photo'] = $resolvedPhotoPath;
+            $payload['photo_thumb'] = $resolvedPhotoPath;
+            $metadata['photo'] = $resolvedPhotoPath;
+            $metadata['foto'] = $resolvedPhotoPath;
+            $metadata['foto_url'] = str_starts_with($resolvedPhotoPath, 'http') ? $resolvedPhotoPath : Storage::disk('public')->url($resolvedPhotoPath);
+        }
+
+        $payload['metadata'] = $metadata;
+
+        return $payload;
+    }
+
+    private function handlePhotoData(?string $photoCandidate): ?string
+    {
+        if (empty($photoCandidate) || !is_string($photoCandidate)) {
+            return null;
+        }
+
+        $photoCandidate = trim($photoCandidate);
+
+        // Jangan proses blob URL lokal peramban (misal blob:http://localhost:5173/...)
+        if (str_starts_with($photoCandidate, 'blob:')) {
+            return null;
+        }
+
+        // Jika Base64 data URI
+        if (str_starts_with($photoCandidate, 'data:image/')) {
+            $ext = 'jpg';
+            if (preg_match('#^data:image\/(\w+);base64,#i', $photoCandidate, $m)) {
+                $ext = strtolower($m[1]) === 'jpeg' ? 'jpg' : strtolower($m[1]);
+            }
+            $b64 = substr($photoCandidate, strpos($photoCandidate, ',') + 1);
+            $binary = base64_decode($b64, true);
+            if ($binary !== false) {
+                $filename = 'students/photos/std_' . Str::uuid()->toString() . '.' . $ext;
+                Storage::disk('public')->put($filename, $binary);
+                return $filename;
+            }
+            return null;
+        }
+
+        // Jika URL lengkap yang mengarah ke storage lokal
+        if (str_starts_with($photoCandidate, 'http://') || str_starts_with($photoCandidate, 'https://')) {
+            if (preg_match('#/storage/(.+)$#', $photoCandidate, $matches)) {
+                return $matches[1];
+            }
+            return $photoCandidate;
+        }
+
+        // Relative path
+        $clean = ltrim($photoCandidate, '/');
+        if (str_starts_with($clean, 'storage/')) {
+            $clean = substr($clean, 8);
+        }
+
+        return $clean;
+    }
+
+    private function syncUserAvatar(Student $student): void
+    {
+        if ($student->user_id && !empty($student->photo)) {
+            $user = User::find($student->user_id);
+            if ($user) {
+                $userMeta = $user->metadata ?? [];
+                $userMeta['avatar'] = $student->photo;
+                $user->metadata = $userMeta;
+                $user->save();
+            }
+        }
     }
 
     public function generateVaBsi(Request $request): JsonResponse

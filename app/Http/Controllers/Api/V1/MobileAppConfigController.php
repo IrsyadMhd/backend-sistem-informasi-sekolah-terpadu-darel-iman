@@ -70,15 +70,16 @@ class MobileAppConfigController extends Controller
     {
         $type = $request->input('type');
         $isBanner = $type === 'login_banner';
+        $isOnboarding = (bool) preg_match('/^onboarding_([1-3])$/', $type, $matches);
 
         $rules = [
-            'type' => ['required', Rule::in(['logo_header', 'logo_login', 'logo_footer', 'login_banner'])],
+            'type' => ['required', Rule::in(['logo_header', 'logo_login', 'logo_footer', 'login_banner', 'onboarding_1', 'onboarding_2', 'onboarding_3'])],
             'file' => [
                 'required',
                 'file',
                 'image',
-                $isBanner ? 'mimes:png,jpg,jpeg,webp' : 'mimes:png,jpg,jpeg,webp,svg',
-                $isBanner ? 'max:4096' : 'max:2048',
+                ($isBanner || $isOnboarding) ? 'mimes:png,jpg,jpeg,webp' : 'mimes:png,jpg,jpeg,webp,svg',
+                ($isBanner || $isOnboarding) ? 'max:4096' : 'max:2048',
             ],
         ];
 
@@ -93,7 +94,13 @@ class MobileAppConfigController extends Controller
         $newPath = $request->file('file')->store("mobile-config/{$type}", 'public');
         $newUrl = url('/storage/'.$newPath);
 
-        if ($isBanner) {
+        if ($isOnboarding) {
+            $idx = ((int) $matches[1]) - 1;
+            if (!isset($config['onboarding']['slides']) || !is_array($config['onboarding']['slides'])) {
+                $config['onboarding'] = MobileAppConfig::defaults()['onboarding'];
+            }
+            $config['onboarding']['slides'][$idx]['image_url'] = $newUrl;
+        } elseif ($isBanner) {
             $config['theme']['login_banner_url'] = $newUrl;
         } else {
             $config['branding']["{$type}_url"] = $newUrl;
@@ -125,7 +132,7 @@ class MobileAppConfigController extends Controller
 
     public function deleteMedia(Request $request, string $type): JsonResponse
     {
-        if (!in_array($type, ['logo_header', 'logo_login', 'logo_footer', 'login_banner'])) {
+        if (!in_array($type, ['logo_header', 'logo_login', 'logo_footer', 'login_banner', 'onboarding_1', 'onboarding_2', 'onboarding_3'])) {
             return response()->json(['message' => 'Tipe asset tidak valid.'], 422);
         }
 
@@ -134,7 +141,12 @@ class MobileAppConfigController extends Controller
 
         $oldPath = $config['media_paths'][$type] ?? null;
 
-        if ($type === 'login_banner') {
+        if (preg_match('/^onboarding_([1-3])$/', $type, $matches)) {
+            $idx = ((int) $matches[1]) - 1;
+            if (isset($config['onboarding']['slides'][$idx])) {
+                $config['onboarding']['slides'][$idx]['image_url'] = null;
+            }
+        } elseif ($type === 'login_banner') {
             $config['theme']['login_banner_url'] = null;
         } else {
             $config['branding']["{$type}_url"] = null;
@@ -189,6 +201,10 @@ class MobileAppConfigController extends Controller
 
         $features = array_replace_recursive($defaults['features'], $config['features'] ?? []);
         $system = array_replace_recursive($defaults['system'], $config['system'] ?? []);
+        $onboarding = array_replace_recursive($defaults['onboarding'], $config['onboarding'] ?? []);
+        if (isset($config['onboarding']['slides']) && is_array($config['onboarding']['slides'])) {
+            $onboarding['slides'] = $config['onboarding']['slides'];
+        }
 
         $siteSetting = SiteSetting::current();
         $system['mapbox_token'] = $siteSetting->mapbox_token;
@@ -207,17 +223,37 @@ class MobileAppConfigController extends Controller
         $branding['logo_header_url'] = !empty($branding['logo_header_url']) ? $branding['logo_header_url'] : $branding['logo_url'];
         $branding['logo_login_url'] = !empty($branding['logo_login_url']) ? $branding['logo_login_url'] : $branding['logo_url'];
         $branding['logo_footer_url'] = !empty($branding['logo_footer_url']) ? $branding['logo_footer_url'] : $branding['logo_url'];
+        $branding['card_rules_student'] = $siteSetting->card_rules_student;
+        $branding['card_footer_motto'] = $siteSetting->card_footer_motto;
+
+        $educationUnits = \App\Models\EducationUnit::query()
+            ->select(['id', 'name', 'code', 'metadata'])
+            ->orderBy('id')
+            ->get()
+            ->map(function ($u) {
+                return [
+                    'id' => $u->id,
+                    'name' => $u->name,
+                    'code' => $u->code,
+                    'phone' => $u->metadata['phone'] ?? null,
+                    'email' => $u->metadata['email'] ?? null,
+                    'address' => $u->metadata['address'] ?? null,
+                ];
+            });
 
         return [
             'platform' => 'android',
             'version' => $setting->version,
             'theme' => $theme,
             'branding' => $branding,
+            'education_units' => $educationUnits,
             'navigation' => $navigation,
             'home_layout' => $homeLayout,
             'role_home_layouts' => $roleHomeLayouts,
+            'role_menus' => $config['role_menus'] ?? null,
             'features' => $features,
             'system' => $system,
+            'onboarding' => $onboarding,
             'mapbox_token' => $siteSetting->mapbox_token,
             'updated_at' => $setting->updated_at?->toIso8601String(),
         ];
@@ -313,6 +349,12 @@ class MobileAppConfigController extends Controller
                 'max:500',
                 'required_if:system.force_update,true',
             ],
+            'onboarding' => ['sometimes', 'nullable', 'array'],
+            'onboarding.enabled' => ['nullable', 'boolean'],
+            'onboarding.slides' => ['nullable', 'array'],
+            'onboarding.slides.*.title' => ['required_with:onboarding.slides', 'string', 'max:100'],
+            'onboarding.slides.*.desc' => ['required_with:onboarding.slides', 'string', 'max:300'],
+            'onboarding.slides.*.image_url' => ['nullable', 'url', 'max:500'],
         ];
     }
 }

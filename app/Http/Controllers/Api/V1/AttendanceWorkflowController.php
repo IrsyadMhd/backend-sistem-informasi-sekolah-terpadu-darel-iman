@@ -265,8 +265,8 @@ class AttendanceWorkflowController extends Controller
     {
         $this->permit(
             $request,
-            ['lesson_attendance.create', 'homeroom_attendance.view'],
-            ['Guru', 'Wali Kelas']
+            ['lesson_attendance.create', 'homeroom_attendance.view', 'kehadiran.siswa.absensi_digital'],
+            ['Guru', 'Wali Kelas', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan']
         );
         $data = $request->validate([
             'schedule_id' => ['required', 'uuid', 'exists:class_schedules,id'],
@@ -382,8 +382,8 @@ class AttendanceWorkflowController extends Controller
     {
         $this->permit(
             $request,
-            ['lesson_attendance.finalize', 'homeroom_attendance.view'],
-            ['Guru', 'Wali Kelas']
+            ['lesson_attendance.finalize', 'homeroom_attendance.view', 'kehadiran.siswa.absensi_digital'],
+            ['Guru', 'Wali Kelas', 'Tata Usaha', 'TU', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Divisi Pendidikan', 'divisi_pendidikan']
         );
         $isRecordedSubstitute = $request->user()->hasRole('Wali Kelas')
             && data_get($session->metadata, 'attendance_context') === 'active_login'

@@ -17,7 +17,9 @@ class AppModule extends Model
     protected $fillable = [
         'id',
         'name',
+        'name_mobile',
         'icon',
+        'icon_mobile',
         'description',
         'sort_order',
         'platform',

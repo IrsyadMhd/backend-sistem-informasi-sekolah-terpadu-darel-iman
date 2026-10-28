@@ -20,16 +20,28 @@ class UserProfileResource extends JsonResource
         }
         $portal = app(PortalResolver::class)->resolve($this->resource);
 
+        $photoUrl = $this->photo_url ?? $employee?->photo_url ?? $student?->photo_url;
+        $avatarUrl = $this->avatar_url ?? $photoUrl;
+
+        $employeePayload = $employee ? [
+            'id' => $employee->id,
+            'nama_lengkap' => $employee->nama_lengkap,
+            'foto' => $employee->foto,
+            'photo_url' => $employee->photo_url,
+            'avatar_url' => $employee->avatar_url,
+        ] : null;
+
         $userData = [
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
             'phone' => $this->phone,
-            'photo_url' => $this->photo_url,
-            'avatar_url' => $this->avatar_url,
+            'photo_url' => $photoUrl,
+            'avatar_url' => $avatarUrl,
             'is_active' => $this->is_active,
             'unit_name' => $unit?->name,
             'unit_code' => $unit?->code,
+            'employee' => $employeePayload,
         ];
 
         return [
@@ -37,8 +49,9 @@ class UserProfileResource extends JsonResource
             'name' => $this->name,
             'email' => $this->email,
             'phone' => $this->phone,
-            'photo_url' => $this->photo_url,
-            'avatar_url' => $this->avatar_url,
+            'photo_url' => $photoUrl,
+            'avatar_url' => $avatarUrl,
+            'employee' => $employeePayload,
             'is_active' => $this->is_active,
             'unit' => $unit ? [
                 'id' => $unit->id,

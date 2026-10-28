@@ -84,7 +84,7 @@ class AppNavigationSeeder extends Seeder
                         'icon' => 'Briefcase',
                         'required_permissions' => ['dashboard.tata-usaha.view'],
                         'sort_order' => 7,
-                        'platform' => 'web',
+                        'platform' => 'both',
                     ],
                     [
                         'id' => 'dash-tahfizh',
@@ -167,7 +167,7 @@ class AppNavigationSeeder extends Seeder
                         'icon' => 'Users',
                         'required_permissions' => ['employee.view_all', 'foundation.employee.view', 'dashboard.pemantauan.lihat'],
                         'sort_order' => 2,
-                        'platform' => 'web',
+                        'platform' => 'both',
                     ],
                     [
                         'id' => 'master-siswa',
@@ -176,7 +176,7 @@ class AppNavigationSeeder extends Seeder
                         'icon' => 'Users',
                         'required_permissions' => ['student.view', 'student.view_all', 'kesiswaan.data_lengkap_siswa'],
                         'sort_order' => 3,
-                        'platform' => 'web',
+                        'platform' => 'both',
                     ],
                     [
                         'id' => 'master-kelas',
@@ -342,7 +342,7 @@ class AppNavigationSeeder extends Seeder
                         'icon' => 'Database',
                         'required_permissions' => ['pembelajaran.bank_soal', 'lms.view'],
                         'sort_order' => 5,
-                        'platform' => 'web',
+                        'platform' => 'both',
                     ],
                     [
                         'id' => 'lms-ujian',
@@ -509,7 +509,7 @@ class AppNavigationSeeder extends Seeder
                 'icon' => 'FileText',
                 'description' => 'Laporan presensi, siswa, prestasi, dan rekap yayasan',
                 'sort_order' => 7,
-                'platform' => 'web',
+                'platform' => 'both',
                 'is_active' => true,
                 'menus' => [
                     [
@@ -555,7 +555,7 @@ class AppNavigationSeeder extends Seeder
                         'icon' => 'Users',
                         'required_permissions' => ['foundation.report.view', 'alumni.view', 'kesiswaan.kelulusan_per_tahun', 'kesiswaan.alumni_tujuan_lanjut'],
                         'sort_order' => 5,
-                        'platform' => 'web',
+                        'platform' => 'both',
                     ],
                 ],
             ],
@@ -604,6 +604,18 @@ class AppNavigationSeeder extends Seeder
                         'sort_order' => 4,
                         'platform' => 'web',
                     ],
+                    [
+                        'id' => 'pengaturan-menu-navigasi',
+                        'name' => 'Manajemen Menu & Navigasi',
+                        'name_mobile' => 'Menu & Navigasi',
+                        'path' => '/dashboard/pengaturan/menu-navigasi',
+                        'icon' => 'Menu',
+                        'icon_mobile' => 'menu',
+                        'required_permissions' => ['sistem.pengaturan'],
+                        'target_roles' => ['Super Admin', 'Admin'],
+                        'sort_order' => 5,
+                        'platform' => 'web',
+                    ],
                 ],
             ],
         ];
@@ -627,5 +639,10 @@ class AppNavigationSeeder extends Seeder
                 );
             }
         }
+
+        // Auto-seed default mobile menus and synchronize MobileAppConfig
+        $adminNav = new \App\Http\Controllers\Api\V1\AdminNavigationController();
+        $adminNav->seedDefaultMobileMenus();
+        $adminNav->autoSyncMobileMenus();
     }
 }

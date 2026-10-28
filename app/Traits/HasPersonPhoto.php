@@ -52,6 +52,10 @@ trait HasPersonPhoto
 
         $value = trim($value);
 
+        if (str_starts_with($value, 'data:image/') || str_starts_with($value, 'data:')) {
+            return $value;
+        }
+
         if (preg_match('#^https?://#i', $value)) {
             return $value;
         }

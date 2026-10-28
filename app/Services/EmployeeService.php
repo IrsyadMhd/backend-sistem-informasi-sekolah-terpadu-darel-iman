@@ -10,6 +10,8 @@ use App\Models\SchoolClass;
 use App\Models\Subject;
 use App\Repositories\Contracts\EmployeeRepositoryInterface;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class EmployeeService
 {
@@ -250,12 +252,78 @@ class EmployeeService
             $data['niy'] = \App\Services\CodeGeneratorService::generate('employee_niy', $data['unit_id'] ?? null);
         }
 
-        return $this->employeeRepository->create($data);
+        $this->handlePhotoData($data);
+
+        $employee = $this->employeeRepository->create($data);
+
+        if (! empty($employee->user_id) && ! empty($employee->foto)) {
+            $this->syncUserAvatar($employee->user_id, $employee->foto);
+        }
+
+        return $employee;
     }
 
     public function update(string $id, array $data)
     {
-        return $this->employeeRepository->update($id, $data);
+        $existing = $this->employeeRepository->findById($id);
+        $this->handlePhotoData($data, $existing?->foto);
+
+        $employee = $this->employeeRepository->update($id, $data);
+
+        $userId = $employee->user_id ?? $existing?->user_id;
+        if (! empty($userId) && array_key_exists('foto', $data)) {
+            $this->syncUserAvatar($userId, $employee->foto);
+        }
+
+        return $employee;
+    }
+
+    protected function syncUserAvatar(string $userId, ?string $photoPath): void
+    {
+        $user = \App\Models\User::find($userId);
+        if ($user) {
+            $meta = is_array($user->metadata) ? $user->metadata : [];
+            $meta['avatar'] = $photoPath;
+            $user->update(['metadata' => $meta]);
+        }
+    }
+
+    protected function handlePhotoData(array &$data, ?string $existingPath = null): void
+    {
+        if (! array_key_exists('foto', $data)) {
+            return;
+        }
+
+        $rawPhoto = $data['foto'];
+
+        if (empty($rawPhoto)) {
+            if ($existingPath && ! str_starts_with($existingPath, 'data:') && ! str_starts_with($existingPath, 'http')) {
+                Storage::disk('public')->delete($existingPath);
+            }
+            $data['foto'] = null;
+            return;
+        }
+
+        if (is_string($rawPhoto) && str_starts_with($rawPhoto, 'data:image/')) {
+            if ($existingPath && ! str_starts_with($existingPath, 'data:') && ! str_starts_with($existingPath, 'http')) {
+                Storage::disk('public')->delete($existingPath);
+            }
+
+            $extension = 'jpg';
+            if (preg_match('#^data:image/(\w+);base64,#i', $rawPhoto, $matches)) {
+                $extCandidate = strtolower($matches[1]);
+                $extension = $extCandidate === 'jpeg' ? 'jpg' : $extCandidate;
+            }
+
+            $base64Content = substr($rawPhoto, strpos($rawPhoto, ',') + 1);
+            $decoded = base64_decode($base64Content, true);
+
+            if ($decoded !== false) {
+                $path = 'avatars/emp_' . Str::uuid()->toString() . '.' . $extension;
+                Storage::disk('public')->put($path, $decoded);
+                $data['foto'] = $path;
+            }
+        }
     }
 
     public function delete(string $id)

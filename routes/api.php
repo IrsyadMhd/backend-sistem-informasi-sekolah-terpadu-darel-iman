@@ -58,6 +58,7 @@ use App\Http\Controllers\Api\V1\LmsPenugasanController;
 use App\Http\Controllers\Api\V1\LmsPresensiController;
 use App\Http\Controllers\Api\V1\MobileAppConfigController;
 use App\Http\Controllers\Api\V1\NavigationModuleController;
+use App\Http\Controllers\Api\V1\AdminNavigationController;
 
 use App\Http\Controllers\Api\V1\LmsRaporController;
 use App\Http\Controllers\Api\V1\LmsReferensiController;
@@ -196,6 +197,8 @@ Route::middleware('auth:sanctum')->prefix('v2/approval')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/v1/navigation/modules', [NavigationModuleController::class, 'index']);
     Route::post('/export/pdf', [\App\Http\Controllers\Api\V1\ExportPdfController::class, 'export']);
+    Route::post('/upload', [\App\Http\Controllers\Api\V1\FileUploadController::class, 'upload']);
+    Route::post('/v1/upload', [\App\Http\Controllers\Api\V1\FileUploadController::class, 'upload']);
 
     // Informasi & Pengumuman Sekolah (Dapat diakses oleh seluruh civitas sekolah terautentikasi: TU, Guru, Siswa, Orang Tua, Yayasan)
     Route::get('/foundation/information', [FoundationDashboardController::class, 'information']);
@@ -252,12 +255,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/children', [MutabaahPortalController::class, 'children']);
         Route::post('/{dailyHeaderId}/signature', [MutabaahPortalController::class, 'signature'])->whereUuid('dailyHeaderId');
         Route::get('/{studentId}/history', [MutabaahPortalController::class, 'parentHistory'])->whereUuid('studentId');
+        Route::get('/{studentId}/weekly-pdf', [MutabaahPortalController::class, 'exportWeeklyPdf'])->whereUuid('studentId');
         Route::get('/{studentId}', [MutabaahPortalController::class, 'parentOverview'])->whereUuid('studentId');
     });
     Route::prefix('student/mutabaah')->group(function () {
         Route::get('/', [MutabaahPortalController::class, 'studentOverview']);
         Route::get('/history', [MutabaahPortalController::class, 'studentHistory']);
+        Route::get('/weekly-pdf', [MutabaahPortalController::class, 'exportOwnWeeklyPdf']);
     });
+
     Route::prefix('mutabaah')->group(function () {
         Route::get('/analytics/dashboard', [MutabaahAnalyticsController::class, 'dashboard']);
         Route::get('/analytics/recap', [MutabaahAnalyticsController::class, 'recap']);
@@ -317,6 +323,23 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('can:sistem.pengaturan');
     Route::delete('/admin/mobile-config/media/{type}', [MobileAppConfigController::class, 'deleteMedia'])
         ->middleware('can:sistem.pengaturan');
+
+    foreach (['admin/navigation', 'v1/admin/navigation'] as $navPrefix) {
+        Route::prefix($navPrefix)->middleware('can:sistem.pengaturan')->group(function () {
+            Route::get('/', [AdminNavigationController::class, 'index']);
+            Route::get('/modules', [AdminNavigationController::class, 'index']);
+            Route::get('/icon-registries', [AdminNavigationController::class, 'iconRegistries']);
+            Route::post('/modules', [AdminNavigationController::class, 'storeModule']);
+            Route::put('/modules/{id}', [AdminNavigationController::class, 'updateModule']);
+            Route::delete('/modules/{id}', [AdminNavigationController::class, 'destroyModule']);
+            Route::post('/menus', [AdminNavigationController::class, 'storeMenu']);
+            Route::put('/menus/{id}', [AdminNavigationController::class, 'updateMenu']);
+            Route::delete('/menus/{id}', [AdminNavigationController::class, 'destroyMenu']);
+            Route::post('/reorder', [AdminNavigationController::class, 'reorder']);
+            Route::post('/sync-mobile-config', [AdminNavigationController::class, 'syncMobileConfig']);
+            Route::post('/reset-defaults', [AdminNavigationController::class, 'resetDefaults']);
+        });
+    }
     Route::get('/dashboard', [DashboardPemantauanController::class, 'ringkasan'])
         ->middleware('can:dashboard.pemantauan.lihat');
     Route::get('/dashboard/super-admin', [SuperAdminDashboardController::class, 'index'])
@@ -1104,7 +1127,13 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/schedules', [TeacherPortalController::class, 'schedules'])
                 ->middleware('permission:teacher.schedule.view|academic.schedule.view|lesson_attendance.view|tu.dashboard.view|dashboard.tata_usaha');
             Route::get('/academic-calendar', [TeacherPortalController::class, 'academicCalendar'])
-                ->middleware('permission:teacher.schedule.view|academic.schedule.view|academic.calendar.view|tu.dashboard.view|dashboard.tata_usaha');
+                ->middleware('permission:teacher.schedule.view|academic.schedule.view|academic.calendar.view|pembelajaran.kalender_pendidikan|tu.dashboard.view|dashboard.tata_usaha');
+            Route::post('/academic-calendar', [TeacherPortalController::class, 'storeAcademicCalendar'])
+                ->middleware('permission:academic.calendar.manage|academic.manage|pembelajaran.kalender_pendidikan|sistem.master_data|tu.dashboard.view|dashboard.tata_usaha');
+            Route::put('/academic-calendar/{id}', [TeacherPortalController::class, 'updateAcademicCalendar'])
+                ->middleware('permission:academic.calendar.manage|academic.manage|pembelajaran.kalender_pendidikan|sistem.master_data|tu.dashboard.view|dashboard.tata_usaha');
+            Route::delete('/academic-calendar/{id}', [TeacherPortalController::class, 'deleteAcademicCalendar'])
+                ->middleware('permission:academic.calendar.manage|academic.manage|pembelajaran.kalender_pendidikan|sistem.master_data|tu.dashboard.view|dashboard.tata_usaha');
             Route::get('/announcements', [TeacherPortalController::class, 'announcements'])
                 ->middleware('permission:teacher.dashboard.view|tu.dashboard.view|dashboard.tata_usaha');
             Route::get('/classes', [TeacherPortalController::class, 'classes'])
@@ -1213,6 +1242,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/tahfizh/murajaah', [StudentParentPortalController::class, 'submitMurajaah'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student');
             Route::get('/mutabaah', [StudentParentPortalController::class, 'mutabaah']);
             Route::post('/mutabaah', [StudentParentPortalController::class, 'saveMutabaahStudent'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
+            Route::get('/mutabaah/weekly-pdf', [MutabaahPortalController::class, 'exportPortalWeeklyPdf']);
             Route::get('/children/{studentId}/worship-input', [ParentWorshipInputController::class, 'context'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
             Route::post('/children/{studentId}/worship-input', [ParentWorshipInputController::class, 'store'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
             Route::get('/children/{studentId}/tahfizh-achievement', [ParentWorshipInputController::class, 'tahfizhSummary'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');

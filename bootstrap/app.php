@@ -19,6 +19,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
             'foundation.readonly' => \App\Http\Middleware\EnsureFoundationReadOnly::class,
         ]);
+        $middleware->prependToGroup('api', \App\Http\Middleware\ExtractBearerTokenFromQuery::class);
         $middleware->appendToGroup('api', \App\Http\Middleware\EnsureFoundationReadOnly::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
