@@ -314,7 +314,8 @@ class EmployeeChatController extends Controller
                 }
             }
 
-            $unitEmployees = $unitEmpQuery->orderBy('nama_lengkap', 'asc')->limit(120)->get();
+            $unitCacheKey = 'unit_emp_conv_' . md5(json_encode($scopedUnitIds ?? 'all'));
+            $unitEmployees = \Illuminate\Support\Facades\Cache::remember($unitCacheKey, 60, fn () => $unitEmpQuery->orderBy('nama_lengkap', 'asc')->limit(30)->get());
 
             $allEmpUserIds = $unitEmployees->map(fn ($e) => (string) ($e->user_id ?: $e->id))->unique()->filter()->toArray();
             $morePresence = $this->chatAccess->getPresenceMap($allEmpUserIds);

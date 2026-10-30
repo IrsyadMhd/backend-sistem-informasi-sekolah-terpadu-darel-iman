@@ -9,6 +9,7 @@ use App\Services\MutabaahAnalyticsService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Maatwebsite\Excel\Facades\Excel;
 
 class MutabaahAnalyticsController extends Controller
@@ -21,15 +22,23 @@ class MutabaahAnalyticsController extends Controller
     public function dashboard(Request $request): JsonResponse
     {
         $this->authorizePermission($request, 'mutabaah.dashboard.view');
+        $filters = $this->filters($request) + ['_user' => $request->user()];
+        $cacheKey = 'mutabaah_dash_' . $request->user()->id . '_' . md5(json_encode($request->all()));
 
-        return $this->ok('Dashboard berhasil dimuat.', $this->service->dashboard($this->filters($request) + ['_user' => $request->user()]));
+        $data = Cache::remember($cacheKey, 300, fn () => $this->service->dashboard($filters));
+
+        return $this->ok('Dashboard berhasil dimuat.', $data);
     }
 
     public function recap(Request $request): JsonResponse
     {
         $this->authorizePermission($request, 'mutabaah.recap.view');
+        $filters = $this->filters($request) + ['_user' => $request->user()];
+        $cacheKey = 'mutabaah_recap_' . $request->user()->id . '_' . md5(json_encode($request->all()));
 
-        return $this->ok('Rekap berhasil dimuat.', $this->service->recap($this->filters($request) + ['_user' => $request->user()]));
+        $data = Cache::remember($cacheKey, 300, fn () => $this->service->recap($filters));
+
+        return $this->ok('Rekap berhasil dimuat.', $data);
     }
 
     public function export(Request $request)

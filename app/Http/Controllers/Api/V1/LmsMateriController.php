@@ -451,13 +451,23 @@ class LmsMateriController extends Controller
         $user = $request->user();
         $this->authorizeSupervisi($user);
 
+        $statusInput = $request->input('status') ?? $request->input('status_supervisi');
+        $catatanInput = $request->input('catatan') ?? $request->input('catatan_koreksi');
+
+        $request->merge([
+            'status' => $statusInput,
+            'catatan' => $catatanInput,
+        ]);
+
         $validated = $request->validate([
             'status' => 'required|in:perlu_revisi,disetujui',
-            'catatan' => 'required|string|min:3|max:3000',
+            'catatan' => ($statusInput === 'perlu_revisi')
+                ? 'required|string|min:3|max:3000'
+                : 'nullable|string|max:3000',
         ], [
             'status.required' => 'Status supervisi wajib ditentukan.',
             'status.in' => 'Status supervisi harus salah satu dari: perlu_revisi, disetujui.',
-            'catatan.required' => 'Catatan koreksi / ulasan supervisi wajib diisi.',
+            'catatan.required' => 'Catatan koreksi / ulasan supervisi wajib diisi jika materi perlu direvisi.',
             'catatan.min' => 'Catatan koreksi minimal 3 karakter.',
         ]);
 
@@ -470,9 +480,10 @@ class LmsMateriController extends Controller
 
         $oldStatus = $materi->status_supervisi ?? 'diajukan';
         $newStatus = $validated['status'];
-        $catatan = $validated['catatan'];
-
         $roleName = $user->roles->pluck('name')->first() ?? 'Supervisor Pendidikan';
+        $catatan = ! empty($validated['catatan'])
+            ? $validated['catatan']
+            : ($newStatus === 'disetujui' ? "Materi telah disetujui oleh {$roleName}." : 'Perlu perbaikan materi.');
 
         $updateData = [
             'status_supervisi' => $newStatus,

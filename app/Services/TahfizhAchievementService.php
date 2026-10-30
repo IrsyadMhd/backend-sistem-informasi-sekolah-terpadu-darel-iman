@@ -28,25 +28,73 @@ class TahfizhAchievementService
             })
             ->orderBy('record_date')->get();
 
-        DB::transaction(function () use ($student, $logs) {
-            foreach ($logs as $log) {
-                $surah = QuranSurah::where('nomor', $log->hafalan_surah_number)->first();
-                if (! $surah) continue;
-                $start = max(1, (int) $log->hafalan_ayah_start);
-                $end = min((int) $surah->jumlah_ayat, (int) $log->hafalan_ayah_end);
-                $classId = $log->class_id && Kelas::whereKey($log->class_id)->exists() ? $log->class_id : null;
-                for ($ayah = $start; $ayah <= $end; $ayah++) {
-                    $ayahJuz = \App\Helpers\QuranJuzHelper::getJuz((int) $surah->nomor, $ayah);
-                    TahfizhAyahAchievement::firstOrCreate(
-                        ['student_id' => $student->id, 'surah_number' => $surah->nomor, 'ayah_number' => $ayah],
-                        ['academic_year_id' => $log->academic_year_id, 'semester_id' => $log->semester_id,
-                            'class_id' => $classId, 'source_log_id' => $log->id, 'juz_number' => $ayahJuz,
-                            'status' => 'validated', 'validated_at' => $log->updated_at ?? $log->created_at,
-                            'metadata' => ['source' => 'tahfizh_daily_log']]
-                    );
-                }
+        if ($logs->isEmpty()) {
+            return;
+        }
+
+        // Preload all 114 surahs once to eliminate N+1 queries
+        $surahs = QuranSurah::all()->keyBy('nomor');
+
+        // Preload existing achievements for this student in a single query
+        $existingKeys = TahfizhAyahAchievement::query()
+            ->where('student_id', $student->id)
+            ->select('surah_number', 'ayah_number')
+            ->get()
+            ->mapWithKeys(fn ($r) => [$r->surah_number . '-' . $r->ayah_number => true])
+            ->all();
+
+        // Pre-validate class IDs in memory
+        $classIds = $logs->pluck('class_id')->filter()->unique()->values();
+        $validClassIds = $classIds->isNotEmpty()
+            ? Kelas::whereIn('id', $classIds)->pluck('id')->flip()->all()
+            : [];
+
+        $toInsert = [];
+        $now = now();
+
+        foreach ($logs as $log) {
+            $surah = $surahs->get($log->hafalan_surah_number);
+            if (! $surah) {
+                continue;
             }
-        });
+            $start = max(1, (int) $log->hafalan_ayah_start);
+            $end = min((int) $surah->jumlah_ayat, (int) $log->hafalan_ayah_end);
+            $classId = ($log->class_id && isset($validClassIds[$log->class_id])) ? $log->class_id : null;
+            $validatedAt = $log->updated_at ?? $log->created_at ?? $now;
+
+            for ($ayah = $start; $ayah <= $end; $ayah++) {
+                $key = $surah->nomor . '-' . $ayah;
+                if (isset($existingKeys[$key])) {
+                    continue;
+                }
+
+                $existingKeys[$key] = true;
+                $ayahJuz = \App\Helpers\QuranJuzHelper::getJuz((int) $surah->nomor, $ayah);
+
+                $toInsert[] = [
+                    'id' => (string) \Illuminate\Support\Str::uuid(),
+                    'student_id' => $student->id,
+                    'surah_number' => $surah->nomor,
+                    'ayah_number' => $ayah,
+                    'academic_year_id' => $log->academic_year_id,
+                    'semester_id' => $log->semester_id,
+                    'class_id' => $classId,
+                    'source_log_id' => $log->id,
+                    'juz_number' => $ayahJuz,
+                    'status' => 'validated',
+                    'validated_at' => $validatedAt,
+                    'metadata' => json_encode(['source' => 'tahfizh_daily_log']),
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+        }
+
+        if (! empty($toInsert)) {
+            foreach (array_chunk($toInsert, 500) as $chunk) {
+                TahfizhAyahAchievement::insert($chunk);
+            }
+        }
     }
 
     public function summary(Student $student): array

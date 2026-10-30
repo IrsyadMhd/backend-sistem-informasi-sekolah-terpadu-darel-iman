@@ -26,6 +26,7 @@ use App\Services\MutabaahEnterpriseService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Maatwebsite\Excel\Facades\Excel;
 
 class MutabaahEnterpriseController extends Controller
@@ -216,23 +217,28 @@ return response()->json(['success' => true, 'message' => $this->service->bulkRes
         $wide = $this->dataScope->isFoundationWide($user);
         $unitId = $wide ? null : $this->dataScope->employeeUnitId($user);
 
-        return response()->json(['data' => [
-            'categories' => MutabaahCategory::where('is_active', true)->orderBy('sort_order')->get(['id', 'code', 'name']),
-            'agendas' => MutabaahAgendaItem::active()->orderBy('sort_order')->get(['id', 'code', 'name']),
-            'templates' => MutabaahTemplate::active()->when($unitId, fn ($q, $id) => $q->where('education_unit_id', $id))->orderBy('name')->get(['id', 'code', 'name']),
-            'units' => EducationUnit::where('is_active', true)->when($unitId, fn ($q, $id) => $q->whereKey($id))->orderBy('name')->get(['id', 'name', 'jenis_unit_id']),
-            'jenis_units' => JenisUnitPendidikan::where('status', true)->orderBy('urutan')->get(['uuid', 'singkatan', 'nama_jenis']),
-            'employees' => Employee::where('status', 'Aktif')->when($unitId, fn ($q, $id) => $q->where('unit_id', $id))->orderBy('nama_lengkap')->get(['id', 'nama_lengkap', 'unit_id']),
-            'students' => Student::active()->when($unitId, fn ($q, $id) => $q->where('unit_id', $id))->orderBy('full_name')->get(['id', 'full_name', 'nis', 'unit_id', 'class_id']),
-            'supervisor_assignments' => MutabaahSupervisorAssignment::active()->when($unitId, fn ($q, $id) => $q->where('education_unit_id', $id))->with('employee:id,nama_lengkap')->get()->map(fn ($assignment) => [
-                'id' => $assignment->id,
-                'name' => $assignment->employee?->nama_lengkap.' · '.str($assignment->supervisor_type->value)->replace('_', ' ')->title(),
-            ]),
-            'classes' => Kelas::where('status', 'Aktif')->when($unitId, fn ($q, $id) => $q->where('unit_pendidikan_id', $id))->orderBy('nama_kelas')->get(['id', 'nama_kelas', 'unit_pendidikan_id', 'jenjang']),
-            'school_classes' => SchoolClass::when($unitId, fn ($q, $id) => $q->whereIn('id', Student::active()->where('unit_id', $id)->whereNotNull('class_id')->select('class_id')))->orderBy('name')->get(['id', 'name', 'level', 'academic_year_id', 'semester_id']),
-            'semesters' => Semester::where('is_active', true)->get(['id', 'name', 'academic_year_id']),
-            'academic_years' => AcademicYear::orderByDesc('start_date')->get(['id', 'name', 'is_active']),
-        ]]);
+        $cacheKey = 'mutabaah_options_' . ($unitId ?? 'all');
+        $data = Cache::remember($cacheKey, 1800, function () use ($unitId) {
+            return [
+                'categories' => MutabaahCategory::where('is_active', true)->orderBy('sort_order')->get(['id', 'code', 'name']),
+                'agendas' => MutabaahAgendaItem::active()->orderBy('sort_order')->get(['id', 'code', 'name']),
+                'templates' => MutabaahTemplate::active()->when($unitId, fn ($q, $id) => $q->where('education_unit_id', $id))->orderBy('name')->get(['id', 'code', 'name']),
+                'units' => EducationUnit::where('is_active', true)->when($unitId, fn ($q, $id) => $q->whereKey($id))->orderBy('name')->get(['id', 'name', 'jenis_unit_id']),
+                'jenis_units' => JenisUnitPendidikan::where('status', true)->orderBy('urutan')->get(['uuid', 'singkatan', 'nama_jenis']),
+                'employees' => Employee::where('status', 'Aktif')->when($unitId, fn ($q, $id) => $q->where('unit_id', $id))->orderBy('nama_lengkap')->get(['id', 'nama_lengkap', 'unit_id']),
+                'students' => Student::active()->when($unitId, fn ($q, $id) => $q->where('unit_id', $id))->orderBy('full_name')->get(['id', 'full_name', 'nis', 'unit_id', 'class_id']),
+                'supervisor_assignments' => MutabaahSupervisorAssignment::active()->when($unitId, fn ($q, $id) => $q->where('education_unit_id', $id))->with('employee:id,nama_lengkap')->get()->map(fn ($assignment) => [
+                    'id' => $assignment->id,
+                    'name' => $assignment->employee?->nama_lengkap.' · '.str($assignment->supervisor_type->value)->replace('_', ' ')->title(),
+                ]),
+                'classes' => Kelas::where('status', 'Aktif')->when($unitId, fn ($q, $id) => $q->where('unit_pendidikan_id', $id))->orderBy('nama_kelas')->get(['id', 'nama_kelas', 'unit_pendidikan_id', 'jenjang']),
+                'school_classes' => SchoolClass::when($unitId, fn ($q, $id) => $q->whereIn('id', Student::active()->where('unit_id', $id)->whereNotNull('class_id')->select('class_id')))->orderBy('name')->get(['id', 'name', 'level', 'academic_year_id', 'semester_id']),
+                'semesters' => Semester::where('is_active', true)->get(['id', 'name', 'academic_year_id']),
+                'academic_years' => AcademicYear::orderByDesc('start_date')->get(['id', 'name', 'is_active']),
+            ];
+        });
+
+        return response()->json(['data' => $data]);
     }
 
     public function audit(Request $request): JsonResponse

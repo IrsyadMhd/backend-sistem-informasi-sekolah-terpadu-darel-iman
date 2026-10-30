@@ -304,8 +304,21 @@ class AuthService
             ->values()
             ->all();
 
+        $passwordCheckCache = [];
         $validCandidates = collect($candidates)
-            ->filter(fn (array $candidate) => $this->verifyPassword($candidate['user'], $password) && $candidate['user']->is_active && ($candidate['valid'])($candidate['user']))
+            ->filter(function (array $candidate) use ($password, &$passwordCheckCache) {
+                if (! $candidate['user']->is_active) {
+                    return false;
+                }
+                $uid = (string) $candidate['user']->id;
+                if (! array_key_exists($uid, $passwordCheckCache)) {
+                    $passwordCheckCache[$uid] = $this->verifyPassword($candidate['user'], $password);
+                }
+                if (! $passwordCheckCache[$uid]) {
+                    return false;
+                }
+                return ($candidate['valid'])($candidate['user']);
+            })
             ->values();
 
         // Jika akun memiliki peran Super Admin, selalu masuk langsung sebagai Super Admin (portal admin)

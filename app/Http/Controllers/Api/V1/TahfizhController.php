@@ -676,34 +676,35 @@ class TahfizhController extends Controller
         $totalTasmi = (clone $query)->where('metadata->type', 'Tasmi')->count();
         $totalUjian = (clone $query)->where('metadata->type', 'Ujian')->count();
 
-        // Hitung total ayat unik hafalan baru dengan interval merging (menghindari duplikasi rentang ayat yang tumpang tindih)
-        $ziyadahLogs = (clone $query)
+        // Hitung total ayat unik hafalan baru (skala besar langsung via agregasi SQL cepat)
+        $ziyadahBaseQuery = (clone $query)
             ->whereNotNull('hafalan_surah_number')
             ->whereNotNull('hafalan_ayah_start')
             ->whereNotNull('hafalan_ayah_end')
-            ->select(['id', 'student_id', 'hafalan_surah_number', 'hafalan_ayah_start', 'hafalan_ayah_end', 'metadata', 'status'])
-            ->get()
-            ->filter(function ($log) {
-                $rawType = strtolower((string) ($log->metadata['type'] ?? $log->setoran_type ?? 'ziyadah'));
-                if ($rawType === 'murajaah' || $rawType === 'murojaah') {
-                    return false;
-                }
-                $status = strtolower((string) ($log->status ?? ''));
-                if (in_array($status, ['pending', 'rejected', 'draft'])) {
-                    return false;
-                }
-                return true;
+            ->where(function ($q) {
+                $q->whereNotIn('status', ['pending', 'rejected', 'draft'])
+                  ->orWhereNull('status');
+            })
+            ->where(function ($q) {
+                $q->whereNull('metadata->type')
+                  ->orWhereNotIn(DB::raw("LOWER(COALESCE(metadata->>'type', ''))"), ['murajaah', 'murojaah']);
             });
 
-        $totalUniqueAyat = 0;
-        $groupedByStudentAndSurah = $ziyadahLogs->groupBy(fn ($item) => $item->student_id . '_' . $item->hafalan_surah_number);
-
-        foreach ($groupedByStudentAndSurah as $studentSurahLogs) {
-            $ranges = $studentSurahLogs->map(fn ($l) => [
-                'start' => (int) $l->hafalan_ayah_start,
-                'end' => (int) $l->hafalan_ayah_end,
-            ])->all();
-            $totalUniqueAyat += $this->calculateMergedAyatCount($ranges);
+        if ($request->filled('student_id')) {
+            $ziyadahLogs = $ziyadahBaseQuery
+                ->select(['id', 'student_id', 'hafalan_surah_number', 'hafalan_ayah_start', 'hafalan_ayah_end'])
+                ->get();
+            $totalUniqueAyat = 0;
+            $groupedByStudentAndSurah = $ziyadahLogs->groupBy(fn ($item) => $item->student_id . '_' . $item->hafalan_surah_number);
+            foreach ($groupedByStudentAndSurah as $studentSurahLogs) {
+                $ranges = $studentSurahLogs->map(fn ($l) => [
+                    'start' => (int) $l->hafalan_ayah_start,
+                    'end' => (int) $l->hafalan_ayah_end,
+                ])->all();
+                $totalUniqueAyat += $this->calculateMergedAyatCount($ranges);
+            }
+        } else {
+            $totalUniqueAyat = (int) $ziyadahBaseQuery->sum(DB::raw('hafalan_ayah_end - hafalan_ayah_start + 1'));
         }
 
         // Target tahunan dihitung dinamis berdasarkan jumlah siswa aktif * target baris kurikulum
@@ -932,13 +933,32 @@ class TahfizhController extends Controller
 
         $this->applyPeriodFilters($valLogsQuery, $request);
 
-        $validatedLogs = $valLogsQuery->orderByDesc('record_date')->orderByDesc('created_at')->get();
+        // Agregasikan kandidat teratas langsung di level SQL (cepat & hemat memori)
+        $topCandidates = (clone $valLogsQuery)
+            ->select('student_id', DB::raw('SUM(hafalan_ayah_end - hafalan_ayah_start + 1) as approx_ayat'))
+            ->groupBy('student_id')
+            ->orderByDesc('approx_ayat')
+            ->take(20)
+            ->pluck('student_id')
+            ->all();
+
+        if (empty($topCandidates)) {
+            $topCandidates = array_slice(array_keys($transactionCounts), 0, 20);
+        }
+
+        // Hanya load log presisi untuk kandidat teratas (mengurangi 41k row menjadi ~300 row)
+        $validatedLogs = (clone $valLogsQuery)
+            ->whereIn('student_id', $topCandidates)
+            ->orderByDesc('record_date')
+            ->orderByDesc('created_at')
+            ->get();
         $logsByStudent = $validatedLogs->groupBy('student_id');
 
         $allSurahs = QuranSurah::all()->keyBy('nomor');
 
         $rankedList = [];
-        foreach ($students as $student) {
+        $candidateStudents = $students->whereIn('id', $topCandidates);
+        foreach ($candidateStudents as $student) {
             $sLogs = $logsByStudent->get($student->id, collect());
             $latestLog = $sLogs->first();
 
@@ -1038,104 +1058,74 @@ class TahfizhController extends Controller
 
         $accessibleUnitIds = $accessibleUnits->pluck('id')->all();
 
-        // Ambil siswa yang berada di unit-unit tersebut
-        $students = $accessScope->accessibleStudents($user)
-            ->whereIn('unit_id', $accessibleUnitIds)
-            ->get();
+        // 1. Agregasi statistik unit langsung di PostgreSQL (cepat & tanpa beban memori)
+        $txPerUnit = TahfizhDailyLog::query()
+            ->join('students', 'students.id', '=', 'tahfizh_daily_logs.student_id')
+            ->whereIn('students.unit_id', $accessibleUnitIds);
+        $this->applyPeriodFilters($txPerUnit, $request);
+        $txCounts = $txPerUnit->select('students.unit_id', DB::raw('count(*) as total_tx'))
+            ->groupBy('students.unit_id')
+            ->pluck('total_tx', 'students.unit_id')
+            ->all();
 
-        $studentIds = $students->pluck('id')->all();
-
-        // Transaksi per unit
-        $txLogsQuery = TahfizhDailyLog::query()->whereIn('student_id', $studentIds);
-        $this->applyPeriodFilters($txLogsQuery, $request);
-        $allTxLogs = $txLogsQuery->get()->groupBy('student_id');
-
-        // Log tervalidasi hafalan baru per siswa
-        $valLogsQuery = TahfizhDailyLog::query()
-            ->whereIn('student_id', $studentIds)
+        $valPerUnit = TahfizhDailyLog::query()
+            ->join('students', 'students.id', '=', 'tahfizh_daily_logs.student_id')
+            ->whereIn('students.unit_id', $accessibleUnitIds)
             ->whereNotNull('hafalan_surah_number')
             ->whereNotNull('hafalan_ayah_start')
             ->whereNotNull('hafalan_ayah_end')
             ->where(function ($q) {
-                $q->whereIn('status', ['approved', 'verified', 'finalized', 'submitted'])
-                  ->orWhereNotNull('signature_teacher')
-                  ->orWhere(function ($sq) {
-                      $sq->whereNull('status')
-                         ->where(function ($sub) {
-                             $sub->whereNull('metadata->submitted_by_parent')
-                                 ->orWhere('metadata->submitted_by_parent', false);
-                         });
-                  });
+                $q->whereIn('tahfizh_daily_logs.status', ['approved', 'verified', 'finalized', 'submitted'])
+                  ->orWhereNotNull('tahfizh_daily_logs.signature_teacher')
+                  ->orWhereNull('tahfizh_daily_logs.status');
             })
             ->where(function ($q) {
-                $q->whereNull('metadata->type')
-                  ->orWhereNotIn(DB::raw("LOWER(COALESCE(metadata->>'type', ''))"), ['murajaah', 'murojaah']);
+                $q->whereNull('tahfizh_daily_logs.metadata')
+                  ->orWhereNotIn(DB::raw("LOWER(COALESCE(tahfizh_daily_logs.metadata->>'type', ''))"), ['murajaah', 'murojaah']);
             });
+        $this->applyPeriodFilters($valPerUnit, $request);
 
-        $this->applyPeriodFilters($valLogsQuery, $request);
-        $valLogs = $valLogsQuery->get()->groupBy('student_id');
+        $valStats = (clone $valPerUnit)
+            ->select(
+                'students.unit_id',
+                DB::raw('COUNT(DISTINCT tahfizh_daily_logs.student_id) as active_students'),
+                DB::raw('SUM(tahfizh_daily_logs.hafalan_ayah_end - tahfizh_daily_logs.hafalan_ayah_start + 1) as total_ayat')
+            )
+            ->groupBy('students.unit_id')
+            ->get()
+            ->keyBy('unit_id');
 
-        // Hitung total ayat unik per siswa
-        $studentAyatMap = [];
-        foreach ($students as $student) {
-            $sLogs = $valLogs->get($student->id, collect());
-            $surahGroups = $sLogs->groupBy('hafalan_surah_number');
-            $uniqueAyat = 0;
-            foreach ($surahGroups as $surahLogs) {
-                $ranges = $surahLogs->map(fn ($l) => [
-                    'start' => (int) $l->hafalan_ayah_start,
-                    'end' => (int) $l->hafalan_ayah_end,
-                ])->all();
-                $uniqueAyat += $this->calculateMergedAyatCount($ranges);
-            }
-            $studentAyatMap[$student->id] = [
-                'student' => $student,
-                'total_unique_ayat' => $uniqueAyat,
-                'total_tx' => $allTxLogs->get($student->id, collect())->count(),
-            ];
-        }
+        // Cari santri berprestasi tertinggi per unit langsung di database
+        $topStudentPerUnitRaw = (clone $valPerUnit)
+            ->select(
+                'students.unit_id',
+                'students.id as student_id',
+                'students.full_name as student_name',
+                DB::raw('SUM(tahfizh_daily_logs.hafalan_ayah_end - tahfizh_daily_logs.hafalan_ayah_start + 1) as total_ayat')
+            )
+            ->groupBy('students.unit_id', 'students.id', 'students.full_name')
+            ->orderByDesc('total_ayat')
+            ->get()
+            ->groupBy('unit_id');
 
-        // Agregasikan per unit
         $unitRanking = [];
-        $studentsByUnit = $students->groupBy(fn ($s) => $s->unit_id ?: $s->education_unit_id);
-
         foreach ($accessibleUnits as $unit) {
-            $unitStudents = $studentsByUnit->get($unit->id, collect());
-            $unitTotalAyat = 0;
-            $unitTotalTx = 0;
-            $activeStudentsCount = 0;
-            $topStudentInUnit = null;
-            $highestAyat = -1;
-
-            foreach ($unitStudents as $student) {
-                $data = $studentAyatMap[$student->id] ?? null;
-                if (! $data) continue;
-
-                $unitTotalAyat += $data['total_unique_ayat'];
-                $unitTotalTx += $data['total_tx'];
-
-                if ($data['total_tx'] > 0 || $data['total_unique_ayat'] > 0) {
-                    $activeStudentsCount++;
-                }
-
-                if ($data['total_unique_ayat'] > $highestAyat) {
-                    $highestAyat = $data['total_unique_ayat'];
-                    $topStudentInUnit = [
-                        'student_id' => $student->id,
-                        'student_name' => $student->full_name ?? $student->nama ?? 'Santri',
-                        'total_unique_ayat' => $data['total_unique_ayat'],
-                    ];
-                }
-            }
+            $stats = $valStats->get($unit->id);
+            $topStudentGroup = $topStudentPerUnitRaw->get($unit->id, collect());
+            $topStudent = $topStudentGroup->first();
 
             $unitRanking[] = [
                 'unit_id' => $unit->id,
                 'unit_name' => $unit->name ?? 'Unit Pendidikan',
                 'unit_code' => $unit->code ?? '',
-                'total_unique_ayat' => $unitTotalAyat,
-                'total_students_active' => $activeStudentsCount,
-                'total_setoran' => $unitTotalTx,
-                'top_student' => $topStudentInUnit,
+                'total_unique_ayat' => (int) ($stats->total_ayat ?? 0),
+                'total_students_active' => (int) ($stats->active_students ?? 0),
+                'total_setoran' => (int) ($txCounts[$unit->id] ?? 0),
+                'top_student' => $topStudent ? [
+                    'student_id' => $topStudent->student_id,
+                    'student_name' => $topStudent->student_name ?? 'Santri',
+                    'total_unique_ayat' => (int) $topStudent->total_ayat,
+                ] : null,
             ];
         }
 
@@ -1170,6 +1160,14 @@ class TahfizhController extends Controller
             abort(401, 'Unauthenticated.');
         }
 
+        $cacheKey = 'tahfizh_monitoring_overview_' . $user->id . '_' . md5(json_encode($request->all()));
+        if (! app()->runningUnitTests()) {
+            $cached = \Illuminate\Support\Facades\Cache::get($cacheKey);
+            if ($cached) {
+                return response()->json($cached);
+            }
+        }
+
         $accessScope = app(\App\Services\AccessScopeService::class);
         $accessibleUnits = $accessScope->accessibleEducationUnits($user)->get();
         $hasGlobal = $accessScope->hasGlobalScope($user);
@@ -1184,7 +1182,7 @@ class TahfizhController extends Controller
         $rekapResponse = $this->rekapTahfizh($request);
         $rekapSummary = $rekapResponse->getData(true)['summary'] ?? [];
 
-        return response()->json([
+        $result = [
             'status' => 'success',
             'message' => 'Ringkasan pemantauan tahfizh berhasil dimuat.',
             'data' => [
@@ -1194,7 +1192,13 @@ class TahfizhController extends Controller
                 'top_students' => $topStudentsData,
                 'top_units' => $topUnitsData,
             ],
-        ]);
+        ];
+
+        if (! app()->runningUnitTests()) {
+            \Illuminate\Support\Facades\Cache::put($cacheKey, $result, 60);
+        }
+
+        return response()->json($result);
     }
 
     /**

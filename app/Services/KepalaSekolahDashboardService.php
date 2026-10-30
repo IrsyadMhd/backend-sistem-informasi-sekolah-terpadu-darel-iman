@@ -65,15 +65,23 @@ class KepalaSekolahDashboardService
         if ($targetUnitId && $unit) {
             $employeeQuery->where('unit_id', $targetUnitId);
         }
+        // Eksklusi akun pimpinan (Kepala Sekolah yang sedang login) agar tidak muncul di daftar staf/presensi bawahan
+        $employeeQuery->where('user_id', '!=', $user->id);
+        if ($emp?->id) {
+            $employeeQuery->where('id', '!=', $emp->id);
+        }
         $employeeQuery->whereDoesntHave('position', function ($q) {
             $q->whereIn('level_jabatan', [1, 2, 7])
                 ->orWhere('satuan_kerja', 'Pengurus')
                 ->orWhere('satuan_kerja', 'Bidang Pendidikan')
+                ->orWhere('satuan_kerja', 'Kepala Sekolah')
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%yayasan%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%pembina%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%pengawas%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%bidang pendidikan%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%divisi pendidikan%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%kepala sekolah%'])
+                ->orWhereRaw('LOWER(name) LIKE ?', ['%kepsek%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%operator%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%superadmin%'])
                 ->orWhereRaw('LOWER(name) LIKE ?', ['%super admin%'])
@@ -104,6 +112,9 @@ class KepalaSekolahDashboardService
                 'divisi_pendidikan',
                 'Kepala Bidang Pendidikan',
                 'kepala_bidang_pendidikan',
+                'Kepala Sekolah',
+                'kepala_sekolah',
+                'kepsek',
             ]);
         });
         $employeeQuery->whereDoesntHave('role', function ($q) {
@@ -131,6 +142,9 @@ class KepalaSekolahDashboardService
                 'divisi_pendidikan',
                 'Kepala Bidang Pendidikan',
                 'kepala_bidang_pendidikan',
+                'Kepala Sekolah',
+                'kepala_sekolah',
+                'kepsek',
             ]);
         });
         $employeeQuery->where(function ($q) {
@@ -141,7 +155,8 @@ class KepalaSekolahDashboardService
                      ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%bidang pendidikan%'])
                      ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%superadmin%'])
                      ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%super admin%'])
-                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%operator%']);
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%operator%'])
+                     ->whereRaw('LOWER(nama_lengkap) NOT LIKE ?', ['%kepala sekolah%']);
               });
         });
 
@@ -400,25 +415,162 @@ class KepalaSekolahDashboardService
         $pesantrenTrend = $buildTrend($pesantrenDates);
         $attendanceTrend = $isPesantren ? $pesantrenTrend : $fulldayTrend;
 
+        $fallbackAnnImages = [
+            'https://images.unsplash.com/photo-1577896851231-70ef18881754?w=600&auto=format&fit=crop&q=80',
+            'https://images.unsplash.com/photo-1580582932707-520aed937b7b?w=600&auto=format&fit=crop&q=80',
+            'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=600&auto=format&fit=crop&q=80',
+            'https://images.unsplash.com/photo-1524178232363-1fb2b075b655?w=600&auto=format&fit=crop&q=80',
+            'https://images.unsplash.com/photo-1427504494785-3a9ca7044f45?w=600&auto=format&fit=crop&q=80',
+        ];
+
         // 3. Tables & Alerts
         $recentAnnouncements = PengumumanSekolah::query()
             ->where('status_aktif', true)
             ->latest()
             ->limit(5)
             ->get()
-            ->map(fn ($announcement) => [
-                'id' => $announcement->id,
-                'judul' => $announcement->judul_pengumuman,
-                'isi' => $announcement->isi_pengumuman,
-                'target' => is_array($announcement->target_peran)
-                    ? implode(', ', $announcement->target_peran)
-                    : ($announcement->target_peran ?: 'Semua Unit'),
-                'prioritas' => $announcement->prioritas,
-                'created_at' => $announcement->created_at,
-                'gambar_url' => data_get($announcement->data_tambahan, 'gambar_url') ?? data_get($announcement->data_tambahan, 'image_url') ?? null,
-                'kategori' => data_get($announcement->data_tambahan, 'kategori') ?? 'Informasi',
-                'ringkasan' => data_get($announcement->data_tambahan, 'ringkasan') ?? null,
-            ]);
+            ->values()
+            ->map(function ($announcement, $idx) use ($fallbackAnnImages) {
+                $img = data_get($announcement->data_tambahan, 'gambar_url') 
+                    ?? data_get($announcement->data_tambahan, 'image_url') 
+                    ?? data_get($announcement->data_tambahan, 'thumbnail')
+                    ?? $fallbackAnnImages[$idx % count($fallbackAnnImages)];
+
+                return [
+                    'id' => $announcement->id,
+                    'judul' => $announcement->judul_pengumuman,
+                    'isi' => $announcement->isi_pengumuman,
+                    'target' => is_array($announcement->target_peran)
+                        ? implode(', ', $announcement->target_peran)
+                        : ($announcement->target_peran ?: 'Semua Unit'),
+                    'prioritas' => $announcement->prioritas,
+                    'created_at' => $announcement->created_at,
+                    'gambar_url' => $img,
+                    'thumbnail_url' => $img,
+                    'kategori' => data_get($announcement->data_tambahan, 'kategori') ?? 'Informasi',
+                    'ringkasan' => data_get($announcement->data_tambahan, 'ringkasan') ?? null,
+                ];
+            });
+
+        // 3b. Sesi KBM Hari Ini (Live Supervisi Pembelajaran Guru untuk Kepala Sekolah)
+        $todaySessions = [];
+        if (Schema::hasTable('class_schedules')) {
+            $refCarbon = Carbon::parse($attDateToUse);
+            $dayOfWeek = $refCarbon->dayOfWeekIso; // 1 = Senin, ..., 7 = Minggu
+            $timeNow = now()->format('H:i:s');
+
+            $schedQuery = \App\Models\ClassSchedule::query()
+                ->with(['subject', 'kelas.unitPendidikan', 'employee.user'])
+                ->where(function ($q) {
+                    $q->where('is_active', true)->orWhereNull('is_active');
+                })
+                ->where('day_of_week', $dayOfWeek);
+
+            if ($targetUnitId) {
+                $schedQuery->where(function ($q) use ($targetUnitId) {
+                    $q->whereHas('employee', fn ($eq) => $eq->where('unit_id', $targetUnitId))
+                      ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $targetUnitId));
+                });
+            }
+
+            $schedList = $schedQuery->orderBy('time_start')->limit(30)->get();
+
+            if ($schedList->isEmpty()) {
+                // Jika hari referensi belum memiliki jadwal atau hari libur, ambil jadwal reguler aktif unit tersebut
+                $activeDay = \App\Models\ClassSchedule::query()
+                    ->where(fn ($q) => $q->where('is_active', true)->orWhereNull('is_active'))
+                    ->when($targetUnitId, fn ($q) => $q->where(fn ($sub) => $sub->whereHas('employee', fn ($eq) => $eq->where('unit_id', $targetUnitId))->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $targetUnitId))))
+                    ->min('day_of_week');
+
+                if ($activeDay) {
+                    $schedList = \App\Models\ClassSchedule::query()
+                        ->with(['subject', 'kelas.unitPendidikan', 'employee.user'])
+                        ->where(fn ($q) => $q->where('is_active', true)->orWhereNull('is_active'))
+                        ->where('day_of_week', $activeDay)
+                        ->when($targetUnitId, fn ($q) => $q->where(fn ($sub) => $sub->whereHas('employee', fn ($eq) => $eq->where('unit_id', $targetUnitId))->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $targetUnitId))))
+                        ->orderBy('time_start')
+                        ->limit(30)
+                        ->get();
+                }
+            }
+
+            if ($schedList->isNotEmpty()) {
+                $sIds = $schedList->pluck('id');
+                $attMap = Schema::hasTable('teaching_attendances')
+                    ? \App\Models\TeachingAttendance::whereIn('schedule_id', $sIds)
+                        ->whereDate('attendance_date', $refCarbon->toDateString())
+                        ->get()
+                        ->keyBy('schedule_id')
+                    : collect();
+
+                $sessMap = Schema::hasTable('lesson_attendance_sessions')
+                    ? \App\Models\LessonAttendanceSession::whereIn('schedule_id', $sIds)
+                        ->whereDate('attendance_date', $refCarbon->toDateString())
+                        ->get()
+                        ->keyBy('schedule_id')
+                    : collect();
+
+                $todaySessions = $schedList->map(function ($sch) use ($attMap, $sessMap, $timeNow) {
+                    $att = $attMap->get($sch->id);
+                    $sess = $sessMap->get($sch->id);
+                    $subjectName = $sch->subject?->name ?? $sch->subject?->nama_mapel ?? 'Mata Pelajaran';
+                    $teacherName = $sch->employee?->nama_lengkap ?? $sch->employee?->user?->name ?? 'Guru Pengampu';
+                    $className = $sch->kelas?->nama_kelas ?? $sch->kelas?->kode_kelas ?? 'Kelas';
+                    $room = $sch->ruangan ?? $sch->room ?? 'Ruang KBM';
+
+                    $timeStart = $sch->time_start ? substr($sch->time_start, 0, 5) : '07:30';
+                    $timeEnd = $sch->time_end ? substr($sch->time_end, 0, 5) : '09:00';
+
+                    $isOngoing = false;
+                    $status = 'scheduled';
+
+                    if ($sess && $sess->teaching_session_status === 'completed') {
+                        $status = 'completed';
+                    } elseif ($sess && $sess->teaching_session_status === 'active') {
+                        $status = 'ongoing';
+                        $isOngoing = true;
+                    } elseif ($att && in_array(strtolower($att->status ?? ''), ['hadir', 'tepat_waktu', 'terlambat'])) {
+                        $status = 'ongoing';
+                        $isOngoing = true;
+                    } elseif ($timeNow >= $sch->time_start && $timeNow <= $sch->time_end) {
+                        $status = 'ongoing';
+                        $isOngoing = true;
+                    }
+
+                    return [
+                        'id' => (string) $sch->id,
+                        'schedule_id' => (string) $sch->id,
+                        'start_time' => $timeStart,
+                        'end_time' => $timeEnd,
+                        'jam_mulai' => $timeStart,
+                        'jam_selesai' => $timeEnd,
+                        'subject_name' => $subjectName,
+                        'mata_pelajaran' => $subjectName,
+                        'teacher_name' => $teacherName,
+                        'guru' => $teacherName,
+                        'class_name' => $className,
+                        'kelas' => $className,
+                        'room' => $room,
+                        'ruangan' => $room,
+                        'status' => $status,
+                        'is_ongoing' => $isOngoing,
+                        'attendance_status' => $att?->status ?? 'belum_presensi',
+                        'session_status' => $sess?->teaching_session_status ?? 'belum_mulai',
+                        'meeting_number' => $sess?->meeting_number,
+                        'topic' => $sess?->topic ?? $att?->topic,
+                        'meeting_notes' => $sess?->meeting_notes,
+                        'session_closed_at' => $sess?->session_closed_at ? Carbon::parse($sess->session_closed_at)->format('H:i') : null,
+                        'stats' => [
+                            'present_count' => $sess?->present_count ?? 0,
+                            'sick_count' => $sess?->sick_count ?? 0,
+                            'permit_count' => $sess?->permit_count ?? 0,
+                            'absent_count' => $sess?->absent_count ?? 0,
+                            'total_students' => $sess?->total_students ?? 0,
+                        ],
+                    ];
+                })->values()->toArray();
+            }
+        }
 
         // 4. Rekapitulasi Prestasi Siswa (Data Riil dari Database)
         $rekapPrestasi = [];
@@ -598,7 +750,12 @@ class KepalaSekolahDashboardService
                     'login_events.ip_address',
                     'login_events.created_at'
                 )
-                ->where('login_events.status', 'success');
+                ->where('login_events.status', 'success')
+                ->where('login_events.user_id', '!=', $user->id)
+                ->where(function ($q) {
+                    $q->whereNull('positions.name')
+                      ->orWhereRaw('LOWER(positions.name) NOT LIKE ?', ['%kepala sekolah%']);
+                });
 
             if (! empty($targetUnitId)) {
                 $logQuery->where(function ($q) use ($targetUnitId) {
@@ -626,6 +783,11 @@ class KepalaSekolahDashboardService
                         'login_events.created_at'
                     )
                     ->where('login_events.status', 'success')
+                    ->where('login_events.user_id', '!=', $user->id)
+                    ->where(function ($q) {
+                        $q->whereNull('positions.name')
+                          ->orWhereRaw('LOWER(positions.name) NOT LIKE ?', ['%kepala sekolah%']);
+                    })
                     ->latest('login_events.created_at')
                     ->limit(15)
                     ->get();
@@ -1310,6 +1472,14 @@ class KepalaSekolahDashboardService
             'tendik_list' => $tableTendik,
             'staff_list' => $tablePegawai,
             'rombel_list' => $tableKelas,
+            'today_sessions' => $todaySessions,
+            'teaching_sessions' => $todaySessions,
+            'kbm' => [
+                'sessions' => $todaySessions,
+                'total_scheduled' => count($todaySessions),
+                'ongoing_count' => collect($todaySessions)->where('is_ongoing', true)->count(),
+                'completed_count' => collect($todaySessions)->where('status', 'completed')->count(),
+            ],
             'alerts' => [],
         ];
     }

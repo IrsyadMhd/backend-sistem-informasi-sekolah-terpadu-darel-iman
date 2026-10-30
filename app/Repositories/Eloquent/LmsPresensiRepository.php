@@ -166,34 +166,47 @@ class LmsPresensiRepository implements LmsPresensiRepositoryInterface
 
     public function getStats(array $filters = []): array
     {
-        $query = LmsPresensi::query();
+        $cacheKey = 'lms_presensi_stats_' . md5(json_encode($filters));
+        
+        return \Illuminate\Support\Facades\Cache::remember($cacheKey, 60, function () use ($filters) {
+            $query = LmsPresensi::query();
 
-        if (! empty($filters['jadwal_pelajaran_id'])) {
-            $query->where('jadwal_pelajaran_id', $filters['jadwal_pelajaran_id']);
-        }
+            if (! empty($filters['jadwal_pelajaran_id'])) {
+                $query->where('jadwal_pelajaran_id', $filters['jadwal_pelajaran_id']);
+            }
 
-        if (! empty($filters['tanggal'])) {
-            $query->whereDate('tanggal', $filters['tanggal']);
-        }
+            if (! empty($filters['tanggal'])) {
+                $query->whereDate('tanggal', $filters['tanggal']);
+            }
 
-        $total = (clone $query)->count();
-        $hadir = (clone $query)->where('status_hadir', 'hadir')->count();
-        $izin = (clone $query)->where('status_hadir', 'izin')->count();
-        $sakit = (clone $query)->where('status_hadir', 'sakit')->count();
-        $alpa = (clone $query)->where('status_hadir', 'alpa')->count();
-        $terlambat = (clone $query)->where('status_hadir', 'terlambat')->count();
+            $stats = $query->selectRaw("
+                COUNT(*) as total,
+                COUNT(CASE WHEN status_hadir = 'hadir' THEN 1 END) as hadir,
+                COUNT(CASE WHEN status_hadir = 'izin' THEN 1 END) as izin,
+                COUNT(CASE WHEN status_hadir = 'sakit' THEN 1 END) as sakit,
+                COUNT(CASE WHEN status_hadir = 'alpa' THEN 1 END) as alpa,
+                COUNT(CASE WHEN status_hadir = 'terlambat' THEN 1 END) as terlambat
+            ")->first();
 
-        $persentaseHadir = $total > 0 ? round((($hadir + $terlambat) / $total) * 100, 1) : 0;
+            $total = (int) ($stats->total ?? 0);
+            $hadir = (int) ($stats->hadir ?? 0);
+            $izin = (int) ($stats->izin ?? 0);
+            $sakit = (int) ($stats->sakit ?? 0);
+            $alpa = (int) ($stats->alpa ?? 0);
+            $terlambat = (int) ($stats->terlambat ?? 0);
 
-        return [
-            'total' => $total,
-            'hadir' => $hadir,
-            'izin' => $izin,
-            'sakit' => $sakit,
-            'alpa' => $alpa,
-            'terlambat' => $terlambat,
-            'persentase_hadir' => $persentaseHadir,
-        ];
+            $persentaseHadir = $total > 0 ? round((($hadir + $terlambat) / $total) * 100, 1) : 0;
+
+            return [
+                'total' => $total,
+                'hadir' => $hadir,
+                'izin' => $izin,
+                'sakit' => $sakit,
+                'alpa' => $alpa,
+                'terlambat' => $terlambat,
+                'persentase_hadir' => $persentaseHadir,
+            ];
+        });
     }
 
     public function getOptions(?string $employeeId = null): array
@@ -202,9 +215,9 @@ class LmsPresensiRepository implements LmsPresensiRepositoryInterface
             ->with([
                 'subject:id,name,code',
                 'kelas:id,nama_kelas,kode_kelas',
-                'schoolClass:id,nama_kelas,name',
-                'employee:id,full_name,nip',
-                'teacher:id,full_name,name',
+                'schoolClass:id,name',
+                'employee:id,nama_lengkap,niy,nik',
+                'teacher:id,full_name',
             ])
             ->where(function ($q) {
                 $q->where('is_active', true)

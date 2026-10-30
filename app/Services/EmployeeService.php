@@ -124,19 +124,27 @@ class EmployeeService
               ->orWhereHas('teachings')
               ->orWhere('status_pegawai', $like, '%Guru%')
               ->orWhereHas('position', function ($p) use ($like) {
-                  $p->where('name', $like, '%Guru%')
+                  $p->whereIn('level_jabatan', [8])
+                    ->orWhere('name', $like, '%Guru%')
                     ->orWhere('name', $like, '%Pendidik%')
                     ->orWhere('name', $like, '%Wali Kelas%');
+              })
+              ->orWhereHas('user.roles', function ($r) {
+                  $r->whereIn('name', ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas']);
               });
         })->count();
 
         $totalTUOperator = (clone $query)->where(function ($q) use ($like) {
             $q->whereHas('position', function ($p) use ($like) {
-                $p->where('name', $like, '%Tata Usaha%')
+                $p->whereIn('level_jabatan', [6, 7, 10])
+                  ->orWhere('name', $like, '%Tata Usaha%')
                   ->orWhere('name', $like, '%Operator%')
                   ->orWhere('name', $like, '%Staf%')
                   ->orWhere('name', $like, '%Bendahara%')
                   ->orWhere('name', $like, '%Keamanan%');
+            })
+            ->orWhereHas('user.roles', function ($r) {
+                $r->whereIn('name', ['Tata Usaha', 'tata_usaha', 'TU', 'Operator', 'operator']);
             });
         })->count();
 

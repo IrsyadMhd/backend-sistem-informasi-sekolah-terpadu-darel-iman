@@ -212,13 +212,18 @@ class Student extends Model
     }
 
     /**
-     * Resolusi nama unit pendidikan siswa.
+     * Resolusi nama unit pendidikan siswa (hanya jika relasi sudah dimuat untuk mencegah ribuan N+1 query).
      */
     public function getUnitNameAttribute(): ?string
     {
-        return $this->educationUnit?->name
-            ?? $this->kelas?->unitPendidikan?->name
-            ?? null;
+        if ($this->relationLoaded('educationUnit') && $this->educationUnit) {
+            return $this->educationUnit->name;
+        }
+        if ($this->relationLoaded('kelas') && $this->kelas && $this->kelas->relationLoaded('unitPendidikan') && $this->kelas->unitPendidikan) {
+            return $this->kelas->unitPendidikan->name;
+        }
+
+        return $this->attributes['unit_name'] ?? null;
     }
 
 }

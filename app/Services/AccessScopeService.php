@@ -697,6 +697,19 @@ class AccessScopeService
             }
         }
 
+        // Jika akun memiliki kewenangan lintas-unit (data_scope cross_unit atau permission report.cross_unit.view / Divisi Pendidikan),
+        // berikan akses ke seluruh unit pendidikan aktif yang terdaftar di database yayasan
+        $dataScope = data_get($metadata, 'data_scope');
+        if (
+            $dataScope === 'cross_unit_read' ||
+            $dataScope === 'cross_unit' ||
+            $dataScope === 'semua_unit' ||
+            $user->can('report.cross_unit.view') ||
+            $this->hasAnyRole($user, ['Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan'])
+        ) {
+            return EducationUnit::query()->where('is_active', true)->pluck('id');
+        }
+
         $employeeUnitId = Employee::query()
             ->where('user_id', $user->id)
             ->value('unit_id');

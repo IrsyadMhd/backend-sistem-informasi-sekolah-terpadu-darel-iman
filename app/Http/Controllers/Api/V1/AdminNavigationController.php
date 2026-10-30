@@ -312,15 +312,23 @@ class AdminNavigationController extends Controller
     {
         $mobileMenus = AppMenu::query()
             ->active()
-            ->whereIn('platform', ['mobile', 'both'])
+            ->where(function ($q) {
+                $q->where('platform', 'mobile')
+                  ->orWhere(function ($sub) {
+                      $sub->where('platform', 'both')
+                          ->where('path', 'not like', '/%');
+                  });
+            })
             ->orderBy('sort_order', 'asc')
             ->get();
 
         $canonicalRoles = ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif', 'alumni'];
         $roleMenus = [];
+        $seenDestinations = [];
 
         foreach ($canonicalRoles as $r) {
             $roleMenus[$r] = [];
+            $seenDestinations[$r] = [];
         }
 
         foreach ($mobileMenus as $menu) {
@@ -349,18 +357,55 @@ class AdminNavigationController extends Controller
                 'enabled' => $menu->is_active,
             ];
 
+            $destKey = ($item['route'] ?? '') . '__' . ($item['tab'] ?? '');
+
+            $pushRoleItem = function (string $roleTarget) use (&$roleMenus, &$seenDestinations, $item, $destKey) {
+                if (isset($seenDestinations[$roleTarget][$destKey])) {
+                    return; // Hindari menu ganda yang mengarah ke halaman yang sama
+                }
+                $seenDestinations[$roleTarget][$destKey] = true;
+                $roleMenus[$roleTarget][] = $item;
+            };
+
             foreach ($roles as $roleKey) {
                 $rk = strtolower(trim($roleKey));
                 // Normalization
-                if (in_array($rk, ['siswa', 'student'])) $roleMenus['student'][] = $item;
-                elseif (in_array($rk, ['orang tua', 'orang_tua', 'orangtua', 'wali murid', 'parent'])) $roleMenus['parent'][] = $item;
-                elseif (in_array($rk, ['guru', 'teacher', 'guru tahfizh', 'wali kelas'])) $roleMenus['teacher'][] = $item;
-                elseif (in_array($rk, ['kepala sekolah', 'kepsek', 'principal'])) $roleMenus['principal'][] = $item;
-                elseif (in_array($rk, ['tata usaha', 'tu', 'staff', 'staf', 'operator'])) $roleMenus['tu'][] = $item;
-                elseif (in_array($rk, ['yayasan', 'ketua yayasan', 'divisi pendidikan', 'super admin', 'super_admin', 'foundation'])) $roleMenus['foundation'][] = $item;
-                elseif (in_array($rk, ['musyrif', 'musyrifah', 'asrama', 'pembimbing'])) $roleMenus['musyrif'][] = $item;
-                elseif (in_array($rk, ['alumni'])) $roleMenus['alumni'][] = $item;
-                elseif (isset($roleMenus[$rk])) $roleMenus[$rk][] = $item;
+                if (in_array($rk, ['siswa', 'student'])) {
+                    $pushRoleItem('student');
+                } elseif (in_array($rk, ['orang tua', 'orang_tua', 'orangtua', 'wali murid', 'parent'])) {
+                    $pushRoleItem('parent');
+                } elseif (in_array($rk, ['guru', 'teacher', 'guru tahfizh', 'wali kelas'])) {
+                    $pushRoleItem('teacher');
+                } elseif (in_array($rk, ['kepala sekolah', 'kepsek', 'principal'])) {
+                    // Strict Role Scoping: Kepala Sekolah wewenang pengawasan eksekutif, bukan operasional staf TU, musyrif, bank soal guru, atau portal siswa
+                    $unauthorizedForPrincipal = [
+                        'dash-tu',
+                        'portal-musyrif-workspace',
+                        'mob-bank-soal',
+                        'lms-bank-soal',
+                        'portal-guru-workspace',
+                        'dash-tahfizh',
+                        'portal-sivitas',
+                        'mob-perizinan-santri',
+                        'mob-tugas-lms',
+                        'lms-penugasan',
+                        'mob-buku-hubung',
+                        'mob-tagihan-spp',
+                    ];
+                    if (! in_array($item['id'], $unauthorizedForPrincipal, true)) {
+                        $pushRoleItem('principal');
+                    }
+                } elseif (in_array($rk, ['tata usaha', 'tu', 'staff', 'staf', 'operator'])) {
+                    $pushRoleItem('tu');
+                } elseif (in_array($rk, ['yayasan', 'ketua yayasan', 'divisi pendidikan', 'super admin', 'super_admin', 'foundation'])) {
+                    $pushRoleItem('foundation');
+                } elseif (in_array($rk, ['musyrif', 'musyrifah', 'asrama', 'pembimbing'])) {
+                    $pushRoleItem('musyrif');
+                } elseif (in_array($rk, ['alumni'])) {
+                    $pushRoleItem('alumni');
+                } elseif (isset($roleMenus[$rk])) {
+                    $pushRoleItem($rk);
+                }
             }
         }
 
@@ -647,14 +692,36 @@ class AdminNavigationController extends Controller
             ],
             [
                 'id' => 'mob-pantau-kelas',
-                'name' => 'Monitoring Guru Mengajar',
-                'name_mobile' => 'Pantau Kelas',
+                'name' => 'Pantau Kelas & Rombel',
+                'name_mobile' => 'Pantau Rombel',
                 'path' => 'PantauKelas',
                 'icon' => 'Compass',
                 'icon_mobile' => 'google-classroom',
                 'target_roles' => ['principal'],
-                'metadata' => ['color' => '#D97706', 'bg' => '#FEF3C7'],
+                'metadata' => ['color' => '#EA580C', 'bg' => '#FFFBEB'],
                 'sort_order' => 23,
+            ],
+            [
+                'id' => 'mob-buku-induk',
+                'name' => 'Buku Induk Siswa',
+                'name_mobile' => 'Buku Induk Siswa',
+                'path' => 'MasterSiswa',
+                'icon' => 'BookOpen',
+                'icon_mobile' => 'account-school-outline',
+                'target_roles' => ['principal', 'tu', 'foundation'],
+                'metadata' => ['color' => '#2563EB', 'bg' => '#EFF6FF'],
+                'sort_order' => 24,
+            ],
+            [
+                'id' => 'mob-supervisi-kbm',
+                'name' => 'Supervisi KBM',
+                'name_mobile' => 'Supervisi KBM',
+                'path' => 'SupervisiKbm',
+                'icon' => 'Compass',
+                'icon_mobile' => 'human-male-board',
+                'target_roles' => ['principal', 'foundation'],
+                'metadata' => ['color' => '#0F766E', 'bg' => '#F0FDFA'],
+                'sort_order' => 25,
             ],
         ];
 

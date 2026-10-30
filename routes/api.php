@@ -159,6 +159,8 @@ Route::middleware(['auth:sanctum', 'can:sistem.master_data'])->group(function ()
     Route::delete('/shalat/master-list/{id}', [EQuranController::class, 'deleteMaster']);
 });
 
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+
 Route::prefix('auth')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
     Route::post('/login/admin', [AuthController::class, 'loginAdmin'])->middleware('throttle:10,1');
@@ -229,10 +231,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/rombel', [FoundationDashboardController::class, 'rombel']);
         Route::get('/rombel/{id}', [FoundationDashboardController::class, 'rombelDetail']);
         Route::get('/reports', [FoundationDashboardController::class, 'reports'])
-            ->middleware('can:foundation.report.view');
+            ->middleware('permission:foundation.report.view|report.cross_unit.view');
 
         // Comprehensive Foundation Reports
-        Route::prefix('laporan')->middleware('can:foundation.report.view')->group(function () {
+        Route::prefix('laporan')->middleware('permission:foundation.report.view|report.cross_unit.view')->group(function () {
             Route::get('/sdm', [FoundationReportController::class, 'sdm']);
             Route::get('/sdm/detail/{id}', [FoundationReportController::class, 'sdmDetail']);
             Route::get('/siswa', [FoundationReportController::class, 'siswa']);
@@ -824,22 +826,22 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/tahfizh/weekly-sheet', [TahfizhController::class, 'getWeeklySheet']);
     Route::post('/tahfizh/daily-log', [TahfizhController::class, 'saveDailyLog'])
-        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
+        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
     Route::post('/tahfizh/upload-audio', [TahfizhController::class, 'uploadAudio']);
     Route::get('/tahfizh/student-progress/{studentId}', [TahfizhController::class, 'getStudentProgress']);
     Route::get('/tahfizh/last-hafalan/{studentId}', [TahfizhController::class, 'getLastHafalan']);
     Route::post('/tahfizh/store', [TahfizhController::class, 'inputSetoran'])
-        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
+        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
     Route::get('/tahfizh/report', [TahfizhController::class, 'rekapTahfizh']);
     Route::get('/tahfizh/top-students', [TahfizhController::class, 'topStudents']);
     Route::get('/tahfizh/top-units', [TahfizhController::class, 'topUnits']);
     Route::get('/tahfizh/monitoring', [TahfizhController::class, 'monitoringOverview']);
     Route::get('/tahfizh/pending-murajaah', [StudentParentPortalController::class, 'pendingMurajaahReviewList'])
-        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
+        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
     Route::post('/tahfizh/approve-murajaah/{id}', [StudentParentPortalController::class, 'approveMurajaahReview'])
-        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
+        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
     Route::post('/tahfizh/reject-murajaah/{id}', [StudentParentPortalController::class, 'rejectMurajaahReview'])
-        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
+        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
 
     Route::get('/tahfizh/targets/options', [TahfizhKpiTargetController::class, 'options']);
     Route::apiResource('/tahfizh/targets', TahfizhKpiTargetController::class);
@@ -847,7 +849,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/mutabaah', fn () => app(FeaturePlaceholderController::class)('mutabaah'));
     Route::get('/materials', fn () => app(FeaturePlaceholderController::class)('materials'));
     Route::get('/assignments', fn () => app(FeaturePlaceholderController::class)('assignments'));
-    Route::middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Sekretaris Yayasan|Bendahara Yayasan|ketua_yayasan|pengurus_yayasan|sekretaris_yayasan|bendahara_yayasan|Kepala Sekolah|kepala_sekolah|Waka Kesiswaan|waka_kesiswaan|Tata Usaha|TU|tu|tata_usaha|Operator|operator')->group(function () {
+    Route::middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Sekretaris Yayasan|Bendahara Yayasan|ketua_yayasan|pengurus_yayasan|sekretaris_yayasan|bendahara_yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kesiswaan|waka_kesiswaan|Tata Usaha|TU|tu|tata_usaha|Operator|operator')->group(function () {
         Route::get('/alumni/export', [AlumniController::class, 'export']);
         Route::get('/alumni/import-template', [AlumniController::class, 'template']);
         Route::post('/alumni/import', [AlumniController::class, 'import']);
@@ -1227,6 +1229,7 @@ Route::middleware('auth:sanctum')->group(function () {
              Route::get('/schedules', [StudentParentPortalController::class, 'schedules']);
              Route::get('/dormitory-permits', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalIndex']);
              Route::post('/dormitory-permits/apply', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalApply'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student');
+             Route::post('/dormitory-permits/return-dropoff', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalReturnDropoff'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student');
              Route::post('/dormitory-permits/{permit}/request-extension', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'portalRequestExtension'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student');
              Route::get('/academic-calendar', [StudentParentPortalController::class, 'academicCalendar']);
             Route::get('/attendance', [StudentParentPortalController::class, 'attendance']);
@@ -1331,8 +1334,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/employee/messages/{recipientUserId}', [EmployeeChatController::class, 'sendEmployeeMessage']);
         });
 
-        // Dedicated Musyrif & Boarding Module Routes (/api/v1/musyrif/*)
-        Route::prefix('musyrif')->middleware('role:Musyrif|musyrif|Musyrifah|Musyrif / Musyrifah|Pengasuh|Wali Asrama|Pembimbing|Super Admin|Admin|super_admin')->group(function () {
+        // Dedicated Musyrif, Tata Usaha Pondok & Boarding Module Routes (/api/v1/musyrif/*)
+        Route::prefix('musyrif')->middleware('role:Musyrif|musyrif|Musyrifah|Musyrif / Musyrifah|Pengasuh|Wali Asrama|Pembimbing|Super Admin|Admin|super_admin|Tata Usaha|TU|tu|tata_usaha|Operator')->group(function () {
             // Master Santri, Presensi Sholat 5 Waktu & Setoran Hafalan Harian
             Route::get('/students', [MusyrifModuleController::class, 'students']);
             Route::post('/worship-attendance', [MusyrifModuleController::class, 'storeWorshipAttendance']);
@@ -1360,6 +1363,7 @@ Route::middleware('auth:sanctum')->group(function () {
             // Perizinan & Absensi Kepulangan Santri Asrama (Boarding Pass)
             Route::get('/permits', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'index']);
             Route::post('/permits', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'store']);
+            Route::post('/permits/batch-schedule', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'batchSchedule']);
             Route::post('/permits/emergency-exit', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'emergencyExit']);
             Route::post('/permits/{permit}/checkout', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'checkout']);
             Route::post('/permits/{permit}/return-checkin', [\App\Http\Controllers\Api\V1\DormitoryPermitController::class, 'returnCheckin']);
@@ -1390,7 +1394,7 @@ Route::prefix('prayer-assessment')->middleware('auth:sanctum')->group(function (
     // 5. Lembar Penilaian Siswa (Guru, Walas, Kepsek, Super Admin)
     Route::get('/student/{studentId}', [PrayerAssessmentController::class, 'studentSheet']);
     Route::post('/student/{studentId}/save', [PrayerAssessmentController::class, 'saveStudentScores'])
-        ->middleware('role:Guru|guru|Guru Tahfizh|guru_tahfizh|Guru PAI|guru_pai|Wali Kelas|wali_kelas|Musyrif|Musyrifah|Kepala Sekolah|kepala_sekolah|Super Admin|super_admin');
+        ->middleware('role:Guru|guru|Guru Tahfizh|guru_tahfizh|Guru PAI|guru_pai|Wali Kelas|wali_kelas|Musyrif|Musyrifah|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Super Admin|super_admin');
 });
 
 // Endpoint untuk Orang Tua di Mobile App (Android)

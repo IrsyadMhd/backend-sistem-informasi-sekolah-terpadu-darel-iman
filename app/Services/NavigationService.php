@@ -153,7 +153,19 @@ class NavigationService
             }
         }
 
-        // 5. Evaluate database permissions via Laravel Gate for other modules
+        // 5. Strict scoping untuk menu Jenis Unit Pendidikan (/dashboard/master-jenis-unit):
+        // Kepala Sekolah dan Divisi Pendidikan dilarang mengelola jenis unit institusional yayasan (selaras web routes).
+        if ($menu->id === 'master-jenis-unit' || $menu->path === '/dashboard/master-jenis-unit') {
+            $isRestricted = RoleName::userHasAny($user, [
+                'kepala sekolah', 'kepala_sekolah', 'kepsek',
+                'divisi pendidikan', 'divisi_pendidikan', 'kepala bidang pendidikan',
+            ]);
+            if ($isRestricted) {
+                return false;
+            }
+        }
+
+        // 6. Evaluate database permissions via Laravel Gate for other modules
         // Gate::before natively handles Super Admin bypass.
         $requiredPermissions = (array) $menu->required_permissions;
 
@@ -189,7 +201,18 @@ class NavigationService
             };
         }
 
-        // 2. Evaluate explicit required permissions first for non-superadmin users
+        // 2. Strict scoping untuk dash-tahfizh: Didedikasikan untuk Guru Tahfizh, Kepsek, & Musyrif
+        if ($menu->id === 'dash-tahfizh') {
+            $isDenied = RoleName::userHasAny($user, [
+                'yayasan', 'ketua yayasan', 'tata usaha', 'tu', 'operator',
+                'orang tua', 'siswa',
+            ]);
+            if ($isDenied) {
+                return false;
+            }
+        }
+
+        // 3. Evaluate explicit required permissions first for non-superadmin users
         $requiredPermissions = (array) $menu->required_permissions;
         if (! empty($requiredPermissions)) {
             foreach ($requiredPermissions as $permission) {
@@ -199,7 +222,7 @@ class NavigationService
             }
         }
 
-        // 3. Dedicated Single/Operational Roles (standard role-based fallback):
+        // 4. Dedicated Single/Operational Roles (standard role-based fallback):
         return match ($menu->id) {
             'dash-super-admin' => false,
             'dash-yayasan', 'dash-profil-yayasan' => RoleName::userHasAny($user, [

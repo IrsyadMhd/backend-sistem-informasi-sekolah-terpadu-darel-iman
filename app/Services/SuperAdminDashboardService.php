@@ -13,6 +13,7 @@ use App\Models\Student;
 use App\Models\Teacher;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -20,7 +21,10 @@ class SuperAdminDashboardService
 {
     public function getDashboardOverview(array $filters = []): array
     {
-        $unitFilter = !empty($filters['unit_id']) && $filters['unit_id'] !== 'semua' ? $filters['unit_id'] : null;
+        $cacheKey = 'superadmin_overview_' . md5(json_encode($filters));
+
+        return Cache::remember($cacheKey, 60, function () use ($filters) {
+            $unitFilter = !empty($filters['unit_id']) && $filters['unit_id'] !== 'semua' ? $filters['unit_id'] : null;
         $statusFilter = !empty($filters['status']) && $filters['status'] !== 'semua' ? $filters['status'] : null;
         $periodFilter = !empty($filters['period']) && $filters['period'] !== 'semua' ? $filters['period'] : 'minggu';
         $academicYearId = !empty($filters['academic_year_id']) && $filters['academic_year_id'] !== 'semua' ? $filters['academic_year_id'] : null;
@@ -278,20 +282,21 @@ class SuperAdminDashboardService
                 ->get();
         }
 
-        return [
-            'context' => [
-                'role' => 'Admin Sistem',
-                'tahun_ajaran' => $activeAcademicYear ? ['id' => $activeAcademicYear->id, 'nama' => $activeAcademicYear->name ?? $activeAcademicYear->year_name ?? $activeAcademicYear->nama] : null,
-                'semester' => $activeSemester ? ['id' => $activeSemester->id, 'nama' => $activeSemester->name ?? $activeSemester->nama] : null,
-                'available_units' => $availableUnits,
-                'available_academic_years' => $availableAcademicYears,
-                'available_semesters' => $availableSemesters,
-            ],
-            'kpis' => $kpis,
-            'charts' => $charts,
-            'unit_summaries' => $unitSummaries,
-            'recent_logins' => $recentLogins,
-            'recent_activities' => $recentActivities,
-        ];
+            return [
+                'context' => [
+                    'role' => 'Admin Sistem',
+                    'tahun_ajaran' => $activeAcademicYear ? ['id' => $activeAcademicYear->id, 'nama' => $activeAcademicYear->name ?? $activeAcademicYear->year_name ?? $activeAcademicYear->nama] : null,
+                    'semester' => $activeSemester ? ['id' => $activeSemester->id, 'nama' => $activeSemester->name ?? $activeSemester->nama] : null,
+                    'available_units' => $availableUnits,
+                    'available_academic_years' => $availableAcademicYears,
+                    'available_semesters' => $availableSemesters,
+                ],
+                'kpis' => $kpis,
+                'charts' => $charts,
+                'unit_summaries' => $unitSummaries,
+                'recent_logins' => $recentLogins,
+                'recent_activities' => $recentActivities,
+            ];
+        });
     }
 }

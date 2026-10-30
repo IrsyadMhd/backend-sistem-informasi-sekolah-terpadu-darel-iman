@@ -139,12 +139,24 @@ class TahfizhDailyLog extends Model
 
     public function getTeacherNameAttribute(): ?string
     {
-        return $this->teacher?->user?->name
-            ?? $this->teacher?->full_name
-            ?? $this->employee?->nama_lengkap
-            ?? $this->teacherUser?->name
-            ?? $this->signature_teacher
-            ?? null;
+        if ($this->relationLoaded('teacher') && $this->teacher) {
+            if ($this->teacher->relationLoaded('user') && $this->teacher->user?->name) {
+                return $this->teacher->user->name;
+            }
+            if ($this->teacher->full_name) {
+                return $this->teacher->full_name;
+            }
+        }
+
+        if ($this->relationLoaded('employee') && $this->employee?->nama_lengkap) {
+            return $this->employee->nama_lengkap;
+        }
+
+        if ($this->relationLoaded('teacherUser') && $this->teacherUser?->name) {
+            return $this->teacherUser->name;
+        }
+
+        return $this->signature_teacher ?? null;
     }
 
     public function getSetoranTypeAttribute(): string

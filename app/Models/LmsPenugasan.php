@@ -274,10 +274,27 @@ class LmsPenugasan extends Model
             return [];
         }
 
-        return LmsMateri::query()
-            ->whereIn('id', $ids)
-            ->get()
-            ->toArray();
+        if (count($ids) === 1 && $this->materi_id === $ids[0] && $this->relationLoaded('materi')) {
+            return $this->materi ? [$this->materi->toArray()] : [];
+        }
+
+        static $materiCache = [];
+        $missing = array_diff($ids, array_keys($materiCache));
+        if (! empty($missing)) {
+            $fetched = LmsMateri::query()->whereIn('id', $missing)->get();
+            foreach ($fetched as $item) {
+                $materiCache[$item->id] = $item->toArray();
+            }
+        }
+
+        $result = [];
+        foreach ($ids as $id) {
+            if (isset($materiCache[$id])) {
+                $result[] = $materiCache[$id];
+            }
+        }
+
+        return $result;
     }
 }
 

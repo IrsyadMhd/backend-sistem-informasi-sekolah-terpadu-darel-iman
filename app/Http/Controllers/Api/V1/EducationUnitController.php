@@ -77,47 +77,51 @@ class EducationUnitController extends Controller
             ->orderBy('name')
             ->paginate($perPage);
 
-        $employees = Employee::query()->whereIn('unit_id', $unitIds);
-        $this->teacherQuery($employees);
+        $extraData = \Illuminate\Support\Facades\Cache::remember('edu_units_meta_' . md5($unitIds->sort()->join(',')), 60, function () use ($unitIds, $scopedUnits) {
+            $employees = Employee::query()->whereIn('unit_id', $unitIds);
+            $this->teacherQuery($employees);
 
-        $metadataOptions = (clone $scopedUnits)
-            ->get(['level', 'metadata'])
-            ->reduce(function (array $options, EducationUnit $unit) {
-                if ($unit->level) {
-                    $options['levels'][] = $unit->level;
-                }
-                if ($unit->metadata['city'] ?? null) {
-                    $options['cities'][] = $unit->metadata['city'];
-                }
-                if ($unit->metadata['province'] ?? null) {
-                    $options['provinces'][] = $unit->metadata['province'];
-                }
+            $metadataOptions = (clone $scopedUnits)
+                ->get(['level', 'metadata'])
+                ->reduce(function (array $options, EducationUnit $unit) {
+                    if ($unit->level) {
+                        $options['levels'][] = $unit->level;
+                    }
+                    if ($unit->metadata['city'] ?? null) {
+                        $options['cities'][] = $unit->metadata['city'];
+                    }
+                    if ($unit->metadata['province'] ?? null) {
+                        $options['provinces'][] = $unit->metadata['province'];
+                    }
 
-                return $options;
-            }, [
-                'levels' => JenisUnitPendidikan::query()
-                    ->where('status', true)
-                    ->pluck('singkatan')
-                    ->filter()
-                    ->values()
-                    ->all(),
-                'cities' => [],
-                'provinces' => [],
-            ]);
+                    return $options;
+                }, [
+                    'levels' => JenisUnitPendidikan::query()
+                        ->where('status', true)
+                        ->pluck('singkatan')
+                        ->filter()
+                        ->values()
+                        ->all(),
+                    'cities' => [],
+                    'provinces' => [],
+                ]);
 
-        foreach ($metadataOptions as $key => $values) {
-            $metadataOptions[$key] = collect($values)->unique()->sort()->values()->all();
-        }
+            foreach ($metadataOptions as $key => $values) {
+                $metadataOptions[$key] = collect($values)->unique()->sort()->values()->all();
+            }
 
-        return response()->json(array_merge($data->toArray(), [
-            'statistics' => [
-                'total_unit' => $unitIds->count(),
-                'total_siswa' => Student::query()->whereIn('unit_id', $unitIds)->count(),
-                'total_tenaga_pendidik' => $employees->count(),
-                'total_unit_aktif' => (clone $scopedUnits)->where('is_active', true)->count(),
-            ],
-            'filter_options' => $metadataOptions,
-        ]));
+            return [
+                'statistics' => [
+                    'total_unit' => $unitIds->count(),
+                    'total_siswa' => Student::query()->whereIn('unit_id', $unitIds)->count(),
+                    'total_tenaga_pendidik' => $employees->count(),
+                    'total_unit_aktif' => (clone $scopedUnits)->where('is_active', true)->count(),
+                ],
+                'filter_options' => $metadataOptions,
+            ];
+        });
+
+        return response()->json(array_merge($data->toArray(), $extraData));
     }
 
     public function store(StoreEducationUnitRequest $request): JsonResponse

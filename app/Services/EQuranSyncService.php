@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Doa;
 use App\Models\JadwalSholatCache;
 use App\Models\QuranSurah;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -106,56 +107,62 @@ class EQuranSyncService
             ? QuranSurah::where('nomor', $idOrNomor)->orWhere('id', $idOrNomor)->first()
             : null;
 
-        $nomor = $surah ? $surah->nomor : $idOrNomor;
+        $nomor = $surah ? $surah->nomor : (is_numeric($idOrNomor) ? (int) $idOrNomor : null);
 
-        try {
-            $response = Http::withoutVerifying()->timeout(10)->get("{$this->baseUrl}/surat/{$nomor}");
-            if ($response->successful()) {
-                $resData = $response->json()['data'] ?? null;
-                if ($resData) {
-                    // Update DB record if exists
-                    if ($surah) {
-                        $surah->update([
-                            'deskripsi' => $resData['deskripsi'] ?? $surah->deskripsi,
-                            'audio_full' => $resData['audioFull']['05'] ?? $resData['audioFull']['01'] ?? $surah->audio_full,
-                        ]);
+        if (! $nomor || $nomor < 1 || $nomor > 114) {
+            return $surah ? ['surah' => $surah->toArray(), 'ayat' => []] : null;
+        }
+
+        return \Illuminate\Support\Facades\Cache::remember("equran_surah_detail_{$nomor}", 86400, function () use ($nomor, $surah) {
+            try {
+                $response = Http::withoutVerifying()->timeout(3)->get("{$this->baseUrl}/surat/{$nomor}");
+                if ($response->successful()) {
+                    $resData = $response->json()['data'] ?? null;
+                    if ($resData) {
+                        // Update DB record if exists
+                        if ($surah) {
+                            $surah->update([
+                                'deskripsi' => $resData['deskripsi'] ?? $surah->deskripsi,
+                                'audio_full' => $resData['audioFull']['05'] ?? $resData['audioFull']['01'] ?? $surah->audio_full,
+                            ]);
+                        }
+
+                        return [
+                            'surah' => $surah ? $surah->toArray() : [
+                                'nomor' => $resData['nomor'],
+                                'nama' => $resData['nama'],
+                                'nama_latin' => $resData['namaLatin'],
+                                'jumlah_ayat' => $resData['jumlahAyat'],
+                                'tempat_turun' => $resData['tempatTurun'],
+                                'arti' => $resData['arti'],
+                                'deskripsi' => $resData['deskripsi'] ?? '',
+                                'audio_full' => $resData['audioFull']['05'] ?? null,
+                            ],
+                            'ayat' => array_map(function ($a) {
+                                return [
+                                    'nomor_ayat' => $a['nomorAyat'] ?? $a['nomor'] ?? 0,
+                                    'teks_arab' => $a['teksArab'] ?? $a['ar'] ?? '',
+                                    'teks_latin' => $a['teksLatin'] ?? $a['tr'] ?? '',
+                                    'teks_indonesia' => $a['teksIndonesia'] ?? $a['idn'] ?? '',
+                                    'audio' => $a['audio']['05'] ?? $a['audio']['01'] ?? null,
+                                ];
+                            }, $resData['ayat'] ?? []),
+                        ];
                     }
-
-                    return [
-                        'surah' => $surah ? $surah->toArray() : [
-                            'nomor' => $resData['nomor'],
-                            'nama' => $resData['nama'],
-                            'nama_latin' => $resData['namaLatin'],
-                            'jumlah_ayat' => $resData['jumlahAyat'],
-                            'tempat_turun' => $resData['tempatTurun'],
-                            'arti' => $resData['arti'],
-                            'deskripsi' => $resData['deskripsi'] ?? '',
-                            'audio_full' => $resData['audioFull']['05'] ?? null,
-                        ],
-                        'ayat' => array_map(function ($a) {
-                            return [
-                                'nomor_ayat' => $a['nomorAyat'] ?? $a['nomor'] ?? 0,
-                                'teks_arab' => $a['teksArab'] ?? $a['ar'] ?? '',
-                                'teks_latin' => $a['teksLatin'] ?? $a['tr'] ?? '',
-                                'teks_indonesia' => $a['teksIndonesia'] ?? $a['idn'] ?? '',
-                                'audio' => $a['audio']['05'] ?? $a['audio']['01'] ?? null,
-                            ];
-                        }, $resData['ayat'] ?? []),
-                    ];
                 }
+            } catch (\Exception $e) {
+                Log::error("EQuranSyncService getSurahDetail error: " . $e->getMessage());
             }
-        } catch (\Exception $e) {
-            Log::error("EQuranSyncService getSurahDetail error: " . $e->getMessage());
-        }
 
-        if ($surah) {
-            return [
-                'surah' => $surah->toArray(),
-                'ayat' => [],
-            ];
-        }
+            if ($surah) {
+                return [
+                    'surah' => $surah->toArray(),
+                    'ayat' => [],
+                ];
+            }
 
-        return null;
+            return null;
+        });
     }
 
     /**
@@ -239,36 +246,38 @@ class EQuranSyncService
      */
     public function getProvinsiList(): array
     {
-        try {
-            $response = Http::withoutVerifying()->timeout(5)->get("{$this->baseUrl}/shalat/provinsi");
-            if ($response->successful()) {
-                $res = $response->json();
-                if (isset($res['data']) && is_array($res['data']) && count($res['data']) > 0) {
-                    return [
-                        'code' => 200,
-                        'message' => 'Daftar provinsi berhasil diambil',
-                        'data' => $res['data'],
-                    ];
+        return Cache::remember('equran_provinsi_list', 86400, function () {
+            try {
+                $response = Http::withoutVerifying()->timeout(5)->get("{$this->baseUrl}/shalat/provinsi");
+                if ($response->successful()) {
+                    $res = $response->json();
+                    if (isset($res['data']) && is_array($res['data']) && count($res['data']) > 0) {
+                        return [
+                            'code' => 200,
+                            'message' => 'Daftar provinsi berhasil diambil',
+                            'data' => $res['data'],
+                        ];
+                    }
                 }
+            } catch (\Exception $e) {
+                Log::info("EQuranSyncService getProvinsiList fallback active: " . $e->getMessage());
             }
-        } catch (\Exception $e) {
-            Log::info("EQuranSyncService getProvinsiList fallback active: " . $e->getMessage());
-        }
 
-        $fallbackProvinsi = [
-            "Aceh", "Sumatera Utara", "Sumatera Barat", "Riau", "Kepulauan Riau", "Jambi", "Sumatera Selatan",
-            "Bangka Belitung", "Bengkulu", "Lampung", "DKI Jakarta", "Jawa Barat", "Banten", "Jawa Tengah",
-            "DI Yogyakarta", "Jawa Timur", "Bali", "Nusa Tenggara Barat", "Nusa Tenggara Timur",
-            "Kalimantan Barat", "Kalimantan Tengah", "Kalimantan Selatan", "Kalimantan Timur", "Kalimantan Utara",
-            "Sulawesi Utara", "Gorontalo", "Sulawesi Tengah", "Sulawesi Barat", "Sulawesi Selatan",
-            "Sulawesi Tenggara", "Maluku", "Maluku Utara", "Papua", "Papua Barat"
-        ];
+            $fallbackProvinsi = [
+                "Aceh", "Sumatera Utara", "Sumatera Barat", "Riau", "Kepulauan Riau", "Jambi", "Sumatera Selatan",
+                "Bangka Belitung", "Bengkulu", "Lampung", "DKI Jakarta", "Jawa Barat", "Banten", "Jawa Tengah",
+                "DI Yogyakarta", "Jawa Timur", "Bali", "Nusa Tenggara Barat", "Nusa Tenggara Timur",
+                "Kalimantan Barat", "Kalimantan Tengah", "Kalimantan Selatan", "Kalimantan Timur", "Kalimantan Utara",
+                "Sulawesi Utara", "Gorontalo", "Sulawesi Tengah", "Sulawesi Barat", "Sulawesi Selatan",
+                "Sulawesi Tenggara", "Maluku", "Maluku Utara", "Papua", "Papua Barat"
+            ];
 
-        return [
-            'code' => 200,
-            'message' => 'Daftar provinsi berhasil diambil (Dataset lokal)',
-            'data' => $fallbackProvinsi,
-        ];
+            return [
+                'code' => 200,
+                'message' => 'Daftar provinsi berhasil diambil (Dataset lokal)',
+                'data' => $fallbackProvinsi,
+            ];
+        });
     }
 
     /**
@@ -668,24 +677,26 @@ class EQuranSyncService
     /** Read the EQuran catalogue without changing the local master data. */
     public function getRemoteDoaList(): array
     {
-        try {
-            $response = Http::withoutVerifying()->timeout(10)->get($this->doaApiUrl);
-            if ($response->successful()) {
-                $payload = $response->json();
-                $items = is_array($payload) ? ($payload['data'] ?? $payload) : [];
+        return Cache::remember('equran_remote_doa_catalog', 3600, function () {
+            try {
+                $response = Http::withoutVerifying()->timeout(10)->get($this->doaApiUrl);
+                if ($response->successful()) {
+                    $payload = $response->json();
+                    $items = is_array($payload) ? ($payload['data'] ?? $payload) : [];
 
-                if (is_array($items)) {
-                    return [
-                        'success' => true,
-                        'data' => array_values($items),
-                    ];
+                    if (is_array($items)) {
+                        return [
+                            'success' => true,
+                            'data' => array_values($items),
+                        ];
+                    }
                 }
+            } catch (\Exception $e) {
+                Log::warning('EQuranSyncService getRemoteDoaList error: ' . $e->getMessage());
             }
-        } catch (\Exception $e) {
-            Log::warning('EQuranSyncService getRemoteDoaList error: ' . $e->getMessage());
-        }
 
-        return ['success' => false, 'message' => 'Gagal menarik katalog doa dari EQuran.id.', 'data' => []];
+            return ['success' => false, 'message' => 'Gagal menarik katalog doa dari EQuran.id.', 'data' => []];
+        });
     }
 
     /** Import exactly one selected record from EQuran into the local master data. */

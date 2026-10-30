@@ -30,11 +30,17 @@ class NavigationModuleController extends Controller
             ], 401);
         }
 
+        $platform = $request->query('platform', 'web');
         $allPermissions = $user->getAllPermissions()->pluck('name')->all();
         $roles = $user->getRoleNames()->all();
 
-        $platform = $request->query('platform', 'web');
-        $modules = $this->navigationService->getModulesForUser($user, $platform);
+        $modules = app()->runningUnitTests()
+            ? $this->navigationService->getModulesForUser($user, $platform)
+            : \Illuminate\Support\Facades\Cache::remember(
+                "user_nav_modules_{$user->id}_{$platform}_" . md5(implode(',', $roles) . '|' . implode(',', $allPermissions)),
+                180,
+                fn () => $this->navigationService->getModulesForUser($user, $platform)
+            );
 
         return response()->json([
             'success' => true,

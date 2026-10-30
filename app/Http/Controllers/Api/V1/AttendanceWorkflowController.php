@@ -978,6 +978,7 @@ class AttendanceWorkflowController extends Controller
         $query = $this->buildReportQuery($request);
 
         $stats = (clone $query)
+            ->without(['siswa', 'jadwalPelajaran'])
             ->reorder()
             ->selectRaw('status_hadir, count(*) as cnt')
             ->groupBy('status_hadir')

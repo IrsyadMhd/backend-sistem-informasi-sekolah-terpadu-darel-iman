@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 use App\Models\AcademicYear;
 use App\Models\ClassSchedule;
 use App\Models\EducationUnit;
@@ -725,37 +726,46 @@ class TeacherPortalController extends Controller
             $academicYearId = $activeYear?->id;
         }
 
-        $schedules = $this->accessScope->accessibleSchedules($request->user())
-            ->with(['kelas', 'subject', 'employee', 'teacher'])
-            ->when($academicYearId, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('academic_year_id')->orWhere('academic_year_id', $academicYearId)))
-            ->when($semesterId, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('semester_id')->orWhere('semester_id', $semesterId)))
-            ->when($day, function ($q) use ($day) {
-                if (is_numeric($day)) {
-                    $q->where('day_of_week', (int) $day);
-                } else {
-                    $dayMap = [
-                        'senin' => 1, 'selasa' => 2, 'rabu' => 3, 'kamis' => 4,
-                        'jumat' => 5, 'sabtu' => 6, 'minggu' => 7, 'ahad' => 7,
-                    ];
-                    $dayNum = $dayMap[Str::lower($day)] ?? null;
-                    if ($dayNum) {
-                        $q->where('day_of_week', $dayNum);
-                    }
-                }
-            })
-            ->when($classId && $classId !== 'all', fn ($q) => $q->where(fn ($sq) => $sq->where('class_id', $classId)->orWhere('kelas_id', $classId)))
-            ->orderBy('time_start')
-            ->get();
+        $cacheKey = 'teacher_schedules_' . $request->user()->id . '_' . md5(json_encode($request->all()));
 
-        // Bersihkan data kembar jika ada duplikasi entri jadwal (hari, jam mulai, jam selesai, kelas, mapel yang sama)
-        $uniqueSchedules = $schedules->unique(function ($item) {
-            $cId = $item->kelas_id ?: $item->class_id;
-            $sId = $item->subject_id;
-            $dow = $item->day_of_week;
-            $start = substr((string) ($item->time_start ?? $item->start_time ?? ''), 0, 5);
-            $end = substr((string) ($item->time_end ?? $item->end_time ?? ''), 0, 5);
-            return "{$dow}-{$start}-{$end}-{$cId}-{$sId}";
-        })->values();
+        $uniqueSchedules = Cache::remember($cacheKey, 300, function () use ($request, $academicYearId, $semesterId, $day, $classId) {
+            $schedules = $this->accessScope->accessibleSchedules($request->user())
+                ->with([
+                    'kelas:id,nama_kelas,kode_kelas,tingkat,unit_pendidikan_id',
+                    'subject:id,name,code',
+                    'employee:id,nama_lengkap,niy,nik',
+                    'teacher:id,full_name',
+                ])
+                ->when($academicYearId, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('academic_year_id')->orWhere('academic_year_id', $academicYearId)))
+                ->when($semesterId, fn ($q) => $q->where(fn ($sq) => $sq->whereNull('semester_id')->orWhere('semester_id', $semesterId)))
+                ->when($day, function ($q) use ($day) {
+                    if (is_numeric($day)) {
+                        $q->where('day_of_week', (int) $day);
+                    } else {
+                        $dayMap = [
+                            'senin' => 1, 'selasa' => 2, 'rabu' => 3, 'kamis' => 4,
+                            'jumat' => 5, 'sabtu' => 6, 'minggu' => 7, 'ahad' => 7,
+                        ];
+                        $dayNum = $dayMap[Str::lower($day)] ?? null;
+                        if ($dayNum) {
+                            $q->where('day_of_week', $dayNum);
+                        }
+                    }
+                })
+                ->when($classId && $classId !== 'all', fn ($q) => $q->where(fn ($sq) => $sq->where('class_id', $classId)->orWhere('kelas_id', $classId)))
+                ->orderBy('time_start')
+                ->get();
+
+            // Bersihkan data kembar jika ada duplikasi entri jadwal (hari, jam mulai, jam selesai, kelas, mapel yang sama)
+            return $schedules->unique(function ($item) {
+                $cId = $item->kelas_id ?: $item->class_id;
+                $sId = $item->subject_id;
+                $dow = $item->day_of_week;
+                $start = substr((string) ($item->time_start ?? $item->start_time ?? ''), 0, 5);
+                $end = substr((string) ($item->time_end ?? $item->end_time ?? ''), 0, 5);
+                return "{$dow}-{$start}-{$end}-{$cId}-{$sId}";
+            })->values();
+        });
 
         return response()->json([
             'success' => true,
@@ -868,6 +878,7 @@ class TeacherPortalController extends Controller
             'date' => 'required|date',
             'meeting_number' => 'required|integer',
             'topic' => 'required|string',
+            'meeting_notes' => 'nullable|string',
             'students' => 'required|array',
             'students.*.student_id' => 'required|uuid',
             'students.*.status' => 'required|string|in:Hadir,Izin,Sakit,Alpha,Terlambat,Belum Dicatat,hadir,izin,sakit,alpha,alpa,terlambat,belum dicatat',
@@ -897,6 +908,9 @@ class TeacherPortalController extends Controller
                 'meeting_number' => $request->meeting_number,
                 'topic' => $request->topic,
                 'learning_material' => $request->topic,
+                'meeting_notes' => $request->input('meeting_notes', $request->input('notes')),
+                'teaching_session_status' => 'completed',
+                'session_closed_at' => now(),
                 'status' => 'final',
                 'finalized_at' => now(),
                 'finalized_by' => $request->user()?->id,
@@ -904,6 +918,33 @@ class TeacherPortalController extends Controller
                 'updated_by' => $request->user()?->id,
             ]
         );
+
+        $employee = Employee::query()->where('user_id', $request->user()?->id)->first();
+        if ($employee) {
+            $unitId = $employee->unit_id ?: $schedule->kelas?->unit_pendidikan_id;
+            $teachingAtt = \App\Models\TeachingAttendance::query()->firstOrCreate([
+                'schedule_id' => $schedule->id,
+                'attendance_date' => $request->date,
+            ], [
+                'employee_id' => $employee->id,
+                'education_unit_id' => $unitId,
+                'academic_year_id' => $schedule->academic_year_id,
+                'semester_id' => $schedule->semester_id,
+                'check_in_at' => $session->session_started_at ?: now(),
+                'status' => 'hadir',
+                'attendance_method' => 'portal_checkin',
+                'created_by' => $request->user()?->id,
+                'updated_by' => $request->user()?->id,
+            ]);
+
+            if (! $teachingAtt->check_out_at) {
+                $teachingAtt->update(['check_out_at' => now(), 'status' => 'hadir']);
+            }
+
+            if (! $session->teaching_attendance_id && $teachingAtt) {
+                $session->update(['teaching_attendance_id' => $teachingAtt->id]);
+            }
+        }
 
         foreach ($request->students as $st) {
             $statusHadir = strtolower($st['status']) === 'alpha' ? 'alpa' : strtolower($st['status']);
@@ -1606,13 +1647,22 @@ class TeacherPortalController extends Controller
     {
         $classId = $request->query('class_id');
         $subjectId = $request->query('subject_id');
-        $schedulePairs = $this->accessScope->accessibleSchedules($request->user())
-            ->get(['kelas_id', 'class_id', 'subject_id']);
+        $user = $request->user();
+        $isGlobal = $this->accessScope->hasGlobalScope($user);
 
-        $grades = StudentGrade::query()
-            ->with(['student', 'subject', 'kelas'])
-            ->whereIn('student_id', $this->accessScope->accessibleStudents($request->user())->select('id'))
-            ->where(function (Builder $scope) use ($schedulePairs) {
+        $query = StudentGrade::query()
+            ->with([
+                'student:id,full_name,nis,nisn,kelas_id,class_id',
+                'subject:id,name,code',
+                'kelas:id,nama_kelas,kode_kelas',
+            ]);
+
+        if (! $isGlobal) {
+            $query->whereIn('student_id', $this->accessScope->accessibleStudents($user)->select('id'));
+            $schedulePairs = $this->accessScope->accessibleSchedules($user)
+                ->get(['kelas_id', 'class_id', 'subject_id']);
+
+            $query->where(function (Builder $scope) use ($schedulePairs) {
                 foreach ($schedulePairs as $schedule) {
                     $scope->orWhere(function (Builder $assignment) use ($schedule) {
                         $assignment->where('subject_id', $schedule->subject_id);
@@ -1628,10 +1678,23 @@ class TeacherPortalController extends Controller
                 if ($schedulePairs->isEmpty()) {
                     $scope->whereRaw('1 = 0');
                 }
-            })
-            ->when($classId, fn ($q) => $q->where(fn (Builder $scope) => $scope->where('class_id', $classId)->orWhere('kelas_id', $classId)))
-            ->when($subjectId, fn ($q) => $q->where('subject_id', $subjectId))
-            ->get();
+            });
+        }
+
+        if ($classId) {
+            $query->where(fn (Builder $scope) => $scope->where('class_id', $classId)->orWhere('kelas_id', $classId));
+        }
+
+        if ($subjectId) {
+            $query->where('subject_id', $subjectId);
+        }
+
+        // Limit when no filter is provided to prevent OOM
+        if (! $classId && ! $subjectId) {
+            $grades = $query->latest('id')->take(200)->get();
+        } else {
+            $grades = $query->get();
+        }
 
         return response()->json([
             'success' => true,
@@ -2372,7 +2435,7 @@ class TeacherPortalController extends Controller
             });
         }
 
-        $messages = $messagesQuery->get();
+        $messages = $messagesQuery->limit(60)->get();
 
         $grouped = [];
 

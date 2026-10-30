@@ -43,8 +43,12 @@ class TataUsahaDashboardService
               ->orWhereHas('teachings')
               ->orWhere('status_pegawai', $like, '%Guru%')
               ->orWhereHas('position', function ($p) use ($like) {
-                  $p->where('name', $like, '%Guru%')
+                  $p->whereIn('level_jabatan', [8])
+                    ->orWhere('name', $like, '%Guru%')
                     ->orWhere('name', $like, '%Pendidik%');
+              })
+              ->orWhereHas('user.roles', function ($r) {
+                  $r->whereIn('name', ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas']);
               });
         })->count();
         $totalTendik = max(0, $totalPegawai - $totalGuru);

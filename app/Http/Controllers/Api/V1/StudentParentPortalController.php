@@ -105,8 +105,8 @@ class StudentParentPortalController extends Controller
             ?? $request->query('child')
             ?? $request->input('child');
 
-        // Direct student account without explicit child_id selection always resolves to their own active profile
-        if (! $selectedChildId && $user->hasAnyRole(['Siswa', 'siswa', 'student'])) {
+        // Direct student account always resolves to their own active profile (student cannot switch identity)
+        if ($user->hasAnyRole(['Siswa', 'siswa', 'student'])) {
             $selfStudent = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])
                 ->where('user_id', $user->id)
                 ->where('is_active', true)
@@ -501,192 +501,199 @@ class StudentParentPortalController extends Controller
     public function children(Request $request): JsonResponse
     {
         $user = $request->user();
-        $parent = ParentModel::query()->where('user_id', $user->id)->first();
+        $cacheKey = "portal_children_user_{$user->id}";
 
-        $enrichStudentsBatch = function ($students) use ($user) {
-            if ($students->isEmpty()) return $students;
+        $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 30, function () use ($user) {
+            $parent = ParentModel::query()->where('user_id', $user->id)->first();
 
-            $childIds = $students->pluck('id')->filter()->all();
-            $todayStr = now()->toDateString();
-            $isWeekend = now()->isWeekend();
+            $enrichStudentsBatch = function ($students) use ($user) {
+                if ($students->isEmpty()) return $students;
 
-            // 1. Single query untuk libur sekolah
-            $schoolHoliday = PengumumanSekolah::query()
-                ->where('status_aktif', true)
-                ->where('mulai_tampil', '<=', $todayStr)
-                ->where(function ($sub) use ($todayStr) {
-                    $sub->whereNull('selesai_tampil')->orWhere('selesai_tampil', '>=', $todayStr);
-                })
-                ->where(function ($sub) {
-                    $sub->whereIn('data_tambahan->kategori', ['libur_sekolah', 'libur_semester', 'libur_nasional', 'cuti_bersama', 'libur'])
-                        ->orWhere('judul_pengumuman', 'like', '%libur%');
-                })
-                ->first();
+                $childIds = $students->pluck('id')->filter()->all();
+                $todayStr = now()->toDateString();
+                $isWeekend = now()->isWeekend();
 
-            // 2. Batch presensi gerbang/harian
-            $attendances = Attendance::query()
-                ->whereIn('student_id', $childIds)
-                ->whereDate('attendance_date', $todayStr)
-                ->get()
-                ->keyBy('student_id');
+                // 1. Single query untuk libur sekolah
+                $schoolHoliday = PengumumanSekolah::query()
+                    ->where('status_aktif', true)
+                    ->where('mulai_tampil', '<=', $todayStr)
+                    ->where(function ($sub) use ($todayStr) {
+                        $sub->whereNull('selesai_tampil')->orWhere('selesai_tampil', '>=', $todayStr);
+                    })
+                    ->where(function ($sub) {
+                        $sub->whereIn('data_tambahan->kategori', ['libur_sekolah', 'libur_semester', 'libur_nasional', 'cuti_bersama', 'libur'])
+                            ->orWhere('judul_pengumuman', 'like', '%libur%');
+                    })
+                    ->first();
 
-            // 3. Batch perizinan disetujui
-            $permissions = StudentAttendancePermission::query()
-                ->whereIn('student_id', $childIds)
-                ->where('start_date', '<=', $todayStr)
-                ->where('end_date', '>=', $todayStr)
-                ->whereIn('status', ['approved', 'disetujui'])
-                ->get()
-                ->keyBy('student_id');
+                // 2. Batch presensi gerbang/harian
+                $attendances = Attendance::query()
+                    ->whereIn('student_id', $childIds)
+                    ->whereDate('attendance_date', $todayStr)
+                    ->get()
+                    ->keyBy('student_id');
 
-            // 4. Batch presensi LMS
-            $lmsPresensis = LmsPresensi::query()
-                ->whereIn('siswa_id', $childIds)
-                ->whereDate('tanggal', $todayStr)
-                ->get()
-                ->keyBy('siswa_id');
+                // 3. Batch perizinan disetujui
+                $permissions = StudentAttendancePermission::query()
+                    ->whereIn('student_id', $childIds)
+                    ->where('start_date', '<=', $todayStr)
+                    ->where('end_date', '>=', $todayStr)
+                    ->whereIn('status', ['approved', 'disetujui'])
+                    ->get()
+                    ->keyBy('student_id');
 
-            // 5. Batch pending penugasan
-            $classIds = $students->map(fn ($c) => array_values(array_unique(array_filter([$c->kelas_id, $c->class_id]))))->flatten()->unique()->filter()->values();
-            $activeAssignments = $classIds->isNotEmpty()
-                ? \App\Models\LmsPenugasan::query()
-                    ->whereIn('kelas_id', $classIds)
-                    ->where('is_published', true)
-                    ->where('deadline', '>=', now())
-                    ->get(['id', 'kelas_id'])
-                : collect();
-
-            $submittedGrouped = ($activeAssignments->isNotEmpty() && !empty($childIds))
-                ? \App\Models\LmsPengumpulanTugas::query()
+                // 4. Batch presensi LMS
+                $lmsPresensis = LmsPresensi::query()
                     ->whereIn('siswa_id', $childIds)
-                    ->whereIn('penugasan_id', $activeAssignments->pluck('id'))
-                    ->get(['siswa_id', 'penugasan_id'])
-                    ->groupBy('siswa_id')
-                : collect();
+                    ->whereDate('tanggal', $todayStr)
+                    ->get()
+                    ->keyBy('siswa_id');
 
-            // 6. Batch notifikasi unread user (cukup 1x query, filter di memori)
-            $unreadNotifs = \App\Models\Notification::byUser($user->id)->unread()->get();
+                // 5. Batch pending penugasan
+                $classIds = $students->map(fn ($c) => array_values(array_unique(array_filter([$c->kelas_id, $c->class_id]))))->flatten()->unique()->filter()->values();
+                $activeAssignments = $classIds->isNotEmpty()
+                    ? \App\Models\LmsPenugasan::query()
+                        ->whereIn('kelas_id', $classIds)
+                        ->where('is_published', true)
+                        ->where('deadline', '>=', now())
+                        ->get(['id', 'kelas_id'])
+                    : collect();
 
-            return $students->map(function ($c) use ($user, $todayStr, $isWeekend, $schoolHoliday, $attendances, $permissions, $lmsPresensis, $activeAssignments, $submittedGrouped, $unreadNotifs) {
-                $cidStr = (string) $c->id;
+                $submittedGrouped = ($activeAssignments->isNotEmpty() && !empty($childIds))
+                    ? \App\Models\LmsPengumpulanTugas::query()
+                        ->whereIn('siswa_id', $childIds)
+                        ->whereIn('penugasan_id', $activeAssignments->pluck('id'))
+                        ->get(['siswa_id', 'penugasan_id'])
+                        ->groupBy('siswa_id')
+                    : collect();
 
-                // Notifikasi unread count di memori
-                $notifCount = $unreadNotifs->filter(function ($n) use ($cidStr, $c) {
-                    $meta = is_array($n->metadata) ? $n->metadata : (is_string($n->metadata) ? json_decode($n->metadata, true) : []);
-                    $targetSid = (string) ($meta['student_id'] ?? $meta['child_id'] ?? '');
-                    if ($targetSid && $targetSid === $cidStr) return true;
-                    if ($n->notifiable_type === Student::class && (string) $n->notifiable_id === $cidStr) return true;
-                    return false;
-                })->count();
+                // 6. Batch notifikasi unread user (cukup 1x query, filter di memori)
+                $unreadNotifs = \App\Models\Notification::byUser($user->id)->unread()->get();
 
-                // Hitung pending assignments
-                $classes = array_values(array_unique(array_filter([$c->kelas_id, $c->class_id])));
-                $relevantClassAssignments = $activeAssignments->whereIn('kelas_id', $classes);
-                $doneAssignmentIds = ($submittedGrouped->get($c->id) ?? collect())->pluck('penugasan_id')->all();
-                $pendingAssignments = $relevantClassAssignments->reject(fn ($a) => in_array($a->id, $doneAssignmentIds))->count();
+                return $students->map(function ($c) use ($user, $todayStr, $isWeekend, $schoolHoliday, $attendances, $permissions, $lmsPresensis, $activeAssignments, $submittedGrouped, $unreadNotifs) {
+                    $cidStr = (string) $c->id;
 
-                // Resolusi status presensi hari ini
-                $todayAtt = null;
-                $att = $attendances->get($c->id);
-                if ($att) {
-                    $rawStatus = strtoupper(trim((string) $att->status));
-                    $checkIn = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') : null;
-                    if (in_array($rawStatus, ['HADIR', 'PRESENT'])) {
-                        $todayAtt = ['status' => 'hadir', 'status_label' => 'Hadir', 'label' => 'Hadir', 'color' => '#10B981', 'time' => $checkIn, 'is_holiday' => false];
-                    } elseif (in_array($rawStatus, ['TERLAMBAT', 'LATE'])) {
-                        $todayAtt = ['status' => 'terlambat', 'status_label' => 'Terlambat', 'label' => 'Terlambat', 'color' => '#F59E0B', 'time' => $checkIn, 'is_holiday' => false];
-                    } elseif (in_array($rawStatus, ['SAKIT', 'SICK'])) {
-                        $todayAtt = ['status' => 'sakit', 'status_label' => 'Sakit', 'label' => 'Sakit', 'color' => '#38BDF8', 'time' => null, 'is_holiday' => false];
-                    } elseif (in_array($rawStatus, ['IZIN', 'PERMIT'])) {
-                        $todayAtt = ['status' => 'izin', 'status_label' => 'Izin', 'label' => 'Izin', 'color' => '#60A5FA', 'time' => null, 'is_holiday' => false];
-                    } elseif (in_array($rawStatus, ['ALPHA', 'ALPA', 'ABSENT'])) {
-                        $todayAtt = ['status' => 'tidak_hadir', 'status_label' => 'Tidak Hadir', 'label' => 'Tidak Hadir', 'color' => '#EF4444', 'time' => null, 'is_holiday' => false];
-                    }
-                }
+                    // Notifikasi unread count di memori
+                    $notifCount = $unreadNotifs->filter(function ($n) use ($cidStr, $c) {
+                        $meta = is_array($n->metadata) ? $n->metadata : (is_string($n->metadata) ? json_decode($n->metadata, true) : []);
+                        $targetSid = (string) ($meta['student_id'] ?? $meta['child_id'] ?? '');
+                        if ($targetSid && $targetSid === $cidStr) return true;
+                        if ($n->notifiable_type === Student::class && (string) $n->notifiable_id === $cidStr) return true;
+                        return false;
+                    })->count();
 
-                if (! $todayAtt) {
-                    $perm = $permissions->get($c->id);
-                    if ($perm) {
-                        $isSick = str_contains(strtolower((string) $perm->type), 'sakit');
-                        $todayAtt = ['status' => $isSick ? 'sakit' : 'izin', 'status_label' => $isSick ? 'Sakit' : 'Izin', 'label' => $isSick ? 'Sakit' : 'Izin', 'color' => $isSick ? '#38BDF8' : '#60A5FA', 'time' => null, 'is_holiday' => false];
-                    }
-                }
+                    // Hitung pending assignments
+                    $classes = array_values(array_unique(array_filter([$c->kelas_id, $c->class_id])));
+                    $relevantClassAssignments = $activeAssignments->whereIn('kelas_id', $classes);
+                    $doneAssignmentIds = ($submittedGrouped->get($c->id) ?? collect())->pluck('penugasan_id')->all();
+                    $pendingAssignments = $relevantClassAssignments->reject(fn ($a) => in_array($a->id, $doneAssignmentIds))->count();
 
-                if (! $todayAtt) {
-                    $lms = $lmsPresensis->get($c->id);
-                    if ($lms) {
-                        $lmsStatus = strtolower(trim((string) ($lms->status ?? $lms->status_hadir ?? '')));
-                        $time = $lms->waktu_presensi ? Carbon::parse($lms->waktu_presensi)->format('H:i') : null;
-                        if (in_array($lmsStatus, ['h', 'hadir', 'present'])) {
-                            $todayAtt = ['status' => 'hadir', 'status_label' => 'Hadir', 'label' => 'Hadir', 'color' => '#10B981', 'time' => $time, 'is_holiday' => false];
-                        } elseif (in_array($lmsStatus, ['t', 'terlambat', 'late'])) {
-                            $todayAtt = ['status' => 'terlambat', 'status_label' => 'Terlambat', 'label' => 'Terlambat', 'color' => '#F59E0B', 'time' => $time, 'is_holiday' => false];
-                        } elseif (in_array($lmsStatus, ['s', 'sakit'])) {
+                    // Resolusi status presensi hari ini
+                    $todayAtt = null;
+                    $att = $attendances->get($c->id);
+                    if ($att) {
+                        $rawStatus = strtoupper(trim((string) $att->status));
+                        $checkIn = $att->check_in_time ? Carbon::parse($att->check_in_time)->format('H:i') : null;
+                        if (in_array($rawStatus, ['HADIR', 'PRESENT'])) {
+                            $todayAtt = ['status' => 'hadir', 'status_label' => 'Hadir', 'label' => 'Hadir', 'color' => '#10B981', 'time' => $checkIn, 'is_holiday' => false];
+                        } elseif (in_array($rawStatus, ['TERLAMBAT', 'LATE'])) {
+                            $todayAtt = ['status' => 'terlambat', 'status_label' => 'Terlambat', 'label' => 'Terlambat', 'color' => '#F59E0B', 'time' => $checkIn, 'is_holiday' => false];
+                        } elseif (in_array($rawStatus, ['SAKIT', 'SICK'])) {
                             $todayAtt = ['status' => 'sakit', 'status_label' => 'Sakit', 'label' => 'Sakit', 'color' => '#38BDF8', 'time' => null, 'is_holiday' => false];
-                        } elseif (in_array($lmsStatus, ['i', 'izin'])) {
+                        } elseif (in_array($rawStatus, ['IZIN', 'PERMIT'])) {
                             $todayAtt = ['status' => 'izin', 'status_label' => 'Izin', 'label' => 'Izin', 'color' => '#60A5FA', 'time' => null, 'is_holiday' => false];
-                        } else {
+                        } elseif (in_array($rawStatus, ['ALPHA', 'ALPA', 'ABSENT'])) {
                             $todayAtt = ['status' => 'tidak_hadir', 'status_label' => 'Tidak Hadir', 'label' => 'Tidak Hadir', 'color' => '#EF4444', 'time' => null, 'is_holiday' => false];
                         }
                     }
+
+                    if (! $todayAtt) {
+                        $perm = $permissions->get($c->id);
+                        if ($perm) {
+                            $isSick = str_contains(strtolower((string) $perm->type), 'sakit');
+                            $todayAtt = ['status' => $isSick ? 'sakit' : 'izin', 'status_label' => $isSick ? 'Sakit' : 'Izin', 'label' => $isSick ? 'Sakit' : 'Izin', 'color' => $isSick ? '#38BDF8' : '#60A5FA', 'time' => null, 'is_holiday' => false];
+                        }
+                    }
+
+                    if (! $todayAtt) {
+                        $lms = $lmsPresensis->get($c->id);
+                        if ($lms) {
+                            $lmsStatus = strtolower(trim((string) ($lms->status ?? $lms->status_hadir ?? '')));
+                            $time = $lms->waktu_presensi ? Carbon::parse($lms->waktu_presensi)->format('H:i') : null;
+                            if (in_array($lmsStatus, ['h', 'hadir', 'present'])) {
+                                $todayAtt = ['status' => 'hadir', 'status_label' => 'Hadir', 'label' => 'Hadir', 'color' => '#10B981', 'time' => $time, 'is_holiday' => false];
+                            } elseif (in_array($lmsStatus, ['t', 'terlambat', 'late'])) {
+                                $todayAtt = ['status' => 'terlambat', 'status_label' => 'Terlambat', 'label' => 'Terlambat', 'color' => '#F59E0B', 'time' => $time, 'is_holiday' => false];
+                            } elseif (in_array($lmsStatus, ['s', 'sakit'])) {
+                                $todayAtt = ['status' => 'sakit', 'status_label' => 'Sakit', 'label' => 'Sakit', 'color' => '#38BDF8', 'time' => null, 'is_holiday' => false];
+                            } elseif (in_array($lmsStatus, ['i', 'izin'])) {
+                                $todayAtt = ['status' => 'izin', 'status_label' => 'Izin', 'label' => 'Izin', 'color' => '#60A5FA', 'time' => null, 'is_holiday' => false];
+                            } else {
+                                $todayAtt = ['status' => 'tidak_hadir', 'status_label' => 'Tidak Hadir', 'label' => 'Tidak Hadir', 'color' => '#EF4444', 'time' => null, 'is_holiday' => false];
+                            }
+                        }
+                    }
+
+                    if (! $todayAtt && $schoolHoliday) {
+                        $holidayLabel = str_contains(strtolower($schoolHoliday->judul_pengumuman), 'semester') ? 'Libur Semester' : 'Libur Sekolah';
+                        $todayAtt = ['status' => 'libur', 'status_label' => $holidayLabel, 'label' => $holidayLabel, 'holiday_title' => $schoolHoliday->judul_pengumuman, 'color' => '#F59E0B', 'time' => null, 'is_holiday' => true];
+                    }
+
+                    if (! $todayAtt && $isWeekend) {
+                        $todayAtt = ['status' => 'libur', 'status_label' => 'Libur Akhir Pekan', 'label' => 'Libur', 'color' => '#F59E0B', 'time' => null, 'is_holiday' => true];
+                    }
+
+                    if (! $todayAtt) {
+                        $todayAtt = ['status' => 'belum_presensi', 'status_label' => 'Belum Presensi', 'label' => 'Belum Presensi', 'color' => '#94A3B8', 'time' => null, 'is_holiday' => false];
+                    }
+
+                    $progType = strtolower(trim((string) (
+                        $c->educationUnit?->program_type ??
+                        $c->kelas?->unitPendidikan?->program_type ??
+                        $c->program_type ??
+                        'fullday'
+                    )));
+                    $isBoarding = $progType === 'boarding' || str_contains(strtolower((string) ($c->kelas?->nama_kelas ?? '')), 'asrama') || str_contains(strtolower((string) ($c->educationUnit?->name ?? '')), 'ponpes');
+
+                    $c->program_type = $isBoarding ? 'boarding' : 'fullday';
+                    $c->is_boarding = $isBoarding;
+
+                    $c->unread_notifications_count = $notifCount;
+                    $c->unread_count = $notifCount;
+                    $c->pending_assignments_count = $pendingAssignments;
+                    $c->attendance_status = $todayAtt['status_label'];
+                    $c->attendance_today = $todayAtt;
+                    $c->presensi_status = $todayAtt['status_label'];
+                    $c->status_presensi = $todayAtt['status_label'];
+                    $c->is_holiday = $todayAtt['is_holiday'];
+
+                    return $c;
+                });
+            };
+
+            if (! $parent) {
+                if ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan'])) {
+                    $adminChildren = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->where('is_active', true)->take(3)->get();
+                    return $enrichStudentsBatch($adminChildren);
                 }
 
-                if (! $todayAtt && $schoolHoliday) {
-                    $holidayLabel = str_contains(strtolower($schoolHoliday->judul_pengumuman), 'semester') ? 'Libur Semester' : 'Libur Sekolah';
-                    $todayAtt = ['status' => 'libur', 'status_label' => $holidayLabel, 'label' => $holidayLabel, 'holiday_title' => $schoolHoliday->judul_pengumuman, 'color' => '#F59E0B', 'time' => null, 'is_holiday' => true];
-                }
-
-                if (! $todayAtt && $isWeekend) {
-                    $todayAtt = ['status' => 'libur', 'status_label' => 'Libur Akhir Pekan', 'label' => 'Libur', 'color' => '#F59E0B', 'time' => null, 'is_holiday' => true];
-                }
-
-                if (! $todayAtt) {
-                    $todayAtt = ['status' => 'belum_presensi', 'status_label' => 'Belum Presensi', 'label' => 'Belum Presensi', 'color' => '#94A3B8', 'time' => null, 'is_holiday' => false];
-                }
-
-                $c->unread_notifications_count = $notifCount;
-                $c->unread_count = $notifCount;
-                $c->pending_assignments_count = $pendingAssignments;
-                $c->attendance_status = $todayAtt['status_label'];
-                $c->attendance_today = $todayAtt;
-                $c->presensi_status = $todayAtt['status_label'];
-                $c->status_presensi = $todayAtt['status_label'];
-                $c->is_holiday = $todayAtt['is_holiday'];
-
-                return $c;
-            });
-        };
-
-        if (! $parent) {
-            if ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan'])) {
-                $adminChildren = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->where('is_active', true)->take(3)->get();
-                $adminChildren = $enrichStudentsBatch($adminChildren);
-                return response()->json([
-                    'success' => true,
-                    'data' => $adminChildren,
-                ]);
+                // Fallback check if user owns a student directly
+                $student = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->where('user_id', $user->id)->first();
+                return $student ? $enrichStudentsBatch(collect([$student])) : collect();
             }
 
-            // Fallback check if user owns a student directly
-            $student = Student::query()->with(['kelas.unitPendidikan', 'educationUnit'])->where('user_id', $user->id)->first();
-            $result = $student ? $enrichStudentsBatch(collect([$student])) : collect();
-            return response()->json([
-                'success' => true,
-                'data' => $result,
-            ]);
-        }
+            $children = $this->parentStudentsQuery($parent)
+                ->with(['kelas.unitPendidikan', 'educationUnit'])
+                ->where('is_active', true)
+                ->orderBy('created_at', 'asc')
+                ->get();
 
-        $children = $this->parentStudentsQuery($parent)
-            ->with(['kelas.unitPendidikan', 'educationUnit'])
-            ->where('is_active', true)
-            ->orderBy('created_at', 'asc')
-            ->get();
-
-        $children = $enrichStudentsBatch($children);
+            return $enrichStudentsBatch($children);
+        });
 
         return response()->json([
             'success' => true,
-            'data' => $children,
+            'data' => $data,
         ]);
     }
 
@@ -2225,8 +2232,28 @@ class StudentParentPortalController extends Controller
             ->whereDate('attendance_date', $today)
             ->first();
 
+        $progType = strtolower(trim((string) (
+            $student->educationUnit?->program_type ??
+            $student->kelas?->unitPendidikan?->program_type ??
+            $student->program_type ??
+            'fullday'
+        )));
+        $isBoarding = $progType === 'boarding' || str_contains(strtolower((string) ($student->kelas?->nama_kelas ?? '')), 'asrama') || str_contains(strtolower((string) ($student->educationUnit?->name ?? '')), 'ponpes');
+
+        $activeDormPermit = null;
+        if ($isBoarding) {
+            $activeDormPermit = \App\Models\DormitoryPermit::query()
+                ->where('student_id', $student->id)
+                ->whereIn('status', ['disetujui', 'keluar'])
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
         return response()->json([
             'success' => true,
+            'is_boarding' => $isBoarding,
+            'program_type' => $isBoarding ? 'boarding' : 'fullday',
+            'dormitory_permit' => $activeDormPermit,
             'data' => $gate ? [
                 'id' => $gate->id,
                 'attendance_date' => $gate->attendance_date,
@@ -4593,10 +4620,14 @@ class StudentParentPortalController extends Controller
     {
         $student = $this->getStudentContext($request);
         $user = $request->user();
-        $contactsMap = [];
+        $studentIdKey = $student ? (string) $student->id : 'none';
+        $cacheKey = "chat_contacts_{$user->id}_{$studentIdKey}";
 
-        if ($student) {
-            $kelasId = $student->kelas_id ?? $student->class_id;
+        $contactsMap = \Illuminate\Support\Facades\Cache::remember($cacheKey, 20, function () use ($student, $user) {
+            $contactsMap = [];
+
+            if ($student) {
+                $kelasId = $student->kelas_id ?? $student->class_id;
             if ($kelasId && Str::isUuid($kelasId)) {
                 $kelas = Kelas::query()->with(['waliKelas.user', 'unitPendidikan'])->find($kelasId);
                 $waliKelasEmp = $kelas?->waliKelas;
@@ -4814,6 +4845,11 @@ class StudentParentPortalController extends Controller
             }
             unset($c);
         }
+
+            return $contactsMap;
+        });
+
+        $teacherUserIdsStr = array_map('strval', array_keys($contactsMap));
 
         $presences = \App\Models\UserPresence::query()
             ->whereIn('user_id', $teacherUserIdsStr)

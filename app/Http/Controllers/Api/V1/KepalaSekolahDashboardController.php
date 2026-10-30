@@ -27,7 +27,14 @@ class KepalaSekolahDashboardController extends Controller
             ], 401);
         }
 
-        $data = $this->service->getDashboardData($user, $request->all());
+        $cacheKey = 'kepsek_dashboard_' . $user->id . '_' . md5(json_encode($request->all()));
+        if (app()->runningUnitTests()) {
+            $data = $this->service->getDashboardData($user, $request->all());
+        } else {
+            $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, 60, function () use ($user, $request) {
+                return $this->service->getDashboardData($user, $request->all());
+            });
+        }
 
         return response()->json([
             'success' => true,

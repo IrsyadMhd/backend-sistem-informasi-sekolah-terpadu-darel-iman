@@ -691,6 +691,7 @@ class RolePermissionSeeder extends Seeder
             'student.view', 'student.create', 'student.update', 'student.delete', 'student.export', 'student.import',
             'employee.view', 'employee.create', 'employee.update', 'employee.export',
             'teacher.student_note.view',
+            'dormitory.view', 'dormitory.manage', 'dormitory.permission.approve', 'dashboard.musyrif.view',
         ];
         foreach (['Tata Usaha', 'TU', 'tu', 'operator', 'tata_usaha', 'Operator'] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap['Tata Usaha'] ?? ['dashboard.view'], $tuPermissions)));

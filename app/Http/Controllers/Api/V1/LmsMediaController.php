@@ -195,7 +195,7 @@ class LmsMediaController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'data' => $this->mediaService->opsi(),
+            'data' => $this->mediaService->opsi($user),
         ]);
     }
 

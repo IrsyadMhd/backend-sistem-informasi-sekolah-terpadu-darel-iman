@@ -13,6 +13,7 @@ use App\Services\LmsRaporService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Cache;
 
 class LmsRaporController extends Controller
 {
@@ -206,9 +207,14 @@ class LmsRaporController extends Controller
     public function options(Request $request): JsonResponse
     {
         $user = $request->user();
-        $options = $this->raporService->opsi();
+        $isGlobal = $user && $this->accessScope->hasGlobalScope($user);
 
-        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+        if ($isGlobal) {
+            $options = Cache::remember('lms_rapor_options_global', 1800, function () {
+                return $this->raporService->opsi();
+            });
+        } else {
+            $options = $this->raporService->opsi();
             $accessibleRombels = $this->accessScope->accessibleRombels($user)->get();
             $accessibleStudents = $this->accessScope->accessibleStudents($user)->get();
 

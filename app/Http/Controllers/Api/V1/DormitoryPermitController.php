@@ -556,4 +556,206 @@ class DormitoryPermitController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Jadwal Kepulangan Massal Asrama (Pihak Sekolah / Tata Usaha / Mudir / Musyrif)
+     * Membuat surat izin santri sekaligus untuk 1 unit pendidikan, asrama, atau rombel.
+     */
+    public function batchSchedule(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'unit_pendidikan_id' => 'required|uuid|exists:education_units,id',
+            'rombel_id' => 'nullable|uuid|exists:classes,id',
+            'permit_type' => 'required|string|in:pulang_terjadwal,pesiar_mingguan,libur_semester,pulang_berkala,izin_khusus',
+            'scheduled_departure_at' => 'required|date',
+            'scheduled_return_at' => 'required|date|after:scheduled_departure_at',
+            'destination' => 'nullable|string|max:255',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            abort_unless(
+                $accessibleUnitIds->contains($validated['unit_pendidikan_id']),
+                403,
+                'Akses ditolak: Unit pendidikan di luar cakupan Anda.'
+            );
+        }
+
+        $query = Student::query()
+            ->where('is_active', true)
+            ->where(function ($q) use ($validated) {
+                $q->where('unit_id', $validated['unit_pendidikan_id'])
+                  ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $validated['unit_pendidikan_id']));
+            });
+
+        if (! empty($validated['rombel_id'])) {
+            $query->where(function ($q) use ($validated) {
+                $q->where('kelas_id', $validated['rombel_id'])
+                  ->orWhere('class_id', $validated['rombel_id']);
+            });
+        }
+
+        $students = $query->with('parent')->get();
+        if ($students->isEmpty()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Tidak ditemukan santri aktif pada unit atau rombel yang dipilih.',
+            ], 422);
+        }
+
+        $createdCount = 0;
+        $now = now();
+        $departure = Carbon::parse($validated['scheduled_departure_at']);
+        $return = Carbon::parse($validated['scheduled_return_at']);
+
+        foreach ($students as $student) {
+            $exists = DormitoryPermit::query()
+                ->where('student_id', $student->id)
+                ->whereDate('scheduled_departure_at', $departure->toDateString())
+                ->whereIn('status', ['diajukan', 'disetujui', 'keluar'])
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            $permitNumber = CodeGeneratorService::generate('permit_number', $validated['unit_pendidikan_id']);
+            DormitoryPermit::create([
+                'id' => (string) Str::uuid(),
+                'student_id' => $student->id,
+                'unit_pendidikan_id' => $validated['unit_pendidikan_id'],
+                'permit_number' => $permitNumber,
+                'permit_type' => $validated['permit_type'],
+                'destination' => $validated['destination'] ?: 'Rumah Orang Tua / Wali',
+                'scheduled_departure_at' => $departure,
+                'scheduled_return_at' => $return,
+                'original_scheduled_return_at' => $return,
+                'guardian_name' => $student->parent?->nama_lengkap ?? 'Orang Tua / Wali',
+                'guardian_phone' => $student->parent?->no_hp ?? '-',
+                'guardian_relation' => 'Orang Tua',
+                'status' => 'disetujui',
+                'presence_status' => 'di_pondok',
+                'deadline_status' => 'on_time',
+                'return_status' => 'belum_kembali',
+                'notes' => $validated['notes'] ?? '[Jadwal Kepulangan Massal Sekolah / TU]',
+                'approved_by_musyrif_id' => $user?->employee?->id,
+            ]);
+            $createdCount++;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Jadwal kepulangan massal berhasil diterbitkan untuk {$createdCount} santri.",
+            'data' => [
+                'total_santri_dibuat' => $createdCount,
+                'scheduled_departure_at' => $departure->toIso8601String(),
+                'scheduled_return_at' => $return->toIso8601String(),
+            ],
+        ], 201);
+    }
+
+    /**
+     * Presensi Pengantaran Santri Kembali ke Boarding oleh Orang Tua (Mobile App)
+     * Mengupdate Boarding Pass aktif santri saat orang tua tiba di gerbang pondok pesantren.
+     */
+    public function portalReturnDropoff(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'child_id' => 'required|uuid|exists:students,id',
+            'latitude' => 'nullable|numeric',
+            'longitude' => 'nullable|numeric',
+            'location' => 'nullable|string|max:255',
+            'guardian_name' => 'nullable|string|max:150',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $user = $request->user();
+        $student = Student::with(['parent', 'kelas.unitPendidikan', 'educationUnit'])->findOrFail($validated['child_id']);
+
+        $parent = ParentModel::where('user_id', $user->id)->first();
+        if ($parent) {
+            $childIds = $parent->students->concat($parent->studentsPivot)->pluck('id');
+            abort_unless($childIds->contains($student->id), 403, 'Akses ditolak: Santri bukan anak Anda.');
+        }
+
+        $permit = DormitoryPermit::query()
+            ->where('student_id', $student->id)
+            ->whereIn('status', ['keluar', 'disetujui'])
+            ->whereIn('presence_status', ['di_luar', 'berobat', 'pulang'])
+            ->orderByDesc('created_at')
+            ->first();
+
+        $now = now();
+
+        if (! $permit) {
+            $permit = DormitoryPermit::query()
+                ->where('student_id', $student->id)
+                ->where('status', 'disetujui')
+                ->orderByDesc('created_at')
+                ->first();
+        }
+
+        if (! $permit) {
+            $unitId = $student->unit_id ?: $student->kelas?->unit_pendidikan_id;
+            $permitNumber = CodeGeneratorService::generate('permit_number', $unitId);
+            $permit = DormitoryPermit::create([
+                'id' => (string) Str::uuid(),
+                'student_id' => $student->id,
+                'unit_pendidikan_id' => $unitId,
+                'permit_number' => $permitNumber,
+                'permit_type' => 'pulang_terjadwal',
+                'destination' => 'Asrama Pondok Pesantren',
+                'scheduled_departure_at' => $now,
+                'actual_departure_at' => $now,
+                'scheduled_return_at' => $now,
+                'actual_return_at' => $now,
+                'guardian_name' => $validated['guardian_name'] ?? ($parent?->nama_lengkap ?? 'Orang Tua / Wali'),
+                'guardian_phone' => $parent?->no_hp ?? '-',
+                'guardian_relation' => 'Orang Tua',
+                'status' => 'kembali',
+                'presence_status' => 'di_pondok',
+                'return_status' => 'tepat_waktu',
+                'deadline_status' => 'on_time',
+                'notes' => trim('[Serah Terima Mandiri Ortu di Gerbang] ' . ($validated['notes'] ?? '') . ' | Lokasi: ' . ($validated['location'] ?? 'Gerbang Asrama')),
+            ]);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => "Alhamdulillah, ananda {$student->full_name} berhasil dicatat tiba di asrama pondok pada pukul " . $now->format('H:i') . ' WIB.',
+                'data' => $permit->load(['student', 'educationUnit']),
+            ], 200);
+        }
+
+        $scheduledReturn = Carbon::parse($permit->scheduled_return_at);
+        $isLate = $now->greaterThan($scheduledReturn);
+        $lateMinutes = $isLate ? (int) round(abs($scheduledReturn->diffInMinutes($now))) : 0;
+
+        $permitNotes = trim(
+            ($permit->notes ? $permit->notes . "\n" : '') .
+            '[Pengantaran Kembali Ortu] ' . ($validated['notes'] ?? 'Diantar orang tua') .
+            ($validated['location'] ? " | Lokasi GPS: {$validated['location']}" : '')
+        );
+
+        $permit->update([
+            'status' => 'kembali',
+            'presence_status' => 'di_pondok',
+            'actual_return_at' => $now,
+            'return_status' => $isLate ? 'terlambat' : 'tepat_waktu',
+            'deadline_status' => $isLate ? 'overdue' : 'on_time',
+            'late_minutes' => $lateMinutes,
+            'notes' => $permitNotes,
+        ]);
+
+        $statusMsg = $isLate
+            ? "Ananda diserahterimakan TERLAMBAT {$lateMinutes} menit (Batas: " . $scheduledReturn->format('H:i') . ', Tiba: ' . $now->format('H:i') . ').'
+            : "Ananda kembali TEPAT WAKTU pada pukul " . $now->format('H:i') . ' WIB.';
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Pengantaran ananda {$student->full_name} ke asrama pondok berhasil dicatat. {$statusMsg}",
+            'data' => $permit->fresh(['student', 'educationUnit']),
+        ]);
+    }
 }

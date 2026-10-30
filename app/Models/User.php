@@ -24,7 +24,15 @@ class User extends Authenticatable
 
     public function getIsSuperadminAttribute(): bool
     {
-        return method_exists($this, 'hasRole') ? $this->hasRole(['Super Admin', 'super_admin', 'Admin']) : false;
+        if (array_key_exists('is_superadmin', $this->attributes)) {
+            return (bool) $this->attributes['is_superadmin'];
+        }
+
+        if ($this->relationLoaded('roles')) {
+            return $this->roles->contains(fn ($r) => in_array($r->name, ['Super Admin', 'super_admin', 'Admin']));
+        }
+
+        return false;
     }
 
     /**
@@ -130,18 +138,12 @@ class User extends Authenticatable
             return $directPhoto;
         }
 
-        $employee = $this->relationLoaded('employee')
-            ? $this->employee
-            : $this->employee()->first();
-        if ($employee?->photo_url) {
-            return $employee->photo_url;
+        if ($this->relationLoaded('employee') && $this->employee?->photo_url) {
+            return $this->employee->photo_url;
         }
 
-        $student = $this->relationLoaded('student')
-            ? $this->student
-            : $this->student()->first();
-        if ($student?->photo_url) {
-            return $student->photo_url;
+        if ($this->relationLoaded('student') && $this->student?->photo_url) {
+            return $this->student->photo_url;
         }
 
         return null;

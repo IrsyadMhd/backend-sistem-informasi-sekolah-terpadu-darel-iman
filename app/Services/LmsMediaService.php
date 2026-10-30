@@ -114,11 +114,21 @@ class LmsMediaService
         return $this->mediaRepository->getStats();
     }
 
-    public function opsi(): array
+    public function opsi(?\App\Models\User $user = null): array
     {
-        $materis = LmsMateri::select('id', 'judul', 'modul_ajar_id')
-            ->with(['modulAjar:id,judul_modul,kode_modul'])
-            ->get();
+        $query = LmsMateri::select('id', 'judul', 'modul_ajar_id')
+            ->with(['modulAjar:id,judul_modul,kode_modul']);
+
+        if ($user && $user->hasRole(['Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran']) && ! $user->hasRole('Super Admin')) {
+            $employeeId = \App\Models\Employee::where('user_id', $user->id)->value('id');
+            if ($employeeId) {
+                $query->whereHas('modulAjar', function ($q) use ($employeeId) {
+                    $q->where('guru_id', $employeeId);
+                });
+            }
+        }
+
+        $materis = $query->latest('updated_at')->take(200)->get();
 
         return [
             'materi_options' => $materis,
