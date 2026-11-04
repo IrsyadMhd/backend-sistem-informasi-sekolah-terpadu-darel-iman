@@ -145,6 +145,7 @@ class LmsPenilaianService
         ];
 
         $units = $accessScope->accessibleEducationUnits($user)
+            ->get()
             ->map(fn ($unit) => [
                 'id' => $unit->id,
                 'name' => $unit->nama_unit ?? $unit->name,

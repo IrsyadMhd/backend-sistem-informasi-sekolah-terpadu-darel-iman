@@ -211,6 +211,7 @@ class LmsMateriService
         }
 
         $units = app(\App\Services\AccessScopeService::class)->accessibleEducationUnits($user)
+            ->get()
             ->map(fn ($unit) => [
                 'id' => $unit->id,
                 'name' => $unit->nama_unit ?? $unit->name,

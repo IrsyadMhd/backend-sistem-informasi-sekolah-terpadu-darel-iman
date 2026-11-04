@@ -262,6 +262,7 @@ class LmsPenugasanService
             ->toArray();
 
         $unitOptions = $accessScope->accessibleEducationUnits($user)
+            ->get()
             ->map(fn ($item) => [
                 'value' => $item->id,
                 'id' => $item->id,
