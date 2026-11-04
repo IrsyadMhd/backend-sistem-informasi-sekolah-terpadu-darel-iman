@@ -44,6 +44,30 @@ class SubjectController extends Controller
         $orderBy = (string) $request->query('order_by', 'created_at');
         $orderDir = (string) $request->query('order_dir', 'desc');
 
+        $emp = \App\Models\Employee::where('user_id', $request->user()?->id)->first();
+        $userUnitId = $emp?->unit_id 
+            ?? data_get($request->user()?->metadata, 'education_unit_id') 
+            ?? data_get($request->user()?->metadata, 'unit_id');
+
+        if ($request->user() && ! app(\App\Services\AccessScopeService::class)->hasGlobalScope($request->user())) {
+            $allowedUnitIds = app(\App\Services\AccessScopeService::class)
+                ->accessibleEducationUnits($request->user())
+                ->pluck('id')
+                ->all();
+
+            if (! empty($filters['unit_pendidikan_id']) && $filters['unit_pendidikan_id'] !== 'all' && $filters['unit_pendidikan_id'] !== 'semua') {
+                abort_unless(
+                    in_array($filters['unit_pendidikan_id'], $allowedUnitIds, true),
+                    403,
+                    'Unit pendidikan tidak berada dalam cakupan akun.'
+                );
+            } elseif ($userUnitId) {
+                $filters['unit_pendidikan_id'] = $userUnitId;
+            } elseif (! empty($allowedUnitIds)) {
+                $filters['allowed_unit_ids'] = $allowedUnitIds;
+            }
+        }
+
         $subjects = $this->subjectService->dapatkanDaftar($filters, $perPage, $orderBy, $orderDir);
 
         return response()->json([
@@ -58,7 +82,7 @@ class SubjectController extends Controller
                 'to' => $subjects->lastItem(),
                 'total' => $subjects->total(),
             ],
-            'statistik' => $this->subjectService->dapatkanStatistik(),
+            'statistik' => $this->subjectService->dapatkanStatistik($filters['unit_pendidikan_id'] ?? null),
         ]);
     }
 
@@ -81,9 +105,33 @@ class SubjectController extends Controller
     /**
      * Dapatkan statistik data mata pelajaran.
      */
-    public function stats(): JsonResponse
+    public function stats(Request $request): JsonResponse
     {
-        $stats = $this->subjectService->dapatkanStatistik();
+        $unitId = $request->query('unit_pendidikan_id');
+
+        $emp = \App\Models\Employee::where('user_id', $request->user()?->id)->first();
+        $userUnitId = $emp?->unit_id 
+            ?? data_get($request->user()?->metadata, 'education_unit_id') 
+            ?? data_get($request->user()?->metadata, 'unit_id');
+
+        if ($request->user() && ! app(\App\Services\AccessScopeService::class)->hasGlobalScope($request->user())) {
+            $allowedUnitIds = app(\App\Services\AccessScopeService::class)
+                ->accessibleEducationUnits($request->user())
+                ->pluck('id')
+                ->all();
+
+            if (! empty($unitId) && $unitId !== 'all' && $unitId !== 'semua') {
+                abort_unless(
+                    in_array($unitId, $allowedUnitIds, true),
+                    403,
+                    'Unit pendidikan tidak berada dalam cakupan akun.'
+                );
+            } elseif ($userUnitId) {
+                $unitId = $userUnitId;
+            }
+        }
+
+        $stats = $this->subjectService->dapatkanStatistik($unitId);
 
         return response()->json([
             'status' => 'success',
@@ -241,7 +289,7 @@ class SubjectController extends Controller
                 'Nama Singkat' => $s->nama_singkat ?? '-',
                 'Unit Pendidikan' => $s->unitPendidikan->name ?? '-',
                 'Kurikulum' => $s->kurikulum->nama_kurikulum ?? '-',
-                'Kelompok' => $s->kelompok_mapel ?? 'Kelompok A',
+                'Kelompok' => $s->kelompok_mapel ?? 'Pelajaran Wajib',
                 'Kategori' => $s->kategori ?? 'Wajib',
                 'Jenjang' => $s->jenjang ?? 'SD',
                 'Jam Pelajaran' => $s->jam_pelajaran ?? 2,

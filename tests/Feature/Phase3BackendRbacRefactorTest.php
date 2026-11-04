@@ -275,6 +275,13 @@ class Phase3BackendRbacRefactorTest extends TestCase
         $this->assertContains('master-data', $tuModules);
         $this->assertNotContains('pengaturan', $tuModules);
 
+        // 3b. Kepala Sekolah sees dashboard, master-data, etc., but NOT pengaturan
+        $kepsek = User::factory()->create();
+        $kepsek->assignRole('Kepala Sekolah');
+        $kepsekModules = collect($navService->getModulesForUser($kepsek, 'web'))->pluck('id')->all();
+        $this->assertContains('dashboard', $kepsekModules);
+        $this->assertNotContains('pengaturan', $kepsekModules);
+
         // 4. Pilot Role: Wakil Humas dan Program Khusus sees lap-alumni and dash-monitoring
         $humasRole = Role::firstOrCreate(['name' => 'Wakil Humas dan Program Khusus', 'guard_name' => 'web']);
         $humasRole->givePermissionTo([

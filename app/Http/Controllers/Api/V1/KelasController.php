@@ -48,7 +48,14 @@ class KelasController extends Controller
             ?? data_get($request->user()->metadata, 'education_unit_id') 
             ?? data_get($request->user()->metadata, 'unit_id');
 
-        if (! $this->accessScopeService->hasGlobalScope($request->user())) {
+        $canAccessAllUnits = $this->accessScopeService->hasGlobalScope($request->user())
+            || $request->user()->hasAnyRole([
+                'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+                'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+            ])
+            || $request->user()->can('report.cross_unit.view');
+
+        if (! $canAccessAllUnits) {
             $allowedUnitIds = $this->accessScopeService
                 ->accessibleEducationUnits($request->user())
                 ->pluck('id')
@@ -64,6 +71,10 @@ class KelasController extends Controller
                 $filters['unit_pendidikan_id'] = $userUnitId;
             } elseif (! empty($allowedUnitIds)) {
                 $filters['allowed_unit_ids'] = $allowedUnitIds;
+            }
+        } else {
+            if (! empty($filters['unit_pendidikan_id']) && in_array(strtolower((string) $filters['unit_pendidikan_id']), ['all', 'semua'], true)) {
+                $filters['unit_pendidikan_id'] = null;
             }
         }
 
@@ -91,7 +102,10 @@ class KelasController extends Controller
                 'to' => $kelas->lastItem(),
                 'total' => $kelas->total(),
             ],
-            'statistik' => $this->kelasService->dapatkanStatistik($this->accessibleRombelIds($request)),
+            'statistik' => $this->kelasService->dapatkanStatistik(
+                $this->accessibleRombelIds($request),
+                $filters['unit_pendidikan_id'] ?? null
+            ),
         ]);
     }
 
@@ -100,10 +114,19 @@ class KelasController extends Controller
      */
     public function options(Request $request): JsonResponse
     {
-        $allowedUnitIds = $this->accessScopeService
-            ->accessibleEducationUnits($request->user())
-            ->pluck('education_units.id')
-            ->all();
+        $canAccessAllUnits = $this->accessScopeService->hasGlobalScope($request->user())
+            || $request->user()->hasAnyRole([
+                'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+                'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+            ])
+            || $request->user()->can('report.cross_unit.view');
+
+        $allowedUnitIds = $canAccessAllUnits
+            ? null
+            : $this->accessScopeService
+                ->accessibleEducationUnits($request->user())
+                ->pluck('education_units.id')
+                ->all();
         $options = $this->kelasService->dapatkanOpsiMaster($allowedUnitIds);
 
         return response()->json([

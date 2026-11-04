@@ -351,25 +351,7 @@ class LmsMateriController extends Controller
 
     private function canAccessAllUnits(User $user): bool
     {
-        return $user->hasAnyRole([
-            'Super Admin',
-            'super_admin',
-            'Yayasan',
-            'Ketua Yayasan',
-            'ketua_yayasan',
-            'sekretaris_yayasan',
-            'Sekretaris Yayasan',
-            'bendahara_yayasan',
-            'Bendahara Yayasan',
-            'pengurus_yayasan',
-            'Pengurus Yayasan',
-            'Kepala Bidang Pendidikan',
-            'Divisi Pendidikan',
-            'divisi_pendidikan',
-            'Divisi Kurikulum',
-            'Admin',
-            'admin',
-        ]);
+        return $this->accessScope->hasGlobalScope($user);
     }
 
     private function isTeacher(User $user): bool

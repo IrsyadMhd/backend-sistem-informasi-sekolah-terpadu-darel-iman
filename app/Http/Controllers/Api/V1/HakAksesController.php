@@ -407,6 +407,30 @@ class HakAksesController extends Controller
             $query->whereNull('user_id');
         }
 
+        $role = $request->get('role', '');
+        $roles = $request->get('roles', []);
+        if (is_string($roles) && !empty($roles)) {
+            $roles = array_filter(array_map('trim', explode(',', $roles)));
+        }
+
+        if ($role) {
+            $query->where(function ($q) use ($role) {
+                $q->whereHas('role', function ($rq) use ($role) {
+                    $rq->where('name', $role);
+                })->orWhereHas('user.roles', function ($urq) use ($role) {
+                    $urq->where('name', $role);
+                });
+            });
+        } elseif (!empty($roles)) {
+            $query->where(function ($q) use ($roles) {
+                $q->whereHas('role', function ($rq) use ($roles) {
+                    $rq->whereIn('name', $roles);
+                })->orWhereHas('user.roles', function ($urq) use ($roles) {
+                    $urq->whereIn('name', $roles);
+                });
+            });
+        }
+
         $perPage = (int) $request->get('per_page', 15);
         $pegawai = $query->paginate($perPage);
 

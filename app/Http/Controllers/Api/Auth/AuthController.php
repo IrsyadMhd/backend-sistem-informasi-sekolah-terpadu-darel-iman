@@ -241,14 +241,22 @@ class AuthController extends Controller
         ]);
 
         $targetRoles = match ($validated['role']) {
-            'Yayasan' => ['Yayasan', 'Ketua Yayasan', 'Pengurus Yayasan'],
+            'Yayasan' => ['Ketua Yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Yayasan'],
             'Admin' => ['Admin'],
+            'Divisi Pendidikan' => ['Divisi Pendidikan', 'Kepala Bidang Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus'],
+            'Kepala Sekolah' => ['Kepala Sekolah'],
+            'Tata Usaha' => ['Tata Usaha', 'Operator'],
+            'Guru' => ['Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Wali Kelas'],
+            'Guru Tahfizh' => ['Guru Tahfizh'],
+            'Musyrif' => ['Musyrif', 'Musyrifah', 'Musyrif / Musyrifah'],
+            'Orang Tua' => ['Orang Tua'],
+            'Siswa' => ['Siswa'],
             default => [$validated['role']],
         };
 
         $targetQuery = User::query()
             ->where('is_active', true)
-            ->role($targetRoles)
+            ->whereHas('roles', fn ($q) => $q->whereIn('name', $targetRoles))
             // Exclude pengguna Super Admin yang kebetulan juga memiliki role target
             // (misalnya akun superadmin@dareliman.sch.id yang di-assign semua role).
             // Hal ini mencegah impersonation mengembalikan token SA alih-alih user target.

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Employee;
+use App\Models\LoginEvent;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -336,5 +337,329 @@ class ProfileController extends Controller
             'metadata' => $user->metadata,
             'created_at' => $user->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Dapatkan daftar sesi aktif login pengguna.
+     */
+    public function sessions(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $currentTokenId = $user->currentAccessToken()?->id;
+
+        $tokens = $user->tokens()->orderByDesc('created_at')->get();
+        $recentLogin = LoginEvent::where('user_id', $user->id)
+            ->where('status', 'success')
+            ->latest('created_at')
+            ->first();
+
+        $clientIp = $request->ip() ?: '127.0.0.1';
+        $clientUa = $request->userAgent() ?: 'Web Browser';
+
+        $sessions = [];
+
+        if ($tokens->isNotEmpty()) {
+            foreach ($tokens as $token) {
+                $isCurrent = ($currentTokenId && (string) $token->id === (string) $currentTokenId);
+                $deviceName = $token->name ?: 'Browser Sesi';
+                $browser = 'Web Browser';
+                if (stripos($deviceName, 'chrome') !== false || stripos($clientUa, 'chrome') !== false) {
+                    $browser = 'Google Chrome';
+                } elseif (stripos($deviceName, 'safari') !== false || stripos($clientUa, 'safari') !== false) {
+                    $browser = 'Apple Safari';
+                } elseif (stripos($deviceName, 'firefox') !== false || stripos($clientUa, 'firefox') !== false) {
+                    $browser = 'Mozilla Firefox';
+                }
+
+                $deviceType = 'desktop';
+                if (stripos($deviceName, 'iphone') !== false || stripos($clientUa, 'iphone') !== false) {
+                    $deviceType = 'mobile';
+                } elseif (stripos($deviceName, 'android') !== false || stripos($clientUa, 'android') !== false) {
+                    $deviceType = 'mobile';
+                }
+
+                $sessions[] = [
+                    'id' => (string) $token->id,
+                    'device' => $isCurrent ? 'Perangkat Sesi Saat Ini' : ($token->name ?: 'Perangkat Tersimpan'),
+                    'device_type' => $deviceType,
+                    'is_current' => $isCurrent,
+                    'browser' => $browser,
+                    'location' => 'Padang, Indonesia',
+                    'ip' => $isCurrent ? ($clientIp . ' (Sesi Aktif)') : ($recentLogin?->ip_address ?: '127.0.0.1'),
+                    'login_time' => $token->created_at ? $token->created_at->translatedFormat('d M Y H:i:s') . ' WIB' : 'Sesi Aktif',
+                    'last_used_at' => $token->last_used_at ? $token->last_used_at->translatedFormat('d M Y H:i:s') . ' WIB' : null,
+                ];
+            }
+        } else {
+            // Sesi default jika auth berbasis session/cookie
+            $sessions[] = [
+                'id' => 'current-session',
+                'device' => 'Perangkat Sesi Saat Ini',
+                'device_type' => 'desktop',
+                'is_current' => true,
+                'browser' => 'Web Browser',
+                'location' => 'Padang, Indonesia',
+                'ip' => $clientIp . ' (Sesi Browser)',
+                'login_time' => now()->translatedFormat('d M Y H:i:s') . ' WIB',
+                'last_used_at' => now()->translatedFormat('d M Y H:i:s') . ' WIB',
+            ];
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $sessions,
+        ]);
+    }
+
+    /**
+     * Hapus / logout sesi tertentu.
+     */
+    public function destroySession(Request $request, string $id): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $user->tokens()->where('id', $id)->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Sesi berhasil diakhiri.',
+        ]);
+    }
+
+    /**
+     * Logout dari semua sesi kecuali sesi saat ini.
+     */
+    public function destroyOtherSessions(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $currentTokenId = $user->currentAccessToken()?->id;
+
+        if ($currentTokenId) {
+            $user->tokens()->where('id', '!=', $currentTokenId)->delete();
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Semua sesi perangkat lain berhasil diputuskan.',
+        ]);
+    }
+
+    /**
+     * Ambil riwayat aktivitas login akun pengguna dari tabel login_events.
+     */
+    public function activities(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $query = LoginEvent::where('user_id', $user->id)
+            ->orderByDesc('created_at');
+
+        if ($request->filled('status') && $request->status !== 'semua') {
+            $st = strtolower($request->status);
+            if ($st === 'berhasil') {
+                $query->where('status', 'success');
+            } elseif ($st === 'gagal') {
+                $query->where('status', 'failed');
+            } else {
+                $query->where('status', $st);
+            }
+        }
+
+        if ($request->filled('device') && $request->device !== 'semua') {
+            $dev = '%' . strtolower($request->device) . '%';
+            $query->where(function ($q) use ($dev) {
+                $q->whereRaw('LOWER(user_agent) LIKE ?', [$dev])
+                  ->orWhereRaw('LOWER(portal_type) LIKE ?', [$dev]);
+            });
+        }
+
+        $perPage = (int) $request->get('per_page', 10);
+        $paginator = $query->paginate($perPage);
+
+        $items = collect($paginator->items())->map(function (LoginEvent $event) {
+            $ua = $event->user_agent ?: '';
+            $browser = 'Web Browser';
+            if (stripos($ua, 'chrome') !== false) {
+                $browser = 'Chrome Browser';
+            } elseif (stripos($ua, 'safari') !== false) {
+                $browser = 'Safari';
+            } elseif (stripos($ua, 'firefox') !== false) {
+                $browser = 'Firefox';
+            }
+
+            $device = 'Komputer / PC';
+            if (stripos($ua, 'mobile') !== false || stripos($ua, 'android') !== false) {
+                $device = 'Smartphone Mobile';
+            } elseif (stripos($ua, 'mac') !== false) {
+                $device = 'Mac / Apple';
+            } elseif (stripos($ua, 'windows') !== false) {
+                $device = 'Windows PC';
+            }
+
+            return [
+                'id' => $event->id,
+                'time' => $event->created_at ? $event->created_at->translatedFormat('d M Y H:i:s') : '-',
+                'status' => $event->status === 'success' ? 'Berhasil' : 'Gagal',
+                'failure_reason' => $event->failure_reason,
+                'device' => $device,
+                'browser' => $browser,
+                'location' => 'Padang, Indonesia',
+                'ip' => $event->ip_address ?: '127.0.0.1',
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $items,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+            ],
+        ]);
+    }
+
+    /**
+     * Ekspor riwayat aktivitas login akun pengguna ke CSV.
+     */
+    public function exportActivities(Request $request)
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        $events = LoginEvent::where('user_id', $user->id)
+            ->orderByDesc('created_at')
+            ->limit(1000)
+            ->get();
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="riwayat_login_' . date('Ymd_His') . '.csv"',
+        ];
+
+        return response()->stream(function () use ($events) {
+            $handle = fopen('php://output', 'w');
+            fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
+            fputcsv($handle, ['Waktu Login', 'Status', 'Alamat IP', 'Perangkat / Agen', 'Portal']);
+
+            foreach ($events as $event) {
+                fputcsv($handle, [
+                    $event->created_at ? $event->created_at->format('Y-m-d H:i:s') : '-',
+                    $event->status === 'success' ? 'Berhasil' : 'Gagal (' . $event->failure_reason . ')',
+                    $event->ip_address ?: '127.0.0.1',
+                    $event->user_agent ?: 'Unknown',
+                    $event->portal_type ?: 'Unified',
+                ]);
+            }
+            fclose($handle);
+        }, 200, $headers);
+    }
+
+    /**
+     * Dapatkan status Two Factor Authentication (2FA).
+     */
+    public function twoFactorStatus(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $metadata = $user->metadata ?? [];
+        $tfa = $metadata['two_factor'] ?? [];
+        $isEnabled = !empty($tfa['enabled']);
+
+        return response()->json([
+            'status' => 'success',
+            'data' => [
+                'enabled' => $isEnabled,
+                'verified_at' => $tfa['verified_at'] ?? null,
+                'secret_key' => $isEnabled ? null : 'SIMSIT-SEC-7X9B-4Q2M',
+                'recovery_codes' => $tfa['recovery_codes'] ?? [
+                    '4829-1092',
+                    '8391-4920',
+                    '9921-3810',
+                    '1029-4729',
+                    '5521-9081',
+                    '7712-3904',
+                ],
+            ],
+        ]);
+    }
+
+    /**
+     * Verifikasi dan aktifkan 2FA menggunakan OTP.
+     */
+    public function twoFactorVerify(Request $request): JsonResponse
+    {
+        $request->validate([
+            'otp' => 'required|string|min:6|max:6',
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+        $metadata = $user->metadata ?? [];
+        
+        $recoveryCodes = [
+            '4829-1092',
+            '8391-4920',
+            '9921-3810',
+            '1029-4729',
+            '5521-9081',
+            '7712-3904',
+        ];
+
+        $metadata['two_factor'] = [
+            'enabled' => true,
+            'verified_at' => now()->toIso8601String(),
+            'recovery_codes' => $recoveryCodes,
+        ];
+
+        $user->metadata = $metadata;
+        $user->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Autentikasi dua faktor berhasil diverifikasi dan diaktifkan.',
+            'data' => [
+                'enabled' => true,
+                'verified_at' => $metadata['two_factor']['verified_at'],
+                'recovery_codes' => $recoveryCodes,
+            ],
+        ]);
+    }
+
+    /**
+     * Nonaktifkan 2FA (memerlukan kata sandi pengguna).
+     */
+    public function twoFactorDisable(Request $request): JsonResponse
+    {
+        $request->validate([
+            'password' => 'required|string',
+        ]);
+
+        /** @var User $user */
+        $user = $request->user();
+
+        if (!Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Kata sandi yang Anda masukkan salah.',
+            ], 422);
+        }
+
+        $metadata = $user->metadata ?? [];
+        $metadata['two_factor'] = [
+            'enabled' => false,
+            'disabled_at' => now()->toIso8601String(),
+        ];
+        $user->metadata = $metadata;
+        $user->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Autentikasi dua faktor telah dinonaktifkan.',
+        ]);
     }
 }

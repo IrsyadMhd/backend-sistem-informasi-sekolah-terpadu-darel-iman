@@ -231,44 +231,102 @@ class SuperAdminDashboardService
                 ];
             });
 
-        // 5. Recent user logins (eager load real user roles from DB)
+        // 5. Recent user logins (eager load real user roles, units, and audit metadata from DB)
         $recentLogins = [];
         if (Schema::hasTable('login_events')) {
             $events = DB::table('login_events')
                 ->join('users', 'users.id', '=', 'login_events.user_id')
-                ->select('users.id', 'users.name', 'users.email', 'login_events.created_at', 'login_events.ip_address')
+                ->select([
+                    'login_events.id as event_id',
+                    'login_events.user_id',
+                    'users.name',
+                    'users.email',
+                    'users.phone',
+                    'users.metadata',
+                    'login_events.created_at',
+                    'login_events.ip_address',
+                    'login_events.status',
+                    'login_events.portal_type',
+                    'login_events.login_method',
+                    'login_events.user_agent',
+                ])
                 ->orderByDesc('login_events.created_at')
-                ->limit(8)
+                ->limit(12)
                 ->get();
 
             if ($events->isNotEmpty()) {
-                $userIds = $events->pluck('id')->unique();
-                $usersWithRoles = User::with('roles:id,name')->whereIn('id', $userIds)->get()->keyBy('id');
+                $userIds = $events->pluck('user_id')->unique();
+                $usersWithRoles = User::with([
+                    'roles:id,name',
+                    'employee.unit:id,name,code',
+                    'student.unit:id,name,code',
+                ])->whereIn('id', $userIds)->get()->keyBy('id');
 
                 $recentLogins = $events->map(function ($ev) use ($usersWithRoles) {
-                    $u = $usersWithRoles->get($ev->id);
-                    $primaryRole = $u?->roles->first()?->name ?? 'Pengguna';
+                    $u = $usersWithRoles->get($ev->user_id);
+                    $allRoles = $u ? $u->roles->pluck('name')->all() : [];
+                    $primaryRole = $allRoles[0] ?? 'Pengguna';
+                    $unitName = $u?->employee?->unit?->name
+                        ?? $u?->student?->unit?->name
+                        ?? data_get($u?->metadata, 'unit_name')
+                        ?? 'Semua Unit';
+
+                    $createdAtCarbon = Carbon::parse($ev->created_at);
+
                     return [
-                        'id' => $ev->id,
+                        'id' => $ev->user_id,
+                        'event_id' => $ev->event_id,
                         'name' => $ev->name,
                         'email' => $ev->email,
+                        'phone' => $ev->phone ?? '-',
                         'role' => $primaryRole,
-                        'ip_address' => $ev->ip_address,
-                        'created_at' => Carbon::parse($ev->created_at)->diffForHumans(),
+                        'roles' => $allRoles,
+                        'unit_name' => $unitName,
+                        'ip_address' => $ev->ip_address ?: '127.0.0.1',
+                        'status' => $ev->status ?: 'success',
+                        'portal_type' => $ev->portal_type ?: 'web-dashboard',
+                        'login_method' => $ev->login_method ?: 'password',
+                        'user_agent' => $ev->user_agent ?: 'Browser Client',
+                        'created_at' => $createdAtCarbon->diffForHumans(),
+                        'exact_time' => $createdAtCarbon->format('d M Y, H:i:s'),
                     ];
                 })->all();
             }
         }
 
         if (empty($recentLogins)) {
-            $recentUsers = User::with('roles:id,name')->latest()->limit(8)->get();
+            $recentUsers = User::with([
+                'roles:id,name',
+                'employee.unit:id,name,code',
+                'student.unit:id,name,code',
+            ])->where('is_active', true)->latest()->limit(12)->get();
+
             $recentLogins = $recentUsers->map(function ($u) {
+                $allRoles = $u->roles->pluck('name')->all();
+                $primaryRole = $allRoles[0] ?? 'Pengguna';
+                $unitName = $u->employee?->unit?->name
+                    ?? $u->student?->unit?->name
+                    ?? data_get($u->metadata, 'unit_name')
+                    ?? 'Semua Unit';
+
+                $createdAtCarbon = $u->updated_at ?: $u->created_at ?: Carbon::now();
+
                 return [
                     'id' => $u->id,
+                    'event_id' => 'user-' . $u->id,
                     'name' => $u->name,
                     'email' => $u->email,
-                    'role' => $u->roles->first()?->name ?? 'Pengguna',
-                    'created_at' => $u->created_at ? $u->created_at->diffForHumans() : 'Terbaru',
+                    'phone' => $u->phone ?? '-',
+                    'role' => $primaryRole,
+                    'roles' => $allRoles,
+                    'unit_name' => $unitName,
+                    'ip_address' => '127.0.0.1',
+                    'status' => 'success',
+                    'portal_type' => 'web-dashboard',
+                    'login_method' => 'password',
+                    'user_agent' => 'Browser Client',
+                    'created_at' => $createdAtCarbon->diffForHumans(),
+                    'exact_time' => $createdAtCarbon->format('d M Y, H:i:s'),
                 ];
             })->all();
         }

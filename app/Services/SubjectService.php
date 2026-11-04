@@ -96,9 +96,9 @@ class SubjectService
     /**
      * Dapatkan statistik ringkasan mata pelajaran.
      */
-    public function dapatkanStatistik(): array
+    public function dapatkanStatistik(?string $unitId = null): array
     {
-        return $this->subjectRepository->getStats();
+        return $this->subjectRepository->getStats($unitId);
     }
 
     /**
@@ -150,7 +150,7 @@ class SubjectService
                 'kurikulum_id' => $row['kurikulum_id'] ?? null,
                 'kode_mapel' => trim((string) ($row['kode_mapel'] ?? $row['code'] ?? '')),
                 'nama_mapel' => trim((string) ($row['nama_mapel'] ?? $row['name'] ?? '')),
-                'kelompok_mapel' => $row['kelompok_mapel'] ?? 'Kelompok A',
+                'kelompok_mapel' => $row['kelompok_mapel'] ?? 'Pelajaran Wajib',
                 'kategori' => $row['kategori'] ?? 'Wajib',
                 'jenjang' => $row['jenjang'] ?? 'SD',
                 'tingkat_kelas' => $row['tingkat_kelas'] ?? 'All',

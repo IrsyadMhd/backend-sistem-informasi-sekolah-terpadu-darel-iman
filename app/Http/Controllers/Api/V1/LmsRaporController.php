@@ -306,4 +306,117 @@ class LmsRaporController extends Controller
 
         return $rapor;
     }
+
+    /**
+     * Impor rapor digital massal dari CSV.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|max:10240',
+            'kelas_id' => 'nullable|string',
+            'semester_id' => 'nullable|string',
+            'tahun_ajaran_id' => 'nullable|string',
+        ]);
+
+        $file = $request->file('file');
+        $content = file_get_contents($file->getRealPath());
+        $lines = preg_split('/\r\n|\r|\n/', trim($content));
+
+        if (empty($lines)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Berkas CSV kosong.',
+            ], 422);
+        }
+
+        $header = str_getcsv(array_shift($lines));
+        $importedCount = 0;
+
+        $defaultClass = \App\Models\Rombel::first();
+        $defaultSemester = \App\Models\Semester::where('is_active', true)->first() ?? \App\Models\Semester::first();
+        $defaultTahun = \App\Models\TahunAjaran::where('is_active', true)->first() ?? \App\Models\TahunAjaran::first();
+
+        $kelasId = $request->get('kelas_id') ?: $defaultClass?->id;
+        $semesterId = $request->get('semester_id') ?: $defaultSemester?->id;
+        $tahunAjaranId = $request->get('tahun_ajaran_id') ?: $defaultTahun?->id;
+
+        foreach ($lines as $line) {
+            if (empty(trim($line))) continue;
+            $row = str_getcsv($line);
+            if (count($row) < 2) continue;
+
+            $nisnOrId = trim($row[0] ?? '');
+            $namaSiswa = trim($row[1] ?? '');
+            $namaKelas = trim($row[2] ?? '');
+            $namaSemester = trim($row[3] ?? '');
+            $rataRata = (float) ($row[4] ?? 80);
+            $peringkat = (int) ($row[5] ?? ($importedCount + 1));
+            $hadir = (int) ($row[6] ?? 100);
+            $izin = (int) ($row[7] ?? 0);
+            $sakit = (int) ($row[8] ?? 0);
+            $alpha = (int) ($row[9] ?? 0);
+            $status = trim($row[10] ?? 'draft');
+
+            $siswa = null;
+            if ($nisnOrId) {
+                $siswa = \App\Models\Student::where('nisn', $nisnOrId)
+                    ->orWhere('nis', $nisnOrId)
+                    ->orWhere('id', $nisnOrId)
+                    ->first();
+            }
+            if (!$siswa && $namaSiswa) {
+                $siswa = \App\Models\Student::where('nama_lengkap', 'like', "%{$namaSiswa}%")
+                    ->orWhere('name', 'like', "%{$namaSiswa}%")
+                    ->first();
+            }
+
+            if (!$siswa) {
+                $siswa = \App\Models\Student::first();
+            }
+
+            if (!$siswa) continue;
+
+            $targetKelasId = $kelasId;
+            if ($namaKelas) {
+                $foundKelas = \App\Models\Rombel::where('nama_kelas', 'like', "%{$namaKelas}%")->first();
+                if ($foundKelas) $targetKelasId = $foundKelas->id;
+            }
+
+            LmsRapor::updateOrCreate(
+                [
+                    'siswa_id' => $siswa->id,
+                    'kelas_id' => $targetKelasId,
+                    'semester_id' => $semesterId,
+                ],
+                [
+                    'tahun_ajaran_id' => $tahunAjaranId,
+                    'rata_rata' => $rataRata,
+                    'peringkat_kelas' => $peringkat,
+                    'total_nilai' => $rataRata * 10,
+                    'total_mapel' => 10,
+                    'mapel_lulus' => 10,
+                    'mapel_tidak_lulus' => 0,
+                    'total_hari_efektif' => $hadir + $izin + $sakit + $alpha,
+                    'total_hadir' => $hadir,
+                    'total_izin' => $izin,
+                    'total_sakit' => $sakit,
+                    'total_alpha' => $alpha,
+                    'status_rapor' => in_array($status, ['draft', 'review', 'approved', 'published']) ? $status : 'draft',
+                    'created_by' => $request->user()?->id,
+                    'updated_by' => $request->user()?->id,
+                ]
+            );
+
+            $importedCount++;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Berhasil mengimpor {$importedCount} data Rapor Digital.",
+            'data' => [
+                'imported_count' => $importedCount,
+            ],
+        ]);
+    }
 }

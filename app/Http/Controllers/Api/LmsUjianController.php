@@ -96,7 +96,10 @@ class LmsUjianController extends Controller
             'kelas_id',
             'status',
             'with_trashed',
+            'unit_pendidikan_id',
         ]);
+
+        $requestedUnitId = $request->get('unit_pendidikan_id') ?? $request->get('unit_id');
 
         if ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
@@ -108,6 +111,8 @@ class LmsUjianController extends Controller
             } else {
                 $filters['kelas_ids'] = $accessibleRombelIds;
             }
+        } elseif ($requestedUnitId) {
+            $filters['unit_ids'] = [$requestedUnitId];
         }
 
         $perPage = (int) $request->get('per_page', 15);
@@ -519,13 +524,87 @@ class LmsUjianController extends Controller
         ]);
     }
 
-    public function options(): JsonResponse
+    public function options(Request $request): JsonResponse
     {
+        $user = $request->user();
         $options = $this->ujianService->opsi();
+        if ($user) {
+            $options['units'] = $this->accessScope->accessibleEducationUnits($user)
+                ->where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'code']);
+        }
 
         return response()->json([
             'success' => true,
             'data' => $options,
+        ]);
+    }
+
+    /**
+     * Impor jadwal ujian CBT massal dari berkas CSV/XLSX.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|max:10240',
+            'kelas_id' => 'nullable|string',
+        ]);
+
+        $file = $request->file('file');
+        $content = file_get_contents($file->getRealPath());
+        $lines = preg_split('/\r\n|\r|\n/', trim($content));
+
+        if (empty($lines)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Berkas CSV kosong.',
+            ], 422);
+        }
+
+        $header = str_getcsv(array_shift($lines));
+        $importedCount = 0;
+        $defaultKelas = \App\Models\Rombel::first();
+        $defaultSemester = \App\Models\SchoolYear::where('is_active', true)->first();
+        $defaultGuru = \App\Models\Employee::first();
+
+        foreach ($lines as $line) {
+            if (empty(trim($line))) continue;
+            $row = str_getcsv($line);
+            if (count($row) < 2) continue;
+
+            $judul = trim($row[0] ?? '');
+            $durasi = (int) ($row[1] ?? 60);
+            $kkm = (float) ($row[2] ?? 75);
+            $status = trim($row[3] ?? 'published');
+
+            if (!$judul) continue;
+
+            LmsUjian::create([
+                'kelas_id' => $request->get('kelas_id') ?: $defaultKelas?->id,
+                'guru_id' => $defaultGuru?->id,
+                'semester_id' => $defaultSemester?->id,
+                'judul_ujian' => $judul,
+                'instruksi' => 'Silakan kerjakan soal ujian dengan teliti dan jujur.',
+                'durasi_menit' => $durasi > 0 ? $durasi : 60,
+                'nilai_kkm' => $kkm > 0 ? $kkm : 75,
+                'acak_soal' => true,
+                'acak_jawaban' => true,
+                'tampilkan_nilai_langsung' => true,
+                'status' => in_array($status, ['draft', 'published', 'closed']) ? $status : 'published',
+                'waktu_mulai' => now(),
+                'waktu_selesai' => now()->addDays(7),
+            ]);
+
+            $importedCount++;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Berhasil mengimpor {$importedCount} jadwal ujian CBT.",
+            'data' => [
+                'imported_count' => $importedCount,
+            ],
         ]);
     }
 }

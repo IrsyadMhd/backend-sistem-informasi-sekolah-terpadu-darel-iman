@@ -16,6 +16,11 @@ class PemantauanDivisi extends Model
     protected $fillable = [
         'id_tahun_ajaran',
         'id_semester',
+        'unit_id',
+        'division_id',
+        'unit_pendidikan',
+        'kategori_laporan',
+        'petugas_supervisi',
         'tanggal_pemantauan',
         'nama_divisi',
         'aspek_pemantauan',
@@ -33,5 +38,20 @@ class PemantauanDivisi extends Model
             'persentase_capaian' => 'float',
             'data_tambahan' => 'array',
         ];
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(EducationUnit::class, 'unit_id');
+    }
+
+    public function division()
+    {
+        return $this->belongsTo(Division::class, 'division_id');
+    }
+
+    public function penginput()
+    {
+        return $this->belongsTo(User::class, 'id_penginput');
     }
 }

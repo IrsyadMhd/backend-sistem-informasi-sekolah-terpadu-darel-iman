@@ -16,6 +16,11 @@ class SimpanPemantauanDivisiRequest extends FormRequest
         return [
             'id_tahun_ajaran' => ['nullable', 'uuid', 'exists:academic_years,id'],
             'id_semester' => ['nullable', 'uuid', 'exists:semesters,id'],
+            'unit_id' => ['nullable', 'uuid', 'exists:education_units,id'],
+            'division_id' => ['nullable', 'uuid', 'exists:divisions,id'],
+            'unit_pendidikan' => ['nullable', 'string', 'max:120'],
+            'kategori_laporan' => ['nullable', 'string', 'max:100'],
+            'petugas_supervisi' => ['nullable', 'string', 'max:120'],
             'tanggal_pemantauan' => ['required', 'date'],
             'nama_divisi' => ['required', 'string', 'max:120'],
             'aspek_pemantauan' => ['required', 'string', 'max:150'],

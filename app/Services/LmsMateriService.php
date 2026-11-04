@@ -210,7 +210,16 @@ class LmsMateriService
             $subjectsQuery->whereIn('unit_pendidikan_id', $unitIds);
         }
 
+        $units = app(\App\Services\AccessScopeService::class)->accessibleEducationUnits($user)
+            ->map(fn ($unit) => [
+                'id' => $unit->id,
+                'name' => $unit->nama_unit ?? $unit->name,
+                'code' => $unit->kode_unit ?? $unit->code ?? null,
+            ])
+            ->values();
+
         return [
+            'units' => $units,
             'modul_ajar' => $modulAjars,
             'subjects' => $subjectsQuery->get(),
             'tipe_options' => [

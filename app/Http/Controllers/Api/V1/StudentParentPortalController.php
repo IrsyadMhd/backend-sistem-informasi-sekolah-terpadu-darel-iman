@@ -3805,12 +3805,14 @@ class StudentParentPortalController extends Controller
         if ($user) {
             $isParent = \App\Models\ParentModel::query()->where('user_id', $user->id)->exists()
                 || $user->hasAnyRole(['Orang Tua', 'orang_tua', 'Parent', 'parent', 'wali', 'Wali Murid']);
+            $isStudent = \App\Models\Student::query()->where('user_id', $user->id)->exists()
+                || $user->hasAnyRole(['Siswa', 'siswa', 'Student', 'student']);
             $isPrivilegedStaff = $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Tata Usaha', 'tu', 'Operator', 'operator']);
 
-            if (! $isParent && ! $isPrivilegedStaff) {
+            if (! $isParent && ! $isStudent && ! $isPrivilegedStaff) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Akses ditolak. Informasi tagihan dan SPP khusus untuk akun Orang Tua/Wali Murid.',
+                    'message' => 'Akses ditolak. Informasi tagihan dan SPP khusus untuk akun Orang Tua/Wali Murid dan Siswa.',
                 ], 403);
             }
         }
@@ -3944,6 +3946,65 @@ class StudentParentPortalController extends Controller
             ],
             'payment_info' => $paymentInfo,
         ]);
+    }
+
+    public function createVaPayment(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user) {
+            $isParent = \App\Models\ParentModel::query()->where('user_id', $user->id)->exists()
+                || $user->hasAnyRole(['Orang Tua', 'orang_tua', 'Parent', 'parent', 'wali', 'Wali Murid']);
+            $isStudent = \App\Models\Student::query()->where('user_id', $user->id)->exists()
+                || $user->hasAnyRole(['Siswa', 'siswa', 'Student', 'student']);
+            $isPrivilegedStaff = $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Tata Usaha', 'tu', 'Operator', 'operator']);
+
+            if (! $isParent && ! $isStudent && ! $isPrivilegedStaff) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Akses ditolak. Fitur pembayaran Virtual Account khusus untuk Orang Tua/Wali Murid dan Siswa.',
+                ], 403);
+            }
+        }
+
+        $student = $this->getStudentContext($request);
+        if (! $student) {
+            return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+        }
+
+        $validated = $request->validate([
+            'bank' => ['required', 'string', 'in:NAGARI,BSI,nagari,bsi'],
+            'items' => ['required', 'array', 'min:1', 'max:50'],
+            'items.*.jenis' => ['required', 'string', 'in:TAGIHAN,TUNGGAKAN,DANA_ORTU_ASUH,tagihan,tunggakan,dana_ortu_asuh'],
+            'items.*.id' => ['required', 'integer'],
+            'items.*.bayar' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $studentMeta = is_array($student->metadata) ? $student->metadata : [];
+        $nisPembayaran = $studentMeta['nis_pembayaran'] ?? $studentMeta['no_pendaftaran'] ?? $student->nis ?? null;
+
+        if (! $nisPembayaran) {
+            return response()->json([
+                'success' => false,
+                'message' => 'NIS Pembayaran siswa belum terdaftar di sistem SIPDEI.',
+            ], 422);
+        }
+
+        $sipdeiService = app(\App\Services\SipdeiBillingService::class);
+        if (! $sipdeiService->isConfigured()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Layanan SIPDEI belum dikonfigurasi di server. Silakan hubungi Super Admin / Admin untuk mengisi API Key pada Pengaturan Sistem.',
+            ], 503);
+        }
+
+        $result = $sipdeiService->createVaPayment(
+            (string) $nisPembayaran,
+            strtoupper($validated['bank']),
+            $validated['items']
+        );
+
+        $statusCode = $result['status_code'] ?? ($result['success'] ? 200 : 422);
+        return response()->json($result, $statusCode >= 200 && $statusCode < 600 ? $statusCode : 500);
     }
 
     public function signStudentNote(Request $request, string $noteId): JsonResponse

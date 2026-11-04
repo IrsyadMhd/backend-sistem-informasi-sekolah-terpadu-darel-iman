@@ -47,6 +47,11 @@ class Teacher extends Model
         );
     }
 
+    public function unit()
+    {
+        return $this->educationUnit();
+    }
+
     public function kelas()
     {
         return $this->hasMany(Kelas::class, 'wali_kelas_id', 'employee_id');

@@ -87,6 +87,16 @@ class Student extends Model
         return $this->belongsTo(EducationUnit::class, 'unit_id');
     }
 
+    /**
+     * Relasi ke unit pendidikan (alias dari educationUnit).
+     * Memungkinkan eager loading $student->unit maupun User::with('student.unit')
+     * selaras dengan Employee::unit.
+     */
+    public function unit()
+    {
+        return $this->belongsTo(EducationUnit::class, 'unit_id');
+    }
+
     public function bills()
     {
         return $this->hasMany(StudentBill::class, 'student_id');
@@ -218,6 +228,9 @@ class Student extends Model
     {
         if ($this->relationLoaded('educationUnit') && $this->educationUnit) {
             return $this->educationUnit->name;
+        }
+        if ($this->relationLoaded('unit') && $this->unit) {
+            return $this->unit->name;
         }
         if ($this->relationLoaded('kelas') && $this->kelas && $this->kelas->relationLoaded('unitPendidikan') && $this->kelas->unitPendidikan) {
             return $this->kelas->unitPendidikan->name;

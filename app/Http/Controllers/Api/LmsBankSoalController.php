@@ -247,6 +247,10 @@ class LmsBankSoalController extends Controller
         }
 
         $options = $this->bankSoalService->opsi($unitId);
+        $options['units'] = $this->accessScope->accessibleEducationUnits($user)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
 
         return response()->json([
             'success' => true,
@@ -304,5 +308,75 @@ class LmsBankSoalController extends Controller
                 abort_unless(in_array($subj->unit_pendidikan_id, $allowedUnitIds, true), 403, 'Akses ditolak: Mata pelajaran di luar cakupan unit Anda.');
             }
         }
+    }
+
+    /**
+     * Impor bank soal massal dari berkas CSV/XLSX.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|max:10240',
+            'mata_pelajaran_id' => 'nullable|string',
+        ]);
+
+        $file = $request->file('file');
+        $content = file_get_contents($file->getRealPath());
+        $lines = preg_split('/\r\n|\r|\n/', trim($content));
+
+        if (empty($lines)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Berkas CSV kosong.',
+            ], 422);
+        }
+
+        $header = str_getcsv(array_shift($lines));
+        $importedCount = 0;
+        $defaultSubject = \App\Models\Subject::first();
+        $mapelId = $request->get('mata_pelajaran_id') ?: $defaultSubject?->id;
+
+        foreach ($lines as $line) {
+            if (empty(trim($line))) continue;
+            $row = str_getcsv($line);
+            if (count($row) < 3) continue;
+
+            $pertanyaan = trim($row[0] ?? '');
+            $tipeSoal = trim($row[1] ?? 'pilihan_ganda');
+            $opsiA = trim($row[2] ?? '');
+            $opsiB = trim($row[3] ?? '');
+            $opsiC = trim($row[4] ?? '');
+            $opsiD = trim($row[5] ?? '');
+            $kunci = trim($row[6] ?? 'A');
+            $poin = (float) ($row[7] ?? 10);
+            $kesulitan = trim($row[8] ?? 'sedang');
+
+            if (!$pertanyaan) continue;
+
+            LmsBankSoal::create([
+                'mata_pelajaran_id' => $mapelId,
+                'kode_soal' => 'SOAL-' . strtoupper(\Illuminate\Support\Str::random(6)),
+                'pertanyaan' => $pertanyaan,
+                'tipe_soal' => in_array($tipeSoal, ['pilihan_ganda', 'essay', 'benar_salah']) ? $tipeSoal : 'pilihan_ganda',
+                'opsi_a' => $opsiA,
+                'opsi_b' => $opsiB,
+                'opsi_c' => $opsiC,
+                'opsi_d' => $opsiD,
+                'kunci_jawaban' => $kunci,
+                'poin' => $poin > 0 ? $poin : 10,
+                'tingkat_kesulitan' => in_array($kesulitan, ['mudah', 'sedang', 'sulit']) ? $kesulitan : 'sedang',
+                'status' => true,
+            ]);
+
+            $importedCount++;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Berhasil mengimpor {$importedCount} butir butir soal ke Bank Soal.",
+            'data' => [
+                'imported_count' => $importedCount,
+            ],
+        ]);
     }
 }

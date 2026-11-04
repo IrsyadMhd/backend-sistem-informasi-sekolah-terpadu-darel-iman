@@ -24,7 +24,7 @@ interface SubjectRepositoryInterface
 
     public function restore(string $id): bool;
 
-    public function getStats(): array;
+    public function getStats(?string $unitId = null): array;
 
     public function getDropdownOptions(): Collection;
 

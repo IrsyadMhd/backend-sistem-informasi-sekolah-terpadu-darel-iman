@@ -4,7 +4,12 @@ namespace Database\Seeders;
 
 use App\Models\EducationUnit;
 use App\Models\Employee;
+use App\Models\Kelas;
+use App\Models\ParentModel;
 use App\Models\Role;
+use App\Models\SchoolClass;
+use App\Models\Student;
+use App\Models\StudentParent;
 use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -191,6 +196,36 @@ class TestingRoleAccountsSeeder extends Seeder
             'unit_code' => 'PONPES-PA',
             'is_permanent_admin' => false,
         ],
+        'Orang Tua' => [
+            'email' => 'orangtua.test@dareliman.sch.id',
+            'password' => 'OrangTuaTest@2026!',
+            'name' => 'Orang Tua Test',
+            'phone' => '081299990020',
+            'role' => 'Orang Tua',
+            'scope' => 'linked_children',
+            'unit_code' => null,
+            'is_permanent_admin' => false,
+        ],
+        'Siswa' => [
+            'email' => 'siswa.test@dareliman.sch.id',
+            'password' => 'SiswaTest@2026!',
+            'name' => 'Siswa Test',
+            'phone' => '081299990021',
+            'role' => 'Siswa',
+            'scope' => 'self',
+            'unit_code' => null,
+            'is_permanent_admin' => false,
+        ],
+        'Alumni' => [
+            'email' => 'alumni.test@dareliman.sch.id',
+            'password' => 'AlumniTest@2026!',
+            'name' => 'Alumni Test',
+            'phone' => '081299990022',
+            'role' => 'Alumni',
+            'scope' => 'self',
+            'unit_code' => null,
+            'is_permanent_admin' => false,
+        ],
     ];
 
     public function run(): void
@@ -263,8 +298,65 @@ class TestingRoleAccountsSeeder extends Seeder
 
             $user->syncRoles([$roleName]);
 
+            // Buat profil ParentModel khusus akun Orang Tua uji coba
+            if ($roleName === 'Orang Tua') {
+                ParentModel::withTrashed()->updateOrCreate(
+                    ['user_id' => $user->id],
+                    [
+                        'nik' => '1371000000000020',
+                        'full_name' => $user->name,
+                        'phone' => $user->phone,
+                        'email' => $user->email,
+                        'occupation' => 'Akun Uji',
+                        'address' => 'Data fixture akun uji',
+                        'metadata' => [self::TEST_METADATA_FLAG => true],
+                    ]
+                );
+            }
+
+            // Buat profil Student khusus akun Siswa uji coba
+            if ($roleName === 'Siswa') {
+                $testParent = ParentModel::where('metadata->' . self::TEST_METADATA_FLAG, true)->first();
+                $firstKelas = $unitId ? Kelas::where('unit_pendidikan_id', $unitId)->first() : Kelas::first();
+                $firstSchoolClass = SchoolClass::first();
+
+                $student = Student::withTrashed()->updateOrCreate(
+                    ['nis' => 'TEST001'],
+                    [
+                        'user_id' => $user->id,
+                        'parent_id' => $testParent?->id,
+                        'unit_id' => $unitId ?? $firstKelas?->unit_pendidikan_id,
+                        'kelas_id' => $firstKelas?->id,
+                        'class_id' => $firstSchoolClass?->id,
+                        'full_name' => $user->name,
+                        'gender' => 'male',
+                        'birth_date' => '2012-01-01',
+                        'birth_place' => 'Padang',
+                        'address' => 'Data fixture akun uji',
+                        'is_active' => true,
+                        'deleted_at' => null,
+                        'metadata' => [
+                            self::TEST_METADATA_FLAG => true,
+                            'status' => 'Aktif',
+                            'created_by' => 'TestingRoleAccountsSeeder',
+                        ],
+                    ]
+                );
+
+                if ($testParent) {
+                    StudentParent::updateOrCreate(
+                        ['student_id' => $student->id, 'parent_id' => $testParent->id],
+                        [
+                            'relationship_type' => 'father',
+                            'is_primary' => true,
+                            'metadata' => [self::TEST_METADATA_FLAG => true],
+                        ]
+                    );
+                }
+            }
+
             // Buat profil minimum Employee untuk staf/guru agar AuthIdentifierResolver::resolveEmployee mengenali akun
-            if (! in_array($roleName, ['Super Admin', 'Admin'], true)) {
+            if (! in_array($roleName, ['Super Admin', 'Admin', 'Orang Tua', 'Siswa', 'Alumni'], true)) {
                 $niy = 'TEST-NIY-' . Str::slug($key, '-');
                 $employee = Employee::withTrashed()->where('email', $email)->orWhere('user_id', $user->id)->first();
 
@@ -329,6 +421,11 @@ class TestingRoleAccountsSeeder extends Seeder
         if (app()->environment('production')) {
             throw new \RuntimeException('Cleanup DITOLAK keras pada environment production.');
         }
+
+        // Hapus StudentParent & Student test
+        StudentParent::where('metadata->' . self::TEST_METADATA_FLAG, true)->forceDelete();
+        Student::where('metadata->' . self::TEST_METADATA_FLAG, true)->forceDelete();
+        ParentModel::where('metadata->' . self::TEST_METADATA_FLAG, true)->forceDelete();
 
         // Hapus Teacher test
         Teacher::where('metadata->' . self::TEST_METADATA_FLAG, true)->forceDelete();

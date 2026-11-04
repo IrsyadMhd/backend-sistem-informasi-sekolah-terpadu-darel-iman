@@ -172,6 +172,10 @@ class DashboardRoleAccessTest extends TestCase
             ->assertOk();
 
         $this->assertSame(0, $response->json('data.kpis.total_siswa_binaan.total'));
+        $this->assertIsArray($response->json('data.charts.setoran_details.sudah_setor'));
+        $this->assertIsArray($response->json('data.charts.setoran_details.belum_setor'));
+        $this->assertSame(0, $response->json('data.charts.setoran_details.sudah_count'));
+        $this->assertSame(0, $response->json('data.charts.setoran_details.belum_count'));
     }
 
     public function test_wali_kelas_class_id_outside_scope_is_ignored(): void

@@ -21,7 +21,7 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         // Roles/permissions, core logins (SuperAdmin & Admin), navigation, system defaults & Islamic reference masters are safe bootstrap data.
-        $this->call([
+        $bootstrapSeeders = [
             RolePermissionSeeder::class,
             AttendancePermissionSeeder::class,
             SiteSettingsSeeder::class,
@@ -32,7 +32,13 @@ class DatabaseSeeder extends Seeder
             TransportationModeSeeder::class,
             QuranSurahSeeder::class,
             DoaSeeder::class,
-        ]);
+        ];
+
+        if (! app()->environment('production')) {
+            $bootstrapSeeders[] = TestingRoleAccountsSeeder::class;
+        }
+
+        $this->call($bootstrapSeeders);
 
         // All records below are development/simulation fixtures.
         // Disabled by default to keep database clean without dummy data.
@@ -90,7 +96,7 @@ class DatabaseSeeder extends Seeder
         if (app()->environment(['local', 'development', 'testing', 'staging'])) {
             $this->call(TahfizhSeeder::class);
             $this->call(RekapPrestasiSiswaSeeder::class);
-            $this->call(JadwalPonpesIkhwan2026Seeder::class);
+            $this->call(JadwalBoardingTerpaduSeeder::class);
             $this->call(JadwalSditFullDay2026Seeder::class);
             $this->call(SimulasiTerpadu2026Seeder::class);
             $this->call(SimulasiSiswaSemuaKelasSeeder::class);

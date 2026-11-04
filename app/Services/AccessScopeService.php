@@ -25,6 +25,9 @@ class AccessScopeService
         'pengurus_yayasan', 'Pengurus Yayasan',
         'Sekretaris Yayasan', 'sekretaris_yayasan',
         'Bendahara Yayasan', 'bendahara_yayasan',
+        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
+        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
+        'Divisi Kurikulum', 'Divisi Kesiswaan',
     ];
 
     /**
@@ -67,6 +70,9 @@ class AccessScopeService
         'pengurus_yayasan', 'Pengurus Yayasan',
         'Sekretaris Yayasan', 'sekretaris_yayasan',
         'Bendahara Yayasan', 'bendahara_yayasan',
+        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
+        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
+        'Divisi Kurikulum', 'Divisi Kesiswaan',
     ];
 
     private const GLOBAL_ACCESS_PERMISSIONS = [

@@ -18,11 +18,12 @@ class SiteSettingController extends Controller
     {
         $setting = SiteSetting::current()->toArray();
 
-        // Keamanan: Cek otorisasi untuk field sensitif (mapbox_token)
-        // Pengguna publik/unauthenticated atau role non-admin TIDAK boleh melihat mapbox_token
+        // Keamanan: Cek otorisasi untuk field sensitif (mapbox_token & sipdei_api_key)
+        // Pengguna publik/unauthenticated atau role non-admin TIDAK boleh melihat token ini
         $user = auth('sanctum')->user() ?? $request->user();
         if (!$user || !$user->can('sistem.pengaturan')) {
             unset($setting['mapbox_token']);
+            unset($setting['sipdei_api_key']);
         }
 
         // 1. Ambil FAQ portal dari school_settings jika tersedia
@@ -100,6 +101,9 @@ class SiteSettingController extends Controller
             'remove_logo' => ['nullable', 'boolean'],
             'remove_favicon' => ['nullable', 'boolean'],
             'mapbox_token' => ['nullable', 'string', 'max:255'],
+            'sipdei_base_url' => ['nullable', 'string', 'max:255'],
+            'sipdei_api_key' => ['nullable', 'string'],
+            'sipdei_cache_ttl' => ['nullable', 'integer', 'min:10', 'max:86400'],
             'custom_faqs' => ['nullable'],
             'custom_manuals' => ['nullable'],
             'custom_labels' => ['nullable'],

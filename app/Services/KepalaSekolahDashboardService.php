@@ -526,6 +526,9 @@ class KepalaSekolahDashboardService
 
                     if ($sess && $sess->teaching_session_status === 'completed') {
                         $status = 'completed';
+                    } elseif ($timeNow > $sch->time_end) {
+                        // Waktu jam pelajaran telah selesai
+                        $status = ($sess || $att) ? 'completed' : 'missed';
                     } elseif ($sess && $sess->teaching_session_status === 'active') {
                         $status = 'ongoing';
                         $isOngoing = true;
@@ -536,6 +539,8 @@ class KepalaSekolahDashboardService
                         $status = 'ongoing';
                         $isOngoing = true;
                     }
+
+                    $hasJournal = ! empty(trim((string) ($sess?->meeting_notes ?? $att?->meeting_notes ?? '')));
 
                     return [
                         'id' => (string) $sch->id,
@@ -554,8 +559,10 @@ class KepalaSekolahDashboardService
                         'ruangan' => $room,
                         'status' => $status,
                         'is_ongoing' => $isOngoing,
+                        'has_journal' => $hasJournal,
+                        'requires_journal' => ($status === 'completed') && ! $hasJournal,
                         'attendance_status' => $att?->status ?? 'belum_presensi',
-                        'session_status' => $sess?->teaching_session_status ?? 'belum_mulai',
+                        'session_status' => $sess?->teaching_session_status ?? ($status === 'completed' ? 'completed' : 'belum_mulai'),
                         'meeting_number' => $sess?->meeting_number,
                         'topic' => $sess?->topic ?? $att?->topic,
                         'meeting_notes' => $sess?->meeting_notes,

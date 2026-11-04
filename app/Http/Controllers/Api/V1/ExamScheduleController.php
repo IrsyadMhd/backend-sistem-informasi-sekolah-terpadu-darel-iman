@@ -35,6 +35,25 @@ class ExamScheduleController extends Controller
             'invigilator:id,nama_lengkap,niy',
         ]);
 
+        $user = $request->user();
+        if ($user) {
+            $accessScope = app(\App\Services\AccessScopeService::class);
+            $isGlobal = $accessScope->hasGlobalScope($user) || $user->hasAnyRole([
+                'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
+                'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
+                'Divisi Kurikulum', 'Divisi Kesiswaan',
+            ]);
+
+            if (! $isGlobal) {
+                $allowedUnits = $accessScope->accessibleEducationUnits($user)->pluck('id')->all();
+                if (! empty($allowedUnits)) {
+                    $query->whereHas('kelas', fn ($q) => $q->whereIn('unit_pendidikan_id', $allowedUnits));
+                } else {
+                    $query->whereRaw('1 = 0');
+                }
+            }
+        }
+
         if ($request->filled('unit_pendidikan_id')) {
             $unitId = $request->query('unit_pendidikan_id');
             $query->whereHas('kelas', fn ($q) => $q->where('unit_pendidikan_id', $unitId));
@@ -226,13 +245,29 @@ class ExamScheduleController extends Controller
      */
     public function options(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $accessScope = app(\App\Services\AccessScopeService::class);
+        $isGlobal = $user && ($accessScope->hasGlobalScope($user) || $user->hasAnyRole([
+            'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
+            'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
+            'Divisi Kurikulum', 'Divisi Kesiswaan',
+        ]));
+
+        $accessibleUnitsQuery = $isGlobal
+            ? EducationUnit::query()
+            : ($user ? $accessScope->accessibleEducationUnits($user) : EducationUnit::query());
+
         $unitId = $request->query('unit_pendidikan_id');
+        if (! $isGlobal && empty($unitId) && $user) {
+            $firstAccessible = (clone $accessibleUnitsQuery)->first();
+            $unitId = $firstAccessible?->id;
+        }
 
         return response()->json([
             'status' => 'success',
             'data' => [
                 'categories' => ExamCategory::query()->where('is_active', true)->orderBy('name')->get(),
-                'units' => EducationUnit::query()->orderBy('name')->get(['id', 'name', 'code']),
+                'units' => (clone $accessibleUnitsQuery)->orderBy('name')->get(['id', 'name', 'code']),
                 'academic_years' => AcademicYear::query()->orderByDesc('start_date')->get(['id', 'name', 'is_active']),
                 'semesters' => Semester::query()->orderByDesc('start_date')->get(['id', 'academic_year_id', 'name', 'is_active']),
                 'classes' => Kelas::query()

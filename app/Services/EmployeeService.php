@@ -212,6 +212,123 @@ class EmployeeService
         $avgHoursPerGuru = $totalGuru > 0 ? round($totalScheduleCount / $totalGuru, 1) : 0;
         $totalTendik = max(0, $totalPegawai - $totalGuru);
 
+        // ── Perhitungan Top 3 Pegawai Terbaik & Top 3 Guru Terbaik ──
+        $allCandidates = (clone $query)
+            ->with(['unit:id,name,code', 'position:id,name,code', 'teacher', 'teachings', 'user.roles'])
+            ->get();
+
+        $guruCandidates = $allCandidates->filter(function ($emp) {
+            $metaRole = $emp->metadata['role'] ?? '';
+            $posName = $emp->position?->name ?? '';
+            $statusPeg = $emp->status_pegawai ?? '';
+            $fullName = $emp->nama_lengkap ?? '';
+            $userRoles = $emp->user?->roles?->pluck('name')->all() ?? [];
+
+            return $emp->teacher !== null ||
+                   ($emp->teachings && $emp->teachings->isNotEmpty()) ||
+                   in_array('Guru', $userRoles) ||
+                   in_array('Wali Kelas', $userRoles) ||
+                   preg_match('/\b(guru|pendidik|wali kelas|ustadz|ustadzah|pengajar)\b/i', "{$metaRole} {$posName} {$statusPeg} {$fullName}");
+        });
+
+        $nonGuruCandidates = $allCandidates->filter(function ($emp) use ($guruCandidates) {
+            return ! $guruCandidates->contains('id', $emp->id);
+        });
+
+        // 1. Top 3 Pegawai (Non-Guru / Tendik) berdasarkan Indeks Disiplin & Presensi (Mulai dari 0)
+        $rankedPegawai = $nonGuruCandidates->map(function ($emp) {
+            $empAttendance = \App\Models\Attendance::where('employee_id', $emp->id)->get();
+            $attCount = $empAttendance->count();
+            if ($attCount > 0) {
+                $hadir = $empAttendance->whereIn('status', ['HADIR', 'present', 'HADIR_TEPAT_WAKTU', 'hadir'])->count();
+                $terlambat = $empAttendance->where('status', 'TERLAMBAT')->count();
+                $alpa = $empAttendance->whereIn('status', ['ALPHA', 'alpa', 'absent'])->count();
+                $basePct = round(($hadir / $attCount) * 100, 1);
+                $score = max(0, min(100, round($basePct - ($terlambat * 0.5) - ($alpa * 2.0), 1)));
+                $hasAttendance = true;
+                $predikat = $score >= 95 ? 'Pegawai Teladan' : ($score >= 80 ? 'Disiplin Sangat Baik' : 'Cukup Disiplin');
+                $label = "{$score}% Indeks Disiplin ({$hadir}/{$attCount} Hadir)";
+            } else {
+                // MURNI DIMULAI DARI 0: Belum ada catatan presensi riil di database
+                $score = 0.0;
+                $hasAttendance = false;
+                $predikat = 'Belum Ada Presensi';
+                $label = '0% Indeks Disiplin (0 Kehadiran)';
+            }
+
+            return [
+                'id' => $emp->id,
+                'nama_lengkap' => $emp->nama_lengkap,
+                'gelar_depan' => $emp->gelar_depan && $emp->gelar_depan !== '-' ? $emp->gelar_depan : null,
+                'gelar_belakang' => $emp->gelar_belakang && $emp->gelar_belakang !== '-' ? $emp->gelar_belakang : null,
+                'niy' => $emp->niy,
+                'foto' => $emp->foto,
+                'jabatan_name' => $emp->position?->name ?? $emp->jabatan ?? data_get($emp->metadata, 'role', 'Staff Pegawai'),
+                'unit_name' => $emp->unit?->name ?? 'Yayasan',
+                'jenis_kelamin' => $emp->jenis_kelamin,
+                'status' => $emp->status,
+                'indeks_skor' => $score,
+                'indeks_label' => $label,
+                'predikat' => $predikat,
+                'has_attendance' => $hasAttendance,
+            ];
+        })->filter(function ($item) {
+            // HANYA pegawai yang telah memiliki capaian presensi (> 0) yang masuk nominasi Top 3
+            return $item['indeks_skor'] > 0;
+        })->sort(function ($a, $b) {
+            if ($a['indeks_skor'] !== $b['indeks_skor']) {
+                return $b['indeks_skor'] <=> $a['indeks_skor'];
+            }
+            return strcasecmp($a['nama_lengkap'], $b['nama_lengkap']);
+        })->values()->take(3);
+
+        // 2. Top 3 Guru berdasarkan Beban Jam Mengajar & Keaktifan Pembelajaran (Mulai dari 0)
+        $rankedGuru = $guruCandidates->map(function ($guru) {
+            $scheduleHours = \App\Models\ClassSchedule::where('employee_id', $guru->id)->where('is_active', true)->count() * 2;
+            $teachingHours = \Illuminate\Support\Facades\DB::table('employee_teachings')->where('employee_id', $guru->id)->count() * 4;
+            $totalJp = max($scheduleHours, $teachingHours);
+
+            if ($totalJp > 0) {
+                $capaianPct = min(100, round(($totalJp / 24) * 100, 1));
+                $hasSchedule = true;
+                $predikat = 'Guru Teladan';
+                $label = "{$totalJp} JP/Minggu · {$capaianPct}% Capaian KBM";
+            } else {
+                // MURNI DIMULAI DARI 0: Belum ada jadwal mengajar aktif
+                $totalJp = 0;
+                $capaianPct = 0.0;
+                $hasSchedule = false;
+                $predikat = 'Belum Ada Jadwal';
+                $label = '0 JP/Minggu · 0% Capaian KBM';
+            }
+
+            return [
+                'id' => $guru->id,
+                'nama_lengkap' => $guru->nama_lengkap,
+                'gelar_depan' => $guru->gelar_depan && $guru->gelar_depan !== '-' ? $guru->gelar_depan : null,
+                'gelar_belakang' => $guru->gelar_belakang && $guru->gelar_belakang !== '-' ? $guru->gelar_belakang : null,
+                'niy' => $guru->niy,
+                'foto' => $guru->foto,
+                'jabatan_name' => $guru->position?->name ?? data_get($guru->metadata, 'role', 'Guru Mata Pelajaran'),
+                'unit_name' => $guru->unit?->name ?? 'SIT',
+                'jenis_kelamin' => $guru->jenis_kelamin,
+                'status' => $guru->status,
+                'jam_mengajar' => $totalJp,
+                'indeks_skor' => $capaianPct,
+                'indeks_label' => $label,
+                'predikat' => $predikat,
+                'has_schedule' => $hasSchedule,
+            ];
+        })->filter(function ($item) {
+            // HANYA guru yang telah memiliki jadwal KBM & jam mengajar aktif (> 0) yang masuk nominasi Top 3
+            return $item['jam_mengajar'] > 0 && $item['indeks_skor'] > 0;
+        })->sort(function ($a, $b) {
+            if ($a['jam_mengajar'] !== $b['jam_mengajar']) {
+                return $b['jam_mengajar'] <=> $a['jam_mengajar'];
+            }
+            return strcasecmp($a['nama_lengkap'], $b['nama_lengkap']);
+        })->values()->take(3);
+
         return [
             'total_pegawai' => $totalPegawai,
             'total_employees' => $totalPegawai,
@@ -241,6 +358,8 @@ class EmployeeService
                 'jam_guru_terbanyak' => $topTeacherHours,
                 'rata_jam_per_guru' => $avgHoursPerGuru,
             ],
+            'top_3_pegawai' => $rankedPegawai,
+            'top_3_guru' => $rankedGuru,
         ];
     }
 

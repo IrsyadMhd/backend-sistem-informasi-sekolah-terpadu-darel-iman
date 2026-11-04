@@ -50,6 +50,14 @@ class LmsPenilaianRepository implements LmsPenilaianRepositoryInterface
             });
         }
 
+        if (! empty($filters['unit_pendidikan_id'])) {
+            $unitId = $filters['unit_pendidikan_id'];
+            $query->where(function ($q) use ($unitId) {
+                $q->whereHas('kelas', fn ($qk) => $qk->where('unit_pendidikan_id', $unitId))
+                  ->orWhereHas('subject', fn ($qs) => $qs->where('unit_pendidikan_id', $unitId));
+            });
+        }
+
         if (! empty($filters['kelas_ids']) && is_array($filters['kelas_ids'])) {
             $query->whereIn('kelas_id', $filters['kelas_ids']);
         } elseif (! empty($filters['kelas_id'])) {

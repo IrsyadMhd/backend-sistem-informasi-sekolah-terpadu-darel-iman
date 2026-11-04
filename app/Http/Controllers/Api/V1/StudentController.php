@@ -618,6 +618,10 @@ class StudentController extends Controller
         $canAccessAllUnits = $accessScope->hasGlobalScope($user)
             || $user->can('foundation.student.view')
             || $user->can('report.cross_unit.view')
+            || $user->hasAnyRole([
+                'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+                'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+            ])
             || $employee?->position?->scope_akses === 'semua_unit'
             || str_contains(strtolower((string) $employee?->position?->name), 'yayasan');
         $unitId = $employee?->unit_id

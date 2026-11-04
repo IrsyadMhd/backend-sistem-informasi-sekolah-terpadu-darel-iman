@@ -15,6 +15,7 @@ class SiteSetting extends Model
         'header_style', 'header_sticky', 'sidebar_style',
         'sidebar_position', 'sidebar_collapsed', 'template', 'sidebar_color',
         'sidebar_accent_color', 'body_color', 'header_color', 'mapbox_token',
+        'sipdei_base_url', 'sipdei_api_key', 'sipdei_cache_ttl',
     ];
 
     protected $appends = ['logo_url', 'favicon_url'];

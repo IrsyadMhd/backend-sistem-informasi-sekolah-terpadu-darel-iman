@@ -144,7 +144,16 @@ class LmsPenilaianService
             'rumus_deskripsi' => 'Nilai Akhir = (20% Tugas) + (25% CBT UH) + (25% CBT UTS) + (30% CBT UAS)',
         ];
 
+        $units = $accessScope->accessibleEducationUnits($user)
+            ->map(fn ($unit) => [
+                'id' => $unit->id,
+                'name' => $unit->nama_unit ?? $unit->name,
+                'code' => $unit->kode_unit ?? $unit->code ?? null,
+            ])
+            ->values();
+
         return [
+            'units' => $units,
             'kelas' => $kelas,
             'subjects' => $subjects,
             'semesters' => $semesters,

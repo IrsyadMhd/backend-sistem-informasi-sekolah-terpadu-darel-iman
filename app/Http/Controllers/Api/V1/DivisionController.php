@@ -123,10 +123,18 @@ class DivisionController extends Controller
         return response()->json(['status' => 'success', 'message' => 'Divisi berhasil dihapus.']);
     }
 
-    public function dropdown(): JsonResponse
+    public function dropdown(Request $request): JsonResponse
     {
-        $data = Division::where('is_active', true)
-            ->orderBy('name')
+        $user = $request->user();
+        $isYayasanOrSuperAdmin = $user && ($user->is_superadmin || $user->hasAnyRole(['Super Admin', 'Admin', 'Yayasan', 'Ketua Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Pengurus Yayasan']));
+        $isDivisi = $user && !$isYayasanOrSuperAdmin && ($user->hasRole('Divisi Pendidikan') || $user->roles()->where('name', 'ilike', '%divisi%')->exists());
+
+        $query = Division::where('is_active', true);
+        if ($isDivisi) {
+            $query->where('name', 'not ilike', '%yayasan%');
+        }
+
+        $data = $query->orderBy('name')
             ->get(['id', 'code', 'name', 'parent_id']);
 
         return response()->json(['status' => 'success', 'data' => $data]);

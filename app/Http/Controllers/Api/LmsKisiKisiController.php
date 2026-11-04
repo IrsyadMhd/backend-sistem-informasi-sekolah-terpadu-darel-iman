@@ -35,7 +35,10 @@ class LmsKisiKisiController extends Controller
             'semester_id',
             'status',
             'with_trashed',
+            'unit_pendidikan_id',
         ]);
+
+        $requestedUnitId = $request->get('unit_pendidikan_id') ?? $request->get('unit_id');
 
         if ($user && ! $this->accessScope->hasGlobalScope($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
@@ -47,6 +50,8 @@ class LmsKisiKisiController extends Controller
             } else {
                 $filters['kelas_ids'] = $accessibleRombelIds;
             }
+        } elseif ($requestedUnitId) {
+            $filters['unit_pendidikan_id'] = $requestedUnitId;
         }
 
         $perPage = (int) $request->get('per_page', 15);
@@ -213,6 +218,10 @@ class LmsKisiKisiController extends Controller
         }
 
         $options = $this->kisiKisiService->opsi($mataPelajaranId, $cpId, $unitId);
+        $options['units'] = $this->accessScope->accessibleEducationUnits($user)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
 
         return response()->json([
             'success' => true,

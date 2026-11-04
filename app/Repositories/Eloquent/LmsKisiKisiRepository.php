@@ -81,7 +81,13 @@ class LmsKisiKisiRepository implements LmsKisiKisiRepositoryInterface
 
         $this->applyTeacherScope($query);
 
-        if (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
+        if (! empty($filters['unit_pendidikan_id'])) {
+            $unitId = $filters['unit_pendidikan_id'];
+            $query->where(function ($q) use ($unitId) {
+                $q->whereHas('kelas', fn ($qk) => $qk->where('unit_pendidikan_id', $unitId))
+                  ->orWhereHas('subject', fn ($qs) => $qs->where('unit_pendidikan_id', $unitId));
+            });
+        } elseif (! empty($filters['unit_ids']) && is_array($filters['unit_ids'])) {
             $query->where(function ($q) use ($filters) {
                 $q->whereHas('kelas', fn ($qk) => $qk->whereIn('unit_pendidikan_id', $filters['unit_ids']))
                   ->orWhereHas('subject', fn ($qs) => $qs->whereIn('unit_pendidikan_id', $filters['unit_ids']));

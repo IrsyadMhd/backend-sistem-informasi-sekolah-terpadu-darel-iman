@@ -261,7 +261,19 @@ class LmsPenugasanService
             ->values()
             ->toArray();
 
+        $unitOptions = $accessScope->accessibleEducationUnits($user)
+            ->map(fn ($item) => [
+                'value' => $item->id,
+                'id' => $item->id,
+                'label' => $item->nama_unit ?? $item->name,
+                'name' => $item->nama_unit ?? $item->name,
+                'code' => $item->kode_unit ?? $item->code ?? null,
+            ])
+            ->values()
+            ->toArray();
+
         return [
+            'units' => $unitOptions,
             'modul_ajar' => $modulOptions,
             'kelas' => $kelasOptions,
             'guru' => $guruOptions,

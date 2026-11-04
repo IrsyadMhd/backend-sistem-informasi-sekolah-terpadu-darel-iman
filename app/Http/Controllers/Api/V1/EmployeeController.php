@@ -38,13 +38,22 @@ class EmployeeController extends Controller
             $filters['exclude_restricted_roles'] = true;
         }
 
-        if (! $isGlobalUser) {
+        $canFilterAllUnits = $isGlobalUser || $request->user()->hasAnyRole([
+            'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+            'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+        ]);
+
+        if (! $canFilterAllUnits) {
             if (! empty($filters['unit_id'])) {
                 $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
             } elseif ($userUnitId) {
                 $filters['unit_id'] = $userUnitId;
             } else {
                 $filters['allowed_unit_ids'] = $this->accessScopeService->accessibleEducationUnits($request->user())->pluck('id')->all();
+            }
+        } else {
+            if (! empty($filters['unit_id'])) {
+                $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
             }
         }
 
@@ -68,13 +77,22 @@ class EmployeeController extends Controller
             $filters['exclude_restricted_roles'] = true;
         }
 
-        if (! $isGlobalUser) {
+        $canFilterAllUnits = $isGlobalUser || $request->user()->hasAnyRole([
+            'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+            'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+        ]);
+
+        if (! $canFilterAllUnits) {
             if (! empty($filters['unit_id'])) {
                 $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
             } elseif ($userUnitId) {
                 $filters['unit_id'] = $userUnitId;
             } else {
                 $filters['allowed_unit_ids'] = $this->accessScopeService->accessibleEducationUnits($request->user())->pluck('id')->all();
+            }
+        } else {
+            if (! empty($filters['unit_id'])) {
+                $this->accessScopeService->assertEducationUnitAccess($request->user(), $filters['unit_id']);
             }
         }
 
@@ -212,13 +230,19 @@ class EmployeeController extends Controller
     public function positions(Request $request)
     {
         $user = $request->user();
-        if ($this->accessScopeService->canManageUnitAccess($user) && ! $this->accessScopeService->canManageGlobalAccess($user)) {
+        $isDivisi = $user->hasAnyRole([
+            'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+            'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+        ]);
+        $hasGlobalScope = $this->accessScopeService->hasGlobalScope($user) || $isDivisi;
+
+        if ($this->accessScopeService->canManageUnitAccess($user) && ! $hasGlobalScope) {
             $query = $this->accessScopeService->accessiblePositions($user);
         } else {
             $query = \App\Models\Position::query();
         }
 
-        if (! $this->accessScopeService->hasGlobalScope($user) || $user->hasAnyRole(['Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu'])) {
+        if (! $hasGlobalScope || $user->hasAnyRole(['Tata Usaha', 'tata_usaha', 'TU', 'tu', 'staf_tu'])) {
             $query->whereNotIn('level_jabatan', [1, 2, 7])
                   ->where(function ($q) {
                       $q->whereNull('satuan_kerja')
@@ -237,6 +261,16 @@ class EmployeeController extends Controller
                         ->whereRaw('LOWER(name) NOT LIKE ?', ['%super admin%'])
                         ->whereRaw('LOWER(name) NOT LIKE ?', ['%administrator%']);
                   });
+        }
+
+        $unitId = $request->query('unit_id');
+        if (! empty($unitId)) {
+            $query->where(function ($sub) use ($unitId) {
+                $sub->where('unit_sekolah_id', $unitId)
+                    ->orWhereHas('employees', function ($empQuery) use ($unitId) {
+                        $empQuery->where('unit_id', $unitId);
+                    });
+            });
         }
 
         $positions = $query->orderBy('level_jabatan')->orderBy('code')->get();

@@ -45,6 +45,29 @@ class ScheduleController extends Controller
             $query->whereHas('kelas', fn ($q) => $q->where('unit_pendidikan_id', $unitId));
         }
 
+        if ($request->filled('program_type')) {
+            $progType = strtolower((string) $request->query('program_type'));
+            $query->whereHas('kelas.unitPendidikan', function ($q) use ($progType) {
+                if ($progType === 'boarding') {
+                    $q->where(function ($sub) {
+                        $sub->where('program_type', 'boarding')
+                            ->orWhere('metadata->is_boarding', true)
+                            ->orWhere('metadata->program_type', 'boarding');
+                    });
+                } elseif ($progType === 'fullday') {
+                    $q->where(function ($sub) {
+                        $sub->where(function ($s2) {
+                            $s2->where('program_type', 'fullday')
+                               ->orWhereNull('program_type');
+                        })->where(function ($s2) {
+                            $s2->whereNull('metadata->is_boarding')
+                               ->orWhere('metadata->is_boarding', false);
+                        });
+                    });
+                }
+            });
+        }
+
         if ($request->filled('kelas_id')) {
             $query->where('kelas_id', $request->query('kelas_id'));
         }
@@ -871,11 +894,15 @@ class ScheduleController extends Controller
         $query = ClassSchedule::query();
         $unitIds = $this->accessibleUnitIds($user);
 
-        if (! empty($unitIds)) {
-            $query->whereHas('kelas', fn (Builder $kelasQuery) => $kelasQuery->whereIn('unit_pendidikan_id', $unitIds));
+        if ($unitIds !== null) {
+            if (! empty($unitIds)) {
+                $query->whereHas('kelas', fn (Builder $kelasQuery) => $kelasQuery->whereIn('unit_pendidikan_id', $unitIds));
+            } else {
+                $query->whereRaw('1 = 0');
+            }
         }
 
-        // Guru hanya bisa melihat jadwal mengajar mereka sendiri (jika bukan admin/yayasan)
+        // Guru hanya bisa melihat jadwal mengajar mereka sendiri (jika bukan admin/yayasan/divisi)
         if (! $this->canAccessAllUnits($user) && $this->isGuruRole($user)) {
             $employee = Employee::query()->where('user_id', $user->id)->first();
             if ($employee) {
@@ -888,6 +915,16 @@ class ScheduleController extends Controller
 
     private function isGuruRole(User $user): bool
     {
+        if ($user->hasAnyRole([
+            'Kepala Sekolah', 'kepala_sekolah', 'Kepsek', 'kepsek',
+            'Wakil Kepala Sekolah', 'Waka', 'waka_kurikulum', 'waka_kesiswaan',
+            'Tata Usaha', 'tu', 'tata_usaha', 'Operator', 'operator',
+            'Admin', 'admin', 'Super Admin', 'super_admin',
+            'Divisi Pendidikan', 'divisi_pendidikan',
+        ])) {
+            return false;
+        }
+
         return $user->hasAnyRole([
             'Guru',
             'guru',
@@ -915,6 +952,16 @@ class ScheduleController extends Controller
             return null;
         }
 
+        $accessScopeUnitIds = app(\App\Services\AccessScopeService::class)
+            ->accessibleEducationUnits($user)
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        if (! empty($accessScopeUnitIds)) {
+            return $accessScopeUnitIds;
+        }
+
         $unitIds = Employee::query()
             ->where('user_id', $user->id)
             ->whereNotNull('unit_id')
@@ -924,15 +971,14 @@ class ScheduleController extends Controller
         $metaUnitId = data_get($user->metadata, 'unit_id')
             ?? data_get($user->metadata, 'unit_pendidikan_id')
             ?? data_get($user->metadata, 'education_unit_id')
-            ?? data_get($user->metadata, 'unit_sekolah_id');
+            ?? data_get($user->metadata, 'unit_sekolah_id')
+            ?? $user->unit_id;
 
         if ($metaUnitId) {
-            $unitIds[] = $metaUnitId;
+            $unitIds[] = (string) $metaUnitId;
         }
 
-        $unitIds = array_values(array_unique(array_filter($unitIds)));
-
-        return $unitIds;
+        return array_values(array_unique(array_filter($unitIds)));
     }
 
     private function canAccessAllUnits(User $user): bool
@@ -948,6 +994,13 @@ class ScheduleController extends Controller
             'sekretaris_yayasan',
             'bendahara_yayasan',
             'pengurus_yayasan',
+            'Divisi Pendidikan',
+            'divisi_pendidikan',
+            'divisi-pendidikan',
+            'Kepala Bidang Pendidikan',
+            'kepala_bidang_pendidikan',
+            'Divisi Kurikulum',
+            'Divisi Kesiswaan',
         ]);
     }
 

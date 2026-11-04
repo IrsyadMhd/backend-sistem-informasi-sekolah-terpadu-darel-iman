@@ -10,3 +10,7 @@ Artisan::command('inspire', function () {
 
 // Auto-timeout sesi CBT yang melewati batas waktu pengerjaan.
 Schedule::command('cbt:auto-timeout')->everyMinute();
+
+// Auto-close sesi KBM yang belum ditutup pada sore hari dan akhir hari
+Schedule::command('kbm:auto-close-sessions')->dailyAt('17:00');
+Schedule::command('kbm:auto-close-sessions')->dailyAt('23:59');

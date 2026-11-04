@@ -132,11 +132,14 @@ class KelasRepository implements KelasRepositoryInterface
         return (bool) $kelas->restore();
     }
 
-    public function dapatkanStatistik(?array $allowedKelasIds = null): array
+    public function dapatkanStatistik(?array $allowedKelasIds = null, ?string $unitId = null): array
     {
         $query = Kelas::query();
         if ($allowedKelasIds !== null) {
             $query->whereIn('id', $allowedKelasIds);
+        }
+        if (! empty($unitId) && $unitId !== 'all') {
+            $query->where('unit_pendidikan_id', $unitId);
         }
 
         $totalKelas = (clone $query)->count();

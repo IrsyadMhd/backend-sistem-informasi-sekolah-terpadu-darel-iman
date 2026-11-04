@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\V1\EmployeeController;
 use App\Http\Controllers\Api\V1\EQuranController;
 use App\Http\Controllers\Api\V1\FeaturePlaceholderController;
 use App\Http\Controllers\Api\V1\DivisiPendidikanDashboardController;
+use App\Http\Controllers\Api\V1\VocabularyController;
 use App\Http\Controllers\Api\V1\FoundationDashboardController;
 use App\Http\Controllers\Api\V1\GuruBkDashboardController;
 use App\Http\Controllers\Api\V1\GuruTahfizhDashboardController;
@@ -45,6 +46,7 @@ use App\Http\Controllers\Api\V1\WorshipAssessmentSettingController;
 use App\Http\Controllers\Api\V1\ParentWorshipInputController;
 use App\Http\Controllers\Api\V1\ParentController;
 use App\Http\Controllers\Api\V1\HakAksesController;
+use App\Http\Controllers\Api\V1\HelpController;
 use App\Http\Controllers\Api\V1\JabatanController;
 use App\Http\Controllers\Api\V1\JenisUnitPendidikanController;
 use App\Http\Controllers\Api\V1\KelasController;
@@ -88,6 +90,11 @@ use App\Http\Controllers\Api\V1\TeacherController;
 use App\Http\Controllers\Api\V1\TeacherPortalController;
 use App\Http\Controllers\Api\V1\TujuanPembelajaranController;
 use App\Http\Controllers\Api\V1\UserAccountController;
+use App\Http\Controllers\Api\V1\SystemMaintenanceController;
+use App\Http\Controllers\Api\V1\SupervisiKbmController;
+use App\Http\Controllers\Api\V1\KurasiSoalController;
+use App\Http\Controllers\Api\V1\MunaqasyahTahfizhController;
+use App\Http\Controllers\Api\V1\PelatihanGuruController;
 use App\Http\Controllers\Api\V1\WilayahController;
 use App\Http\Controllers\Api\V1\WorshipAttendanceController;
 use Illuminate\Support\Facades\Route;
@@ -342,6 +349,19 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/reset-defaults', [AdminNavigationController::class, 'resetDefaults']);
         });
     }
+
+    // Pusat Data, Impor-Ekspor Terpadu, Cache & Reset Database (Super Admin & Admin Only)
+    foreach (['system-maintenance', 'v1/system-maintenance'] as $smPrefix) {
+        Route::prefix($smPrefix)->middleware('role_or_permission:Super Admin|super_admin|Admin|admin|sistem.pengaturan')->group(function () {
+            Route::get('/status', [SystemMaintenanceController::class, 'status']);
+            Route::post('/optimize-clear', [SystemMaintenanceController::class, 'optimizeClear']);
+            Route::post('/reset-database', [SystemMaintenanceController::class, 'resetDatabase']);
+            Route::get('/export/{table}', [SystemMaintenanceController::class, 'export']);
+            Route::post('/import/{table}', [SystemMaintenanceController::class, 'import']);
+            Route::get('/template/{table}', [SystemMaintenanceController::class, 'template']);
+        });
+    }
+
     Route::get('/dashboard', [DashboardPemantauanController::class, 'ringkasan'])
         ->middleware('can:dashboard.pemantauan.lihat');
     Route::get('/dashboard/super-admin', [SuperAdminDashboardController::class, 'index'])
@@ -349,9 +369,43 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/kepala-sekolah', [KepalaSekolahDashboardController::class, 'index'])
         ->middleware('can:dashboard.kepala-sekolah.view');
     Route::get('/dashboard/divisi-pendidikan', [DivisiPendidikanDashboardController::class, 'index'])
-        ->middleware('can:dashboard.divisi-pendidikan.view');
+        ->middleware('role_or_permission:Super Admin|Admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Divisi Pendidikan|Kepala Bidang Pendidikan|dashboard.divisi-pendidikan.view|foundation.dashboard.view|divisi.monitoring');
     Route::get('/dashboard/divisi-pendidikan/kpi/{type}', [DivisiPendidikanDashboardController::class, 'kpiDetail'])
-        ->middleware('can:dashboard.divisi-pendidikan.view');
+        ->middleware('role_or_permission:Super Admin|Admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Divisi Pendidikan|Kepala Bidang Pendidikan|dashboard.divisi-pendidikan.view|foundation.dashboard.view|divisi.monitoring');
+
+    // Supervisi Kelas & Pembelajaran (KBM) Divisi Pendidikan
+    Route::apiResource('/divisi/supervisi-kbm', SupervisiKbmController::class);
+
+    // Standarisasi Bank Soal & Kurasi Ujian Bersama Divisi Pendidikan
+    Route::get('/divisi/kurasi-soal-options', [KurasiSoalController::class, 'options']);
+    Route::post('/divisi/kurasi-soal/{id}/approve', [KurasiSoalController::class, 'approve']);
+    Route::apiResource('/divisi/kurasi-soal', KurasiSoalController::class);
+
+    // Penjaminan Mutu & Munaqasyah Akbar Tahfizh Divisi Pendidikan
+    Route::get('/divisi/munaqasyah-tahfizh-options', [MunaqasyahTahfizhController::class, 'options']);
+    Route::apiResource('/divisi/munaqasyah-tahfizh', MunaqasyahTahfizhController::class);
+
+    // Manajemen Pelatihan Guru & Pemenuhan Jam Pelatihan (JP) Divisi Pendidikan
+    Route::get('/divisi/pelatihan-guru-options', [PelatihanGuruController::class, 'options']);
+    Route::apiResource('/divisi/pelatihan-guru', PelatihanGuruController::class);
+
+    // Workflow Review & Catatan Revisi Laporan Bulanan Unit Divisi Pendidikan
+    Route::get('/divisi/revisi-laporan-options', [\App\Http\Controllers\Api\V1\ReviewLaporanBulananController::class, 'options']);
+    Route::post('/divisi/revisi-laporan/{id}/review', [\App\Http\Controllers\Api\V1\ReviewLaporanBulananController::class, 'review']);
+    Route::apiResource('/divisi/revisi-laporan', \App\Http\Controllers\Api\V1\ReviewLaporanBulananController::class);
+
+    // Radar Kesiapan Akreditasi & Rapor Mutu SNP Unit Divisi Pendidikan
+    Route::get('/divisi/radar-akreditasi-options', [\App\Http\Controllers\Api\V1\RadarAkreditasiController::class, 'options']);
+    Route::post('/divisi/radar-akreditasi/{id}/standar', [\App\Http\Controllers\Api\V1\RadarAkreditasiController::class, 'updateStandar']);
+    Route::apiResource('/divisi/radar-akreditasi', \App\Http\Controllers\Api\V1\RadarAkreditasiController::class);
+
+    // Bank Kosakata & Setoran Pembiasaan Bahasa (Arab & Inggris)
+    Route::get('/vocabulary/banks', [VocabularyController::class, 'index']);
+    Route::post('/vocabulary/banks', [VocabularyController::class, 'store']);
+    Route::put('/vocabulary/banks/{id}/approve-principal', [VocabularyController::class, 'approveByPrincipal']);
+    Route::put('/vocabulary/banks/{id}/approve-divisi', [VocabularyController::class, 'approveByDivisi']);
+    Route::get('/vocabulary/submissions', [VocabularyController::class, 'submissions']);
+    Route::post('/vocabulary/submissions', [VocabularyController::class, 'storeSubmission']);
     Route::get('/dashboard/waka-kurikulum', [WakaKurikulumDashboardController::class, 'index'])
         ->middleware('can:dashboard.waka-kurikulum.view');
     Route::get('/dashboard/waka-kesiswaan', [WakaKesiswaanDashboardController::class, 'index'])
@@ -363,7 +417,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard/wali-kelas', [WaliKelasDashboardController::class, 'index'])
         ->middleware('permission:homeroom_attendance.dashboard|attendance.homeroom.dashboard');
     Route::get('/dashboard/guru-tahfizh', [GuruTahfizhDashboardController::class, 'index'])
-        ->middleware('can:dashboard.guru-tahfizh.view');
+        ->middleware('permission:dashboard.guru-tahfizh.view|dashboard.kepala-sekolah.view');
     Route::get('/dashboard/guru-bk', [GuruBkDashboardController::class, 'index'])
         ->middleware('can:dashboard.guru-bk.view');
     Route::get('/dashboard/operator', [OperatorDashboardController::class, 'index'])
@@ -707,6 +761,48 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:academic.curriculum.update|sistem.master_data');
         Route::apiResource('capaian-pembelajaran', CapaianPembelajaranController::class)->only(['destroy'])
             ->middleware('permission:academic.curriculum.delete|sistem.master_data');
+
+        // Master Prefix Aliases for Frontend Services
+        Route::prefix('master')->group(function () {
+            // Tahun Ajaran
+            Route::get('/tahun-ajaran/dropdown', [TahunAjaranController::class, 'dropdown']);
+            Route::get('/tahun-ajaran/stats', [TahunAjaranController::class, 'stats']);
+            Route::get('/tahun-ajaran/export', [TahunAjaranController::class, 'export']);
+            Route::post('/tahun-ajaran/import', [TahunAjaranController::class, 'import']);
+            Route::post('/tahun-ajaran/{id}/set-aktif', [TahunAjaranController::class, 'setAktif']);
+            Route::post('/tahun-ajaran/{id}/restore', [TahunAjaranController::class, 'restore']);
+            Route::apiResource('tahun-ajaran', TahunAjaranController::class);
+
+            // Kurikulum
+            Route::get('/kurikulum/dropdown', [MasterKurikulumController::class, 'dropdown']);
+            Route::get('/kurikulum/stats', [MasterKurikulumController::class, 'stats']);
+            Route::get('/kurikulum/export', [MasterKurikulumController::class, 'export']);
+            Route::post('/kurikulum/import', [MasterKurikulumController::class, 'import']);
+            Route::post('/kurikulum/{id}/restore', [MasterKurikulumController::class, 'restore']);
+            Route::apiResource('kurikulum', MasterKurikulumController::class);
+
+            // Modul Semester
+            Route::get('/modul-semester/options', [ModulSemesterController::class, 'options']);
+            Route::get('/modul-semester/stats', [ModulSemesterController::class, 'stats']);
+            Route::post('/modul-semester/{id}/restore', [ModulSemesterController::class, 'restore']);
+            Route::post('/modul-semester/{id}/duplicate', [ModulSemesterController::class, 'duplicate']);
+            Route::match(['post', 'patch'], '/modul-semester/{id}/toggle-status', [ModulSemesterController::class, 'toggleStatus']);
+            Route::apiResource('modul-semester', ModulSemesterController::class);
+
+            // Options
+            Route::get('/options/dropdown/{group}', [BusinessOptionController::class, 'dropdown']);
+            Route::match(['post', 'patch'], '/options/{id}/toggle-status', [BusinessOptionController::class, 'toggleStatus']);
+            Route::apiResource('options', BusinessOptionController::class);
+
+            // Subjects
+            Route::get('/subjects/dropdown', [SubjectController::class, 'dropdown']);
+            Route::get('/subjects/stats', [SubjectController::class, 'stats']);
+            Route::apiResource('subjects', SubjectController::class);
+
+            // Moda Transportasi
+            Route::get('/moda-transportasi/dropdown', [ModaTransportasiController::class, 'dropdown']);
+            Route::apiResource('moda-transportasi', ModaTransportasiController::class);
+        });
     });
 
     // Rute Master Hak Akses (Role & Permission — Spatie)
@@ -885,6 +981,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/foundation/profile/avatar', [ProfileController::class, 'updateAvatar']);
     Route::put('/foundation/profile/password', [ProfileController::class, 'changePassword']);
 
+    // Profile Security, Active Sessions, Activity Logs, and 2FA
+    Route::get('/profile/sessions', [ProfileController::class, 'sessions']);
+    Route::delete('/profile/sessions/{id}', [ProfileController::class, 'destroySession']);
+    Route::post('/profile/sessions/revoke-others', [ProfileController::class, 'destroyOtherSessions']);
+    Route::get('/profile/activities', [ProfileController::class, 'activities']);
+    Route::get('/profile/activities/export', [ProfileController::class, 'exportActivities']);
+    Route::get('/profile/2fa/status', [ProfileController::class, 'twoFactorStatus']);
+    Route::post('/profile/2fa/verify', [ProfileController::class, 'twoFactorVerify']);
+    Route::post('/profile/2fa/disable', [ProfileController::class, 'twoFactorDisable']);
+
+    // Help Center, FAQs, Feedback & Support Tickets
+    Route::get('/help/faqs', [HelpController::class, 'faqs']);
+    Route::post('/help/faqs/{id}/vote', [HelpController::class, 'voteFaq']);
+    Route::post('/help/tickets', [HelpController::class, 'submitTicket']);
+    Route::get('/help/manuals', [HelpController::class, 'manuals']);
+
     // =========================================================================
     // SAFE REFACTOR — Routes Baru (tidak mengubah routes di atas)
     // =========================================================================
@@ -1037,6 +1149,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Diskusi Kelas (Diskusi)
         Route::get('/diskusi/stats', [LmsDiskusiController::class, 'stats']);
         Route::get('/diskusi/options', [LmsDiskusiController::class, 'options']);
+        Route::post('/diskusi/import', [LmsDiskusiController::class, 'import']);
         Route::post('/diskusi/{id}/restore', [LmsDiskusiController::class, 'restore']);
         Route::post('/diskusi/{id}/toggle-pin', [LmsDiskusiController::class, 'togglePin']);
         Route::post('/diskusi/{id}/toggle-close', [LmsDiskusiController::class, 'toggleClose']);
@@ -1077,6 +1190,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Bank Soal (Question Bank)
         Route::get('/bank-soal/stats', [LmsBankSoalController::class, 'stats']);
         Route::get('/bank-soal/options', [LmsBankSoalController::class, 'options']);
+        Route::post('/bank-soal/import', [LmsBankSoalController::class, 'import']);
         Route::post('/bank-soal/{id}/restore', [LmsBankSoalController::class, 'restore']);
         Route::post('/bank-soal/{id}/duplicate', [LmsBankSoalController::class, 'duplicate']);
         Route::apiResource('bank-soal', LmsBankSoalController::class);
@@ -1084,6 +1198,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // CBT Ujian Online Engine
         Route::get('/ujian/stats', [LmsUjianController::class, 'stats']);
         Route::get('/ujian/options', [LmsUjianController::class, 'options']);
+        Route::post('/ujian/import', [LmsUjianController::class, 'import']);
         Route::post('/ujian/{id}/restore', [LmsUjianController::class, 'restore']);
         Route::post('/ujian/{id}/duplicate', [LmsUjianController::class, 'duplicate']);
         Route::post('/ujian/{id}/toggle-publish', [LmsUjianController::class, 'togglePublish']);
@@ -1098,6 +1213,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/penilaian/stats', [LmsPenilaianController::class, 'stats']);
         Route::get('/penilaian/options', [LmsPenilaianController::class, 'options']);
         Route::post('/penilaian/calculate-auto', [LmsPenilaianController::class, 'calculateAuto']);
+        Route::post('/penilaian/import', [LmsPenilaianController::class, 'import']);
         Route::post('/penilaian/{id}/restore', [LmsPenilaianController::class, 'restore']);
         Route::apiResource('penilaian', LmsPenilaianController::class);
 
@@ -1105,6 +1221,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/rapor/stats', [LmsRaporController::class, 'stats']);
         Route::get('/rapor/options', [LmsRaporController::class, 'options']);
         Route::post('/rapor/generate-class', [LmsRaporController::class, 'generateClass']);
+        Route::post('/rapor/import', [LmsRaporController::class, 'import']);
         Route::get('/rapor/{id}/pdf', [LmsRaporController::class, 'exportPdf']);
         Route::post('/rapor/{id}/restore', [LmsRaporController::class, 'restore']);
         Route::post('/rapor/{id}/approve', [LmsRaporController::class, 'approve']);
@@ -1147,6 +1264,10 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/attendance-logs', [TeacherPortalController::class, 'attendanceLogs'])
                 ->middleware('permission:teacher.attendance.view|teacher.dashboard.view|tu.dashboard.view|dashboard.tata_usaha|employee.view|staff.view');
             Route::post('/attendance', [TeacherPortalController::class, 'saveAttendance'])
+                ->middleware('permission:teacher.attendance.create|lesson_attendance.create|kehadiran.siswa.absensi_digital|tu.dashboard.view|dashboard.tata_usaha');
+            Route::get('/pending-journals', [TeacherPortalController::class, 'pendingJournals'])
+                ->middleware('permission:teacher.attendance.view|lesson_attendance.view|teacher.dashboard.view|dashboard.tata_usaha');
+            Route::post('/sessions/{session}/journal', [TeacherPortalController::class, 'saveSessionJournal'])
                 ->middleware('permission:teacher.attendance.create|lesson_attendance.create|kehadiran.siswa.absensi_digital|tu.dashboard.view|dashboard.tata_usaha');
             Route::get('/permissions', [AttendanceWorkflowController::class, 'teacherPermissions'])
                 ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission|kehadiran.siswa.monitoring|attendance.view|attendance_permission.review');
@@ -1260,6 +1381,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/notifications', [StudentParentPortalController::class, 'notifications']);
             Route::post('/notifications/mark-all-read', [StudentParentPortalController::class, 'markAllNotificationsRead']);
             Route::get('/bills', [StudentParentPortalController::class, 'bills']);
+            Route::post('/bills/pay-va', [StudentParentPortalController::class, 'createVaPayment']);
             Route::get('/reports', [StudentParentPortalController::class, 'reports']);
             Route::get('/reports/{id}/download', [StudentParentPortalController::class, 'downloadReport']);
 

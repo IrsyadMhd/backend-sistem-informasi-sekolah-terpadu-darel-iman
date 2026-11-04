@@ -31,6 +31,13 @@ class NavigationService
         $result = [];
 
         foreach ($modules as $module) {
+            // Sembunyikan seluruh modul Pengaturan untuk role Kepala Sekolah
+            if ($module->id === 'pengaturan' && RoleName::userHasAny($user, [
+                'kepala sekolah', 'kepala_sekolah', 'kepsek',
+            ])) {
+                continue;
+            }
+
             $accessibleMenus = [];
 
             foreach ($module->menus as $menu) {
@@ -165,7 +172,20 @@ class NavigationService
             }
         }
 
-        // 6. Evaluate database permissions via Laravel Gate for other modules
+        // 6. Strict scoping untuk modul dan menu Pengaturan:
+        // Role Kepala Sekolah dilarang mengakses modul maupun menu pengaturan institusi.
+        if ($menu->module_id === 'pengaturan'
+            || str_starts_with((string) $menu->path, '/dashboard/pengaturan')
+            || in_array($menu->id, ['set-sekolah', 'master-opsi-bisnis', 'set-mobile', 'pengaturan-info-sekolah', 'pengaturan-menu-navigasi', 'pengaturan-pusat-data-sistem'], true)) {
+            $isKepalaSekolah = RoleName::userHasAny($user, [
+                'kepala sekolah', 'kepala_sekolah', 'kepsek',
+            ]);
+            if ($isKepalaSekolah) {
+                return false;
+            }
+        }
+
+        // 7. Evaluate database permissions via Laravel Gate for other modules
         // Gate::before natively handles Super Admin bypass.
         $requiredPermissions = (array) $menu->required_permissions;
 

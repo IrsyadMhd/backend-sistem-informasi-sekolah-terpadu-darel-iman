@@ -15,9 +15,10 @@ class SipdeiBillingService
 
     public function __construct()
     {
-        $this->baseUrl = (string) config('services.sipdei.base_url', 'https://sipdei.dareliman.tech');
-        $this->apiKey = config('services.sipdei.api_key');
-        $this->cacheTtl = (int) config('services.sipdei.cache_ttl', 600);
+        $setting = \App\Models\SiteSetting::current();
+        $this->baseUrl = (string) ($setting->sipdei_base_url ?: config('services.sipdei.base_url', 'https://sipdei.dareliman.tech'));
+        $this->apiKey = $setting->sipdei_api_key ?: config('services.sipdei.api_key');
+        $this->cacheTtl = (int) ($setting->sipdei_cache_ttl ?: config('services.sipdei.cache_ttl', 600));
     }
 
     /**
@@ -238,5 +239,134 @@ class SipdeiBillingService
         }
 
         return $formatted;
+    }
+
+    /**
+     * Membuat instruksi pembayaran via Virtual Account Bank Nagari atau BSI pada SIPDEI.
+     *
+     * @param string $nisPembayaran
+     * @param string $bank 'NAGARI' atau 'BSI'
+     * @param array $items Array dari item: ['jenis' => 'TAGIHAN'|'TUNGGAKAN'|'DANA_ORTU_ASUH', 'id' => int, 'bayar' => int]
+     * @return array
+     */
+    public function createVaPayment(string $nisPembayaran, string $bank, array $items): array
+    {
+        $cleanNis = trim($nisPembayaran);
+        if ($cleanNis === '') {
+            return [
+                'success' => false,
+                'status_code' => 400,
+                'message' => 'NIS Pembayaran tidak valid atau kosong.',
+                'data' => null,
+            ];
+        }
+
+        if (!$this->isConfigured()) {
+            return [
+                'success' => false,
+                'status_code' => 503,
+                'message' => 'Layanan SIPDEI belum dikonfigurasi di server. Silakan hubungi Super Admin / Admin untuk memasukkan API Key pada Pengaturan Sistem.',
+                'data' => null,
+            ];
+        }
+
+        $bankUpper = strtoupper(trim($bank));
+        if (!in_array($bankUpper, ['NAGARI', 'BSI'])) {
+            return [
+                'success' => false,
+                'status_code' => 422,
+                'message' => 'Bank yang dipilih tidak valid. Pilihan yang didukung: NAGARI atau BSI.',
+                'data' => null,
+            ];
+        }
+
+        if (empty($items)) {
+            return [
+                'success' => false,
+                'status_code' => 422,
+                'message' => 'Pilih setidaknya satu tagihan yang akan dibayar.',
+                'data' => null,
+            ];
+        }
+
+        // Validasi dan sanitasi item sesuai spek SIPDEI
+        $sanitizedItems = [];
+        foreach ($items as $item) {
+            $jenis = strtoupper((string) ($item['jenis'] ?? 'TAGIHAN'));
+            if (!in_array($jenis, ['TAGIHAN', 'TUNGGAKAN', 'DANA_ORTU_ASUH'])) {
+                $jenis = 'TAGIHAN';
+            }
+
+            $sanitizedItems[] = [
+                'jenis' => $jenis,
+                'id' => (int) ($item['id'] ?? 0),
+                'bayar' => (int) ($item['bayar'] ?? 0),
+            ];
+        }
+
+        $endpoint = rtrim($this->baseUrl, '/') . '/api/partner/tagihan-siswa/' . rawurlencode($cleanNis) . '/pembayaran-va';
+
+        try {
+            $response = Http::withHeaders([
+                'X-API-Key' => $this->apiKey,
+                'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
+            ])
+                ->timeout(15)
+                ->post($endpoint, [
+                    'bank' => $bankUpper,
+                    'items' => $sanitizedItems,
+                ]);
+
+            $statusCode = $response->status();
+            $body = $response->json();
+
+            if ($response->successful()) {
+                return [
+                    'success' => true,
+                    'status_code' => 200,
+                    'message' => 'Nomor Virtual Account resmi berhasil diterbitkan oleh SIPDEI.',
+                    'data' => $body['data'] ?? [],
+                ];
+            }
+
+            $errorMessage = match ($statusCode) {
+                401 => 'Autentikasi SIPDEI gagal (X-API-Key tidak valid atau kedaluwarsa).',
+                404 => $body['message'] ?? 'NIS Pembayaran tidak ditemukan di SIPDEI atau daftar ulang belum disetujui.',
+                409 => 'NIS Pembayaran menunjuk lebih dari satu data siswa di SIPDEI.',
+                422 => $body['message'] ?? 'Data item atau nominal bayar tidak valid sesuai ketentuan SIPDEI.',
+                429 => 'Terlalu banyak permintaan pembuatan VA ke server SIPDEI (Maks 5/menit). Mohon tunggu sejenak.',
+                502 => 'Nomor VA atau kode biller siswa belum dapat dibentuk di SIPDEI. Hubungi pengelola yayasan.',
+                503 => 'Layanan pembuatan VA SIPDEI sedang dalam pemeliharaan.',
+                default => $body['message'] ?? 'Gagal membuat pembayaran VA di server SIPDEI (Kode: ' . $statusCode . ').',
+            };
+
+            Log::warning('SIPDEI Create VA Payment non-200 response', [
+                'nis' => $cleanNis,
+                'bank' => $bankUpper,
+                'status' => $statusCode,
+                'body' => $body,
+            ]);
+
+            return [
+                'success' => false,
+                'status_code' => $statusCode,
+                'message' => $errorMessage,
+                'errors' => $body['errors'] ?? null,
+                'data' => null,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('SIPDEI Create VA Payment Exception', [
+                'nis' => $cleanNis,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'status_code' => 500,
+                'message' => 'Gagal terhubung ke server SIPDEI untuk membuat pembayaran Virtual Account: ' . $e->getMessage(),
+                'data' => null,
+            ];
+        }
     }
 }

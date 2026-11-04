@@ -37,7 +37,7 @@ class SubjectResource extends JsonResource
             'nama_singkat' => $this->nama_singkat ?? $this->kode_mapel ?? $this->code,
             'code' => $this->code ?? $this->kode_mapel,
             'name' => $this->name ?? $this->nama_mapel,
-            'kelompok_mapel' => $this->kelompok_mapel ?? 'Kelompok A',
+            'kelompok_mapel' => $this->kelompok_mapel ?? 'Pelajaran Wajib',
             'kategori' => $this->kategori ?? 'Wajib',
             'jenjang' => $this->jenjang ?? 'SD',
             'tingkat_kelas' => $this->tingkat_kelas ?? 'All',

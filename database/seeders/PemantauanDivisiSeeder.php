@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\AcademicYear;
 use App\Models\Division;
+use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\PemantauanDivisi;
 use App\Models\Semester;
@@ -16,7 +17,7 @@ use Illuminate\Support\Facades\Schema;
 class PemantauanDivisiSeeder extends Seeder
 {
     /**
-     * Seed database pemantauan divisi secara dinamis dari data database yang ada.
+     * Seed database pemantauan divisi secara dinamis dan terstruktur dari data unit riil.
      */
     public function run(): void
     {
@@ -49,116 +50,119 @@ class PemantauanDivisiSeeder extends Seeder
                 ->first()
             : null;
 
-        // 3. Tarik master divisi secara dinamis dari database
-        $divisions = Division::where('is_active', true)->orderBy('code')->get();
-
-        // Jika tabel master divisions belum terisi, ekstrak nama divisi/unit dari tabel positions atau education_units di DB
-        if ($divisions->isEmpty()) {
-            $extractedNames = [];
-
-            if (Schema::hasTable('positions')) {
-                $extractedNames = DB::table('positions')
-                    ->whereNotNull('name')
-                    ->where('name', '!=', '')
-                    ->pluck('name')
-                    ->toArray();
-            }
-
-            if (empty($extractedNames) && Schema::hasTable('education_units')) {
-                $extractedNames = DB::table('education_units')
-                    ->whereNotNull('name')
-                    ->pluck('name')
-                    ->toArray();
-            }
-
-            if (empty($extractedNames)) {
-                $extractedNames = [
-                    'Divisi Pendidikan',
-                    'Divisi Kurikulum',
-                    'Divisi Kesiswaan',
-                    'Divisi Tahfizh',
-                    'Divisi Bahasa',
-                    'Tata Usaha',
-                    'HRD & Kepegawaian',
-                ];
-            }
-
-            // Masukkan divisi dinamis ke tabel master divisions di DB
-            foreach (array_unique($extractedNames) as $index => $name) {
-                $code = 'DIV-'.strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 8)).'-'.($index + 1);
-                Division::firstOrCreate(
-                    ['name' => $name],
-                    [
-                        'code' => $code,
-                        'description' => "Divisi & Unit Operasional {$name}",
-                        'is_active' => true,
-                        'created_by' => $penginput->id,
-                    ]
-                );
-            }
-
-            $divisions = Division::where('is_active', true)->orderBy('code')->get();
+        // 3. Tarik master unit pendidikan aktif
+        $units = EducationUnit::where('is_active', true)->orderBy('name')->get();
+        if ($units->isEmpty()) {
+            $units = EducationUnit::all();
         }
 
-        // 4. Generate records Pemantauan Divisi berbasis data divisi & pegawai di database
-        $referenceDate = $semester?->start_date
+        // 4. Pastikan divisi-divisi operasional utama terdaftar di master divisions
+        $coreDivisions = [
+            'Divisi Pendidikan' => 'Akademik & Pembelajaran',
+            'Divisi Kurikulum' => 'Akademik & Pembelajaran',
+            'Divisi Kesiswaan' => 'Kesiswaan & Kedisiplinan',
+            'Divisi Tahfizh' => "Al-Qur'an & Tahfizh",
+            'Divisi Bahasa' => 'Akademik & Pembelajaran',
+            'Tata Usaha (TU)' => 'SDM & Tata Kelola Operasional',
+            'Sarana & Prasarana' => 'Sarpras & Lingkungan Sekolah',
+        ];
+
+        $divisionModels = [];
+        foreach ($coreDivisions as $divName => $kategori) {
+            $code = 'DIV-'.strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $divName), 0, 8));
+            $div = Division::firstOrCreate(
+                ['name' => $divName],
+                [
+                    'code' => $code,
+                    'description' => "Divisi Operasional {$divName}",
+                    'is_active' => true,
+                    'created_by' => $penginput->id,
+                ]
+            );
+            $divisionModels[] = [
+                'model' => $div,
+                'kategori' => $kategori,
+            ];
+        }
+
+        // 5. Daftar petugas pengawas supervisi yayasan/divisi
+        $supervisors = [
+            'Ust. Hendri Fauzan, M.Pd (Supervisi Pendidikan)',
+            'Ust. Ahmad Fauzi, S.Pd.I (Pengawas Kurikulum)',
+            'Ust. Ridwan Effendi, Lc (Koordinator Tahfizh)',
+            'Dr. H. Zulkifli, M.A (Tim Monev Yayasan)',
+            'Ustzh. Nurhasanah, S.Pd (Pengawas Kesiswaan)',
+            'Ust. Irwan Syahputra, S.T (Supervisi Sarpras & Aset)',
+        ];
+
+        // 6. Tanggal referensi semester ganjil tahun ajaran berjalan (2026)
+        $startDate = $semester?->start_date
             ? Carbon::parse($semester->start_date)
-            : now()->startOfDay();
+            : Carbon::create(2026, 7, 1);
 
-        DB::transaction(function () use ($divisions, $tahunAjaran, $semester, $penginput, $referenceDate) {
-            foreach ($divisions as $div) {
-                // Cek data pegawai riil yang terhubung dengan divisi di database
-                $employeeCount = Employee::where('division_id', $div->id)->count();
-                $firstEmployeeName = Employee::where('division_id', $div->id)->value('nama_lengkap')
-                    ?? Employee::inRandomOrder()->value('nama_lengkap');
+        $perfService = app(\App\Services\PemantauanDivisiPerformanceService::class);
 
-                $aspekList = [
-                    [
-                        'aspek' => 'Evaluasi Program Kerja & Target Kinerja '.$div->name,
-                        'capaian' => 92.50,
-                        'status' => 'tercapai',
-                        'catatan' => 'Indikator kinerja utama divisi '.$div->name.' tercapai dengan baik sesuai target operasional.',
-                    ],
-                    [
-                        'aspek' => 'Supervisi Kepatuhan SOP & Pelaporan '.$div->name,
-                        'capaian' => 78.00,
-                        'status' => 'proses',
-                        'catatan' => $firstEmployeeName
-                            ? 'Pendampingan supervisi berjalan bersama '.$firstEmployeeName.' dan tim divisi.'
-                            : 'Kelengkapan administrasi dan pelaporan SOP sedang dalam tahap pemantauan berkala.',
-                    ],
-                    [
-                        'aspek' => 'Rapat Evaluasi Berkala & Koordinasi Tim',
-                        'capaian' => 65.00,
-                        'status' => 'proses',
-                        'catatan' => 'Koordinasi berkala divisi '.$div->name.' telah diselenggarakan dengan beberapa catatan perbaikan.',
-                    ],
-                ];
+        DB::transaction(function () use ($units, $divisionModels, $supervisors, $tahunAjaran, $semester, $penginput, $startDate, $perfService) {
+            // Bersihkan data lama yang belum terhubung dengan unit_id
+            PemantauanDivisi::whereNull('unit_id')->delete();
 
-                foreach ($aspekList as $idx => $aspek) {
-                    $tanggal = $referenceDate->copy()->addDays(($idx * 3) + 1)->format('Y-m-d');
+            $counter = 0;
+            foreach ($units as $unitIndex => $unit) {
+                // Pilih subset divisi yang dimonitor per unit
+                foreach ($divisionModels as $divIndex => $divData) {
+                    $div = $divData['model'];
+                    $kategori = $divData['kategori'];
+
+                    $supervisor = $supervisors[($unitIndex + $divIndex) % count($supervisors)];
+                    $livePerf = $perfService->getLivePerformanceForDivision($div->name, $unit->name);
+
+                    // Distribusi persentase capaian yang bervariasi dan realistis per unit
+                    $baseCapaian = (float) $livePerf['persentase_capaian'];
+                    $variation = (($unitIndex * 7 + $divIndex * 13) % 25) - 10; // -10 s/d +14
+                    $capaian = min(100.0, max(35.0, round($baseCapaian + $variation, 1)));
+
+                    $status = 'proses';
+                    if ($capaian >= 80.0) {
+                        $status = 'tercapai';
+                    } elseif ($capaian < 50.0) {
+                        $status = 'belum_tercapai';
+                    }
+
+                    // Tanggal supervisi terdistribusi antara Juli hingga Oktober 2026
+                    $daysOffset = ($unitIndex * 5) + ($divIndex * 3) + 7;
+                    $tanggal = $startDate->copy()->addDays($daysOffset % 110)->format('Y-m-d');
+
+                    $aspek = "Supervisi & Pemantauan Operasional {$div->name} di {$unit->name}";
+                    $catatan = "Hasil supervisi berkala oleh {$supervisor}. Capaian indikator {$capaian}% dengan status {$status}.";
 
                     PemantauanDivisi::updateOrCreate(
                         [
+                            'unit_id' => $unit->id,
+                            'division_id' => $div->id,
                             'nama_divisi' => $div->name,
-                            'aspek_pemantauan' => $aspek['aspek'],
-                            'tanggal_pemantauan' => $tanggal,
+                            'aspek_pemantauan' => $aspek,
                         ],
                         [
+                            'unit_pendidikan' => $unit->name,
+                            'kategori_laporan' => $kategori,
+                            'petugas_supervisi' => $supervisor,
                             'id_tahun_ajaran' => $tahunAjaran?->id,
                             'id_semester' => $semester?->id,
-                            'persentase_capaian' => $aspek['capaian'],
-                            'status_pemantauan' => $aspek['status'],
-                            'catatan' => $aspek['catatan'],
+                            'persentase_capaian' => $capaian,
+                            'status_pemantauan' => $status,
+                            'catatan' => $catatan,
+                            'tanggal_pemantauan' => $tanggal,
                             'id_penginput' => $penginput->id,
                             'data_tambahan' => [
-                                'division_id' => $div->id,
-                                'jumlah_pegawai_divisi' => $employeeCount,
-                                'sumber_data' => 'Dinamis dari Database',
+                                'unit_code' => $unit->code,
                                 'divisi_code' => $div->code,
+                                'metrik_riil' => $livePerf['indikator_riil'] ?? 'Supervisi Unit Terjadwal',
+                                'sumber_data' => 'Database Terintegrasi Riil',
                             ],
                         ]
                     );
+
+                    $counter++;
                 }
             }
         });

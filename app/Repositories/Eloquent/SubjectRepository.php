@@ -115,14 +115,19 @@ class SubjectRepository implements SubjectRepositoryInterface
         return (bool) $subject->restore();
     }
 
-    public function getStats(): array
+    public function getStats(?string $unitId = null): array
     {
-        $total = Subject::count();
-        $aktif = Subject::where('status', true)->count();
-        $tidakAktif = Subject::where('status', false)->count();
-        $terhapus = Subject::onlyTrashed()->count();
+        $query = Subject::query();
+        if (! empty($unitId) && $unitId !== 'all' && $unitId !== 'semua') {
+            $query->where('unit_pendidikan_id', $unitId);
+        }
 
-        $perKelompok = Subject::selectRaw('kelompok_mapel, count(*) as count')
+        $total = (clone $query)->count();
+        $aktif = (clone $query)->where('status', true)->count();
+        $tidakAktif = (clone $query)->where('status', false)->count();
+        $terhapus = (clone $query)->onlyTrashed()->count();
+
+        $perKelompok = (clone $query)->selectRaw('kelompok_mapel, count(*) as count')
             ->groupBy('kelompok_mapel')
             ->pluck('count', 'kelompok_mapel')
             ->toArray();

@@ -30,7 +30,8 @@ class LmsDiskusiController extends Controller
     {
         $user = $request->user();
         $this->authorizeView($user);
-        $filters = $request->only(['search', 'modul_ajar_id', 'kategori', 'status']);
+        $filters = $request->only(['search', 'modul_ajar_id', 'kategori', 'status', 'unit_pendidikan_id']);
+        $requestedUnitId = $request->get('unit_pendidikan_id') ?? $request->get('unit_id');
         if ($this->isTeacher($user)) {
             $filters['guru_id'] = $this->teacherEmployeeId($user);
         } elseif ($this->isStudent($user)) {
@@ -38,8 +39,14 @@ class LmsDiskusiController extends Controller
             $filters['published_only'] = true;
         } elseif (! $this->canAccessAllUnits($user)) {
             $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
-            $filters['unit_ids'] = $allowedUnitIds;
+            if ($requestedUnitId) {
+                $filters['unit_ids'] = in_array($requestedUnitId, $allowedUnitIds, true) ? [$requestedUnitId] : $allowedUnitIds;
+            } else {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
             $filters['kelas_ids'] = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+        } elseif ($requestedUnitId) {
+            $filters['unit_pendidikan_id'] = $requestedUnitId;
         }
         $perPage = (int) $request->get('per_page', 15);
         $orderBy = $request->get('order_by', 'created_at');
@@ -288,9 +295,15 @@ class LmsDiskusiController extends Controller
             $this->isTeacher($user) ? $this->teacherEmployeeId($user) : null
         );
 
+        $units = $this->accessScope->accessibleEducationUnits($user)
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
+
         return response()->json([
             'success' => true,
             'data' => [
+                'units' => $units,
                 'modul_ajar' => $modulOptions,
                 'modul_ajar_options' => $modulOptions,
                 'kategori' => [
@@ -448,5 +461,65 @@ class LmsDiskusiController extends Controller
         }
 
         return true;
+    }
+
+    /**
+     * Impor topik diskusi massal dari berkas CSV/XLSX.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|max:5120',
+        ]);
+
+        $file = $request->file('file');
+        $path = $file->getRealPath();
+        $content = file_get_contents($path);
+
+        $lines = preg_split('/\r\n|\r|\n/', trim($content));
+        if (empty($lines)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Berkas CSV kosong.',
+            ], 422);
+        }
+
+        $header = str_getcsv(array_shift($lines));
+        $importedCount = 0;
+        $defaultModul = LmsModulAjar::first();
+
+        foreach ($lines as $line) {
+            if (empty(trim($line))) continue;
+            $row = str_getcsv($line);
+            if (count($row) < 2) continue;
+
+            $judul = trim($row[0] ?? '');
+            $deskripsi = trim($row[1] ?? '');
+            $kategori = trim($row[2] ?? 'Umum');
+            $status = trim($row[3] ?? 'published');
+
+            if (!$judul) continue;
+
+            LmsDiskusi::create([
+                'modul_ajar_id' => $defaultModul?->id,
+                'judul' => $judul,
+                'deskripsi' => $deskripsi ?: $judul,
+                'kategori' => $kategori ?: 'Umum',
+                'status' => in_array($status, ['draft', 'published', 'archived']) ? $status : 'published',
+                'is_pinned' => false,
+                'is_closed' => false,
+                'tanggal_mulai' => now(),
+            ]);
+
+            $importedCount++;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Berhasil mengimpor {$importedCount} topik forum diskusi.",
+            'data' => [
+                'imported_count' => $importedCount,
+            ],
+        ]);
     }
 }

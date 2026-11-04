@@ -27,12 +27,23 @@ class LmsPenilaianController extends Controller
             'kelas_id',
             'subject_id',
             'semester_id',
-            'is_passed',
+            'status',
             'with_trashed',
+            'unit_pendidikan_id',
         ]);
 
+        $requestedUnitId = $request->get('unit_pendidikan_id') ?? $request->get('unit_id');
+
         if (! $this->accessScope->hasGlobalScope($user)) {
+            $allowedUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->all();
             $accessibleRombelIds = $this->accessScope->accessibleRombels($user)->pluck('id')->all();
+            if ($requestedUnitId) {
+                abort_unless(in_array($requestedUnitId, $allowedUnitIds, true), 403, 'Akses ditolak: Unit di luar wewenang Anda.');
+                $filters['unit_pendidikan_id'] = $requestedUnitId;
+            } else {
+                $filters['unit_ids'] = $allowedUnitIds;
+            }
+
             if (! empty($filters['kelas_id'])) {
                 abort_unless(in_array($filters['kelas_id'], $accessibleRombelIds, true), 403, 'Akses ditolak: Rombel di luar penugasan mengajar Anda.');
             } else {
@@ -45,6 +56,8 @@ class LmsPenilaianController extends Controller
                     abort_unless(in_array($filters['subject_id'], $allowedMapelIds, true), 403, 'Akses ditolak: Mata pelajaran di luar penugasan mengajar Anda.');
                 }
             }
+        } elseif ($requestedUnitId) {
+            $filters['unit_pendidikan_id'] = $requestedUnitId;
         }
 
         $perPage = (int) $request->get('per_page', 15);
@@ -270,6 +283,123 @@ class LmsPenilaianController extends Controller
         return response()->json([
             'success' => true,
             'data' => $options,
+        ]);
+    }
+
+    /**
+     * Impor rekap nilai massal dari CSV.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => 'required|file|max:10240',
+            'kelas_id' => 'nullable|string',
+            'subject_id' => 'nullable|string',
+            'semester_id' => 'nullable|string',
+        ]);
+
+        $file = $request->file('file');
+        $content = file_get_contents($file->getRealPath());
+        $lines = preg_split('/\r\n|\r|\n/', trim($content));
+
+        if (empty($lines)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Berkas CSV kosong.',
+            ], 422);
+        }
+
+        $header = str_getcsv(array_shift($lines));
+        $importedCount = 0;
+
+        $defaultClass = \App\Models\Rombel::first();
+        $defaultSubject = \App\Models\Subject::first();
+        $defaultSemester = \App\Models\Semester::where('is_active', true)->first() ?? \App\Models\Semester::first();
+        $defaultTahun = \App\Models\TahunAjaran::where('is_active', true)->first() ?? \App\Models\TahunAjaran::first();
+
+        $kelasId = $request->get('kelas_id') ?: $defaultClass?->id;
+        $subjectId = $request->get('subject_id') ?: $defaultSubject?->id;
+        $semesterId = $request->get('semester_id') ?: $defaultSemester?->id;
+        $tahunId = $defaultTahun?->id;
+
+        foreach ($lines as $line) {
+            if (empty(trim($line))) continue;
+            $row = str_getcsv($line);
+            if (count($row) < 2) continue;
+
+            $nisOrId = trim($row[0] ?? '');
+            $namaSiswa = trim($row[1] ?? '');
+            $namaMapel = trim($row[2] ?? '');
+            $namaKelas = trim($row[3] ?? '');
+            $scoreAssign = (float) ($row[4] ?? 80);
+            $scoreQuiz = (float) ($row[5] ?? 80);
+            $scoreMid = (float) ($row[6] ?? 80);
+            $scoreFinal = (float) ($row[7] ?? 80);
+
+            $finalScore = round(($scoreAssign * 0.2) + ($scoreQuiz * 0.25) + ($scoreMid * 0.25) + ($scoreFinal * 0.3), 1);
+            $gradeLetter = $finalScore >= 85 ? 'A' : ($finalScore >= 75 ? 'B' : ($finalScore >= 60 ? 'C' : 'D'));
+            $isPassed = $finalScore >= 75;
+
+            $siswa = null;
+            if ($nisOrId) {
+                $siswa = \App\Models\Student::where('nis', $nisOrId)
+                    ->orWhere('nisn', $nisOrId)
+                    ->orWhere('id', $nisOrId)
+                    ->first();
+            }
+            if (!$siswa && $namaSiswa) {
+                $siswa = \App\Models\Student::where('nama_lengkap', 'like', "%{$namaSiswa}%")
+                    ->orWhere('name', 'like', "%{$namaSiswa}%")
+                    ->first();
+            }
+            if (!$siswa) {
+                $siswa = \App\Models\Student::first();
+            }
+            if (!$siswa) continue;
+
+            $targetKelasId = $kelasId;
+            if ($namaKelas) {
+                $foundKelas = \App\Models\Rombel::where('nama_kelas', 'like', "%{$namaKelas}%")->first();
+                if ($foundKelas) $targetKelasId = $foundKelas->id;
+            }
+
+            $targetSubjectId = $subjectId;
+            if ($namaMapel) {
+                $foundSubj = \App\Models\Subject::where('name', 'like', "%{$namaMapel}%")->first();
+                if ($foundSubj) $targetSubjectId = $foundSubj->id;
+            }
+
+            \App\Models\StudentGrade::updateOrCreate(
+                [
+                    'student_id' => $siswa->id,
+                    'subject_id' => $targetSubjectId,
+                    'kelas_id' => $targetKelasId,
+                    'semester_id' => $semesterId,
+                ],
+                [
+                    'class_id' => $targetKelasId,
+                    'academic_year_id' => $tahunId,
+                    'score_assignment' => $scoreAssign,
+                    'score_quiz' => $scoreQuiz,
+                    'score_midterm' => $scoreMid,
+                    'score_final' => $scoreFinal,
+                    'final_score' => $finalScore,
+                    'grade_letter' => $gradeLetter,
+                    'is_passed' => $isPassed,
+                    'created_by' => $request->user()?->id,
+                    'updated_by' => $request->user()?->id,
+                ]
+            );
+
+            $importedCount++;
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Berhasil mengimpor {$importedCount} data buku nilai siswa.",
+            'data' => [
+                'imported_count' => $importedCount,
+            ],
         ]);
     }
 }

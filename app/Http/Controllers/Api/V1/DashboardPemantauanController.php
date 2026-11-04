@@ -147,32 +147,102 @@ class DashboardPemantauanController extends Controller
         return new RingkasanDashboardPemantauanResource($cachedData);
     }
 
+    private function isDivisiRestrictedUser(?\App\Models\User $user): bool
+    {
+        if (! $user) {
+            return false;
+        }
+
+        if ($user->is_superadmin) {
+            return false;
+        }
+
+        // Pengurus Yayasan dan Super Admin berhak memonitor seluruh struktur
+        if ($user->hasAnyRole(['Super Admin', 'Admin', 'Yayasan', 'Ketua Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Pengurus Yayasan'])) {
+            return false;
+        }
+
+        // Divisi Pendidikan hanya memonitor kepala sekolah dan pegawai guru di seluruh unit, BUKAN pengurus yayasan
+        return $user->hasRole('Divisi Pendidikan') ||
+            $user->roles()->where('name', 'ilike', '%divisi%')->exists();
+    }
+
     public function daftarPemantauanDivisi(DaftarPemantauanDashboardRequest $request): JsonResponse
     {
         $this->pastikanHakAkses($request);
+        $isDivisi = $this->isDivisiRestrictedUser($request->user());
+        $perfService = app(\App\Services\PemantauanDivisiPerformanceService::class);
 
-        $data = PemantauanDivisi::query()
+        $paginator = PemantauanDivisi::query()
+            ->with(['unit:id,name,code', 'division:id,name,code'])
+            ->when($isDivisi, function ($query) {
+                // Divisi Pendidikan tidak berhak memonitoring pengurus yayasan
+                $query->where('nama_divisi', 'not ilike', '%yayasan%');
+            })
+            ->when($request->filled('unit_id') && $request->validated('unit_id') !== 'all', function ($query) use ($request) {
+                $uid = (string) $request->validated('unit_id');
+                $query->where(function ($q) use ($uid) {
+                    $q->where('unit_id', $uid)
+                      ->orWhere('unit_pendidikan', $uid);
+                });
+            })
+            ->when($request->filled('unit_pendidikan') && $request->validated('unit_pendidikan') !== 'all', function ($query) use ($request) {
+                $query->where('unit_pendidikan', $request->validated('unit_pendidikan'));
+            })
+            ->when($request->filled('nama_divisi') && $request->validated('nama_divisi') !== 'all', function ($query) use ($request) {
+                $query->where('nama_divisi', 'ilike', '%' . $request->validated('nama_divisi') . '%');
+            })
+            ->when($request->filled('status_pemantauan') && $request->validated('status_pemantauan') !== 'all', function ($query) use ($request) {
+                $query->where('status_pemantauan', $request->validated('status_pemantauan'));
+            })
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = (string) $request->validated('search');
                 $query->where(function ($inner) use ($search) {
                     $inner->where('nama_divisi', 'ilike', "%{$search}%")
                         ->orWhere('aspek_pemantauan', 'ilike', "%{$search}%")
-                        ->orWhere('status_pemantauan', 'ilike', "%{$search}%");
+                        ->orWhere('status_pemantauan', 'ilike', "%{$search}%")
+                        ->orWhere('unit_pendidikan', 'ilike', "%{$search}%")
+                        ->orWhere('petugas_supervisi', 'ilike', "%{$search}%")
+                        ->orWhere('catatan', 'ilike', "%{$search}%");
                 });
             })
             ->latest('tanggal_pemantauan')
             ->paginate((int) $request->validated('per_page', 15));
 
-        return response()->json($data);
+        $paginator->getCollection()->transform(function ($item) {
+            if (empty($item->unit_pendidikan) && $item->unit) {
+                $item->unit_pendidikan = $item->unit->name;
+            }
+            return $item;
+        });
+
+        return response()->json($paginator);
     }
 
     public function simpanPemantauanDivisi(SimpanPemantauanDivisiRequest $request): JsonResponse
     {
         $this->pastikanHakAkses($request, true);
 
-        $model = DB::transaction(function () use ($request) {
+        if ($this->isDivisiRestrictedUser($request->user()) && preg_match('/yayasan/i', (string) $request->input('nama_divisi'))) {
+            abort(403, 'Divisi Pendidikan tidak berhak memantau atau menginput pemantauan Pengurus Yayasan. Anda hanya berwenang memonitor Kepala Sekolah dan Pegawai/Guru di seluruh unit.');
+        }
+
+        $validated = $request->validated();
+        if (empty($validated['unit_id']) && !empty($validated['unit_pendidikan'])) {
+            $unit = \App\Models\EducationUnit::where('name', $validated['unit_pendidikan'])->orWhere('code', $validated['unit_pendidikan'])->first();
+            if ($unit) {
+                $validated['unit_id'] = $unit->id;
+            }
+        } elseif (!empty($validated['unit_id']) && empty($validated['unit_pendidikan'])) {
+            $unit = \App\Models\EducationUnit::find($validated['unit_id']);
+            if ($unit) {
+                $validated['unit_pendidikan'] = $unit->name;
+            }
+        }
+
+        $model = DB::transaction(function () use ($validated, $request) {
             return PemantauanDivisi::query()->create([
-                ...$request->validated(),
+                ...$validated,
                 'id_penginput' => $request->user()->id,
             ]);
         });
@@ -184,16 +254,38 @@ class DashboardPemantauanController extends Controller
     {
         $this->pastikanHakAkses($request);
 
-        return response()->json(PemantauanDivisi::query()->findOrFail($id));
+        $model = PemantauanDivisi::query()->findOrFail($id);
+        if ($this->isDivisiRestrictedUser($request->user()) && preg_match('/yayasan/i', (string) $model->nama_divisi)) {
+            abort(403, 'Divisi Pendidikan tidak berhak mengakses data pemantauan Pengurus Yayasan.');
+        }
+
+        return response()->json($model);
     }
 
     public function ubahPemantauanDivisi(SimpanPemantauanDivisiRequest $request, string $id): JsonResponse
     {
         $this->pastikanHakAkses($request, true);
 
-        $model = DB::transaction(function () use ($request, $id) {
+        if ($this->isDivisiRestrictedUser($request->user()) && preg_match('/yayasan/i', (string) $request->input('nama_divisi'))) {
+            abort(403, 'Divisi Pendidikan tidak berhak mengelola data pemantauan Pengurus Yayasan.');
+        }
+
+        $validated = $request->validated();
+        if (empty($validated['unit_id']) && !empty($validated['unit_pendidikan'])) {
+            $unit = \App\Models\EducationUnit::where('name', $validated['unit_pendidikan'])->orWhere('code', $validated['unit_pendidikan'])->first();
+            if ($unit) {
+                $validated['unit_id'] = $unit->id;
+            }
+        } elseif (!empty($validated['unit_id']) && empty($validated['unit_pendidikan'])) {
+            $unit = \App\Models\EducationUnit::find($validated['unit_id']);
+            if ($unit) {
+                $validated['unit_pendidikan'] = $unit->name;
+            }
+        }
+
+        $model = DB::transaction(function () use ($validated, $id) {
             $model = PemantauanDivisi::query()->findOrFail($id);
-            $model->update($request->validated());
+            $model->update($validated);
 
             return $model->fresh();
         });
@@ -204,7 +296,11 @@ class DashboardPemantauanController extends Controller
     public function hapusPemantauanDivisi(Request $request, string $id): JsonResponse
     {
         $this->pastikanHakAkses($request, true);
-        PemantauanDivisi::query()->findOrFail($id)->delete();
+        $model = PemantauanDivisi::query()->findOrFail($id);
+        if ($this->isDivisiRestrictedUser($request->user()) && preg_match('/yayasan/i', (string) $model->nama_divisi)) {
+            abort(403, 'Divisi Pendidikan tidak berhak menghapus data pemantauan Pengurus Yayasan.');
+        }
+        $model->delete();
 
         return response()->json(['message' => 'Data pemantauan divisi berhasil dihapus.']);
     }

@@ -82,9 +82,9 @@ class KelasService
     /**
      * Dapatkan statistik ringkasan kelas.
      */
-    public function dapatkanStatistik(?array $allowedKelasIds = null): array
+    public function dapatkanStatistik(?array $allowedKelasIds = null, ?string $unitId = null): array
     {
-        return $this->kelasRepository->dapatkanStatistik($allowedKelasIds);
+        return $this->kelasRepository->dapatkanStatistik($allowedKelasIds, $unitId);
     }
 
     /**

@@ -997,6 +997,66 @@ class TeacherPortalController extends Controller
         ]);
     }
 
+    public function pendingJournals(Request $request): JsonResponse
+    {
+        $this->getTeacherContext($request);
+        $schedules = $this->accessScope->accessibleSchedules($request->user());
+        $scheduleIds = $schedules->pluck('id');
+
+        // Cari sesi yang tanggalnya <= hari ini, dan belum memiliki catatan rangkuman meeting_notes
+        $pendingSessions = LessonAttendanceSession::query()
+            ->with(['schedule.subject', 'schedule.kelas'])
+            ->whereIn('schedule_id', $scheduleIds)
+            ->where(function ($q) {
+                $q->whereNull('meeting_notes')
+                    ->orWhere('meeting_notes', '');
+            })
+            ->whereDate('attendance_date', '<=', today()->toDateString())
+            ->orderBy('attendance_date', 'desc')
+            ->limit(15)
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'total_pending' => $pendingSessions->count(),
+            'data' => $pendingSessions,
+        ]);
+    }
+
+    public function saveSessionJournal(Request $request, string $sessionId): JsonResponse
+    {
+        $request->validate([
+            'meeting_notes' => 'required|string|min:3',
+            'topic' => 'nullable|string|max:255',
+            'learning_material' => 'nullable|string',
+        ]);
+
+        $schedules = $this->accessScope->accessibleSchedules($request->user());
+        $scheduleIds = $schedules->pluck('id');
+
+        $session = LessonAttendanceSession::query()
+            ->whereIn('schedule_id', $scheduleIds)
+            ->findOrFail($sessionId);
+
+        $existingMeta = is_array($session->metadata) ? $session->metadata : [];
+        unset($existingMeta['requires_journal']);
+        $existingMeta['journal_completed_at'] = now()->toIso8601String();
+
+        $session->update([
+            'meeting_notes' => $request->meeting_notes,
+            'topic' => $request->topic ?: ($session->topic ?: 'Pembelajaran Tematik & KBM'),
+            'learning_material' => $request->learning_material ?: ($request->topic ?: $session->learning_material),
+            'metadata' => $existingMeta,
+            'updated_by' => $request->user()?->id,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Rangkuman pelajaran berhasil disimpan.',
+            'data' => $session->load(['schedule.subject', 'schedule.kelas']),
+        ]);
+    }
+
     public function materials(Request $request): JsonResponse
     {
         $ownerIds = $this->teacherMaterialOwnerIds($request);

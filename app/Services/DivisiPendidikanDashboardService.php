@@ -18,6 +18,11 @@ class DivisiPendidikanDashboardService
 
     public function getDashboardOverview(User $user, array $filters = []): array
     {
+        $allAccessibleUnits = $this->accessScope->accessibleEducationUnits($user)
+            ->select('id', 'name', 'code', 'level')
+            ->orderBy('name')
+            ->get();
+
         $unitQuery = $this->accessScope->accessibleEducationUnits($user);
         if (! empty($filters['unit_id']) && $filters['unit_id'] !== 'all') {
             $this->accessScope->assertEducationUnitAccess($user, (string) $filters['unit_id']);
@@ -157,6 +162,8 @@ class DivisiPendidikanDashboardService
                 'role' => 'Divisi Pendidikan',
                 'tahun_ajaran' => $activeAcademicYear ? ['id' => $activeAcademicYear->id, 'nama' => $activeAcademicYear->name ?? $activeAcademicYear->year_name ?? $activeAcademicYear->nama] : null,
                 'semester' => $activeSemester ? ['id' => $activeSemester->id, 'nama' => $activeSemester->name ?? $activeSemester->nama] : null,
+                'units' => $allAccessibleUnits,
+                'selected_unit_id' => $filters['unit_id'] ?? null,
             ],
             'kpis' => $kpis,
             'charts' => [
