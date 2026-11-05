@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\V1\IndexRequest;
 use App\Http\Requests\V1\StoreStudentRequest;
 use App\Models\AcademicYear;
+use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Kelas;
 use App\Models\Semester;
@@ -715,6 +716,9 @@ class StudentController extends Controller
 
     public function import(Request $request): JsonResponse
     {
+        @set_time_limit(300);
+        @ini_set('memory_limit', '512M');
+
         $rows = $request->input('data', []);
 
         if ($request->hasFile('file')) {
@@ -764,7 +768,7 @@ class StudentController extends Controller
                                 $item['gender'] = (string)$val;
                             } elseif (in_array($normHeader, ['unitid', 'unit', 'unitpendidikan'])) {
                                 $item['unit_id'] = $val;
-                            } elseif (in_array($normHeader, ['kelasid', 'kelas'])) {
+                            } elseif (in_array($normHeader, ['kelasid', 'kelas', 'keterangankelas', 'rombel'])) {
                                 $item['kelas_id'] = $val;
                             } else {
                                 $item[$normHeader] = $val;
@@ -773,7 +777,7 @@ class StudentController extends Controller
                         $rows[] = $item;
                     }
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Gagal membaca berkas import: ' . $e->getMessage(),
@@ -789,6 +793,9 @@ class StudentController extends Controller
                 'message' => 'Payload data impor siswa tidak boleh kosong.',
             ], 422);
         }
+
+        $allUnits = EducationUnit::all();
+        $allClasses = Kelas::all();
 
         $berhasil = 0;
         $gagal = 0;
@@ -816,9 +823,45 @@ class StudentController extends Controller
                 continue;
             }
 
+            // Resolve Unit ID safely to prevent UUID cast errors in PostgreSQL
+            $unitVal = $row['unit_id'] ?? $row['unit'] ?? $row['unitpendidikan'] ?? null;
+            $resolvedUnitId = null;
+            if ($unitVal) {
+                $strUnit = trim((string) $unitVal);
+                if (Str::isUuid($strUnit)) {
+                    $resolvedUnitId = $strUnit;
+                } else {
+                    $cleanUnit = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $strUnit));
+                    $matchedUnit = $allUnits->first(function ($u) use ($cleanUnit) {
+                        $uName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $u->name));
+                        $uCode = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $u->code ?? ''));
+                        return str_contains($cleanUnit, $uName) || str_contains($uName, $cleanUnit) || ($uCode && str_contains($cleanUnit, $uCode));
+                    });
+                    $resolvedUnitId = $matchedUnit?->id;
+                }
+            }
+
+            // Resolve Kelas ID safely to prevent UUID cast errors in PostgreSQL
+            $classVal = $row['kelas_id'] ?? $row['kelas'] ?? $row['keterangankelas'] ?? $row['rombel'] ?? null;
+            $resolvedKelasId = null;
+            if ($classVal) {
+                $strClass = trim((string) $classVal);
+                if (Str::isUuid($strClass)) {
+                    $resolvedKelasId = $strClass;
+                } else {
+                    $cleanClass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $strClass));
+                    $matchedClass = $allClasses->first(function ($c) use ($cleanClass, $resolvedUnitId) {
+                        $cName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $c->nama_kelas));
+                        $unitMatch = $resolvedUnitId ? ($c->unit_pendidikan_id === $resolvedUnitId) : true;
+                        return $unitMatch && ($cleanClass === $cName || str_contains($cleanClass, $cName));
+                    });
+                    $resolvedKelasId = $matchedClass?->id;
+                }
+            }
+
             $rowMetadata = [];
             foreach ($row as $k => $v) {
-                if (! in_array($k, ['nis', 'nisn', 'full_name', 'gender', 'unit_id', 'kelas_id', 'birth_date', 'birth_place', 'address'])) {
+                if (! in_array($k, ['nis', 'nisn', 'full_name', 'gender', 'unit_id', 'unit', 'unitpendidikan', 'kelas_id', 'kelas', 'keterangankelas', 'rombel', 'birth_date', 'birth_place', 'address'])) {
                     $rowMetadata[$k] = $v;
                 }
             }
@@ -829,8 +872,8 @@ class StudentController extends Controller
                     'nisn' => $nisn ?: null,
                     'full_name' => $nama,
                     'gender' => in_array(strtolower($row['gender'] ?? $row['jeniskelamin'] ?? ''), ['female', 'p', 'perempuan']) ? 'female' : 'male',
-                    'unit_id' => $row['unit_id'] ?? null,
-                    'kelas_id' => $row['kelas_id'] ?? null,
+                    'unit_id' => $resolvedUnitId,
+                    'kelas_id' => $resolvedKelasId,
                     'birth_date' => ! empty($row['birth_date']) ? $row['birth_date'] : null,
                     'birth_place' => $row['birth_place'] ?? null,
                     'address' => $row['address'] ?? $row['alamatsiswa'] ?? null,
@@ -838,7 +881,7 @@ class StudentController extends Controller
                     'metadata' => $rowMetadata,
                 ]);
                 $berhasil++;
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $gagal++;
                 $errors[] = "Baris {$rowNum}: ".$e->getMessage();
             }
