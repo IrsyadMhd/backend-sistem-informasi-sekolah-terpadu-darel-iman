@@ -114,7 +114,7 @@ class KelasExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAuto
                 $c->unitPendidikan?->name ?? '-',
                 $c->waliKelas?->nama_lengkap ?? '-',
                 (int) $c->kapasitas,
-                $c->is_active ? 'Aktif' : 'Nonaktif',
+                $c->status ?? ($c->is_active ? 'Aktif' : 'Nonaktif'),
             ];
         }
         return $rows;

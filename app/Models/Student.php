@@ -239,4 +239,78 @@ class Student extends Model
         return $this->attributes['unit_name'] ?? null;
     }
 
+    /**
+     * Resolusi daftar kandidat nomor identitas pembayaran resmi (SIPDEI / VA) untuk ananda.
+     * Mengambil nomor yang valid (non-kosong) dari metadata pembiayaan, no pendaftaran,
+     * nomor VA, atau NIS dengan memfilter string kosong.
+     *
+     * @return array<string>
+     */
+    public function getPaymentIdentifierCandidates(): array
+    {
+        $meta = is_array($this->metadata) ? $this->metadata : (json_decode($this->attributes['metadata'] ?? '{}', true) ?: []);
+        $pembiayaan = is_array($meta['pembiayaan'] ?? null) ? $meta['pembiayaan'] : [];
+
+        $rawCandidates = [
+            $meta['nis_pembayaran'] ?? null,
+            $pembiayaan['nip_pembayaran'] ?? null,
+            $pembiayaan['nis_pembayaran'] ?? null,
+            $meta['no_pendaftaran'] ?? null,
+            $this->attributes['nis'] ?? null,
+            $meta['no_va'] ?? null,
+            $this->attributes['nisn'] ?? null,
+        ];
+
+        $candidates = [];
+        foreach ($rawCandidates as $val) {
+            $cleaned = trim((string) $val);
+            if ($cleaned !== '' && !in_array($cleaned, $candidates, true)) {
+                $candidates[] = $cleaned;
+            }
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Mengembalikan identitas pembayaran terbaik (pertama yang tidak kosong).
+     */
+    public function resolvePaymentIdentifier(): ?string
+    {
+        $candidates = $this->getPaymentIdentifierCandidates();
+        return $candidates[0] ?? null;
+    }
+
+    /**
+     * Resolusi nomor Virtual Account BSI dinamis.
+     * Menggabungkan kode biller BSI (default: 9023) dengan nomor pembayaran atau NIS.
+     */
+    public function resolveVirtualAccount(?string $bsiPrefix = null): ?string
+    {
+        $meta = is_array($this->metadata) ? $this->metadata : (json_decode($this->attributes['metadata'] ?? '{}', true) ?: []);
+        if (!empty($meta['no_va'])) {
+            $cleanVa = preg_replace('/\D/', '', (string) $meta['no_va']);
+            if (strlen($cleanVa) >= 8) {
+                return $cleanVa;
+            }
+        }
+
+        $prefix = $bsiPrefix ?: (\App\Models\SiteSetting::current()->bsi_va_prefix ?: '9023');
+        $identifier = $this->resolvePaymentIdentifier();
+        if (!$identifier) {
+            return null;
+        }
+
+        $cleanId = preg_replace('/\D/', '', $identifier);
+        if ($cleanId === '') {
+            return null;
+        }
+
+        // Jika nomor sudah diawali prefix biller dan panjangnya cukup, gunakan langsung
+        if (str_starts_with($cleanId, $prefix) && strlen($cleanId) >= (strlen($prefix) + 6)) {
+            return $cleanId;
+        }
+
+        return $prefix . $cleanId;
+    }
 }

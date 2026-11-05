@@ -3826,10 +3826,7 @@ class StudentParentPortalController extends Controller
 
         $studentMeta = is_array($student->metadata) ? $student->metadata : [];
         $bsiPrefix = $siteSetting->bsi_va_prefix ?: '9023';
-        $studentVa = $studentMeta['no_va'] ?? $studentMeta['nis_pembayaran'] ?? null;
-        if (!$studentVa && !empty($student->nis)) {
-            $studentVa = $bsiPrefix . preg_replace('/\D/', '', (string) $student->nis);
-        }
+        $studentVa = $student->resolveVirtualAccount($bsiPrefix);
 
         $paymentInfo = [
             'bank_name' => $siteSetting->bank_name ?: ($unitMeta['bank_name'] ?? null),
@@ -3844,10 +3841,11 @@ class StudentParentPortalController extends Controller
         ];
 
         // Cek integrasi SIPDEI Billing (Pihak Ketiga)
-        $nisPembayaran = $studentMeta['nis_pembayaran'] ?? $studentMeta['no_pendaftaran'] ?? $student->nis ?? null;
+        $candidates = $student->getPaymentIdentifierCandidates();
+        $nisPembayaran = $candidates[0] ?? null;
         $sipdeiService = app(\App\Services\SipdeiBillingService::class);
 
-        if ($nisPembayaran && $sipdeiService->isConfigured()) {
+        if (!empty($candidates) && $sipdeiService->isConfigured()) {
             $filters = [];
             if ($request->filled('status_tagihan')) {
                 $filters['status_tagihan'] = (string) $request->query('status_tagihan');
@@ -3871,7 +3869,31 @@ class StudentParentPortalController extends Controller
             }
 
             $forceRefresh = $request->boolean('refresh', false);
-            $sipdeiResult = $sipdeiService->getBillingHistory((string) $nisPembayaran, $filters, $forceRefresh);
+
+            // Loop kandidat nomor pembayaran (mis. no_pendaftaran, nip_pembayaran, nis) sampai menemukan hasil di SIPDEI
+            $sipdeiResult = null;
+            $matchedNis = $candidates[0];
+            foreach ($candidates as $cand) {
+                $res = $sipdeiService->getBillingHistory((string) $cand, $filters, $forceRefresh);
+                if (!empty($res['success']) && !empty($res['data']['tagihan'])) {
+                    $sipdeiResult = $res;
+                    $matchedNis = $cand;
+                    break;
+                }
+                if ($sipdeiResult === null || !empty($res['success'])) {
+                    $sipdeiResult = $res;
+                    $matchedNis = $cand;
+                }
+            }
+            $nisPembayaran = $matchedNis;
+
+            // Selaraskan student_va di paymentInfo dengan nomor pembayaran SIPDEI yang valid
+            if ($matchedNis) {
+                $cleanMatched = preg_replace('/\D/', '', (string) $matchedNis);
+                if ($cleanMatched !== '') {
+                    $paymentInfo['student_va'] = str_starts_with($cleanMatched, $bsiPrefix) ? $cleanMatched : ($bsiPrefix . $cleanMatched);
+                }
+            }
 
             if (!empty($sipdeiResult['success']) && !empty($sipdeiResult['data']['tagihan'])) {
                 $sipdeiBills = $sipdeiService->formatBillsForPortal($sipdeiResult['data']['tagihan'], $student);
@@ -3979,8 +4001,8 @@ class StudentParentPortalController extends Controller
             'items.*.bayar' => ['required', 'integer', 'min:1'],
         ]);
 
-        $studentMeta = is_array($student->metadata) ? $student->metadata : [];
-        $nisPembayaran = $studentMeta['nis_pembayaran'] ?? $studentMeta['no_pendaftaran'] ?? $student->nis ?? null;
+        $candidates = $student->getPaymentIdentifierCandidates();
+        $nisPembayaran = $student->resolvePaymentIdentifier();
 
         if (! $nisPembayaran) {
             return response()->json([
@@ -4002,6 +4024,13 @@ class StudentParentPortalController extends Controller
             strtoupper($validated['bank']),
             $validated['items']
         );
+
+        if (! empty($result['data']) && is_array($result['data'])) {
+            $result['data']['nama_siswa'] = $student->name;
+            $result['data']['nis_pembayaran'] = (string) $nisPembayaran;
+            $result['data']['expired_at'] = $result['data']['expired_at'] ?? $result['data']['expired_date'] ?? null;
+            $result['data']['panduan_pembayaran_pdf'] = $result['data']['panduan_pembayaran_pdf'] ?? $result['data']['panduan_url'] ?? null;
+        }
 
         $statusCode = $result['status_code'] ?? ($result['success'] ? 200 : 422);
         return response()->json($result, $statusCode >= 200 && $statusCode < 600 ? $statusCode : 500);
