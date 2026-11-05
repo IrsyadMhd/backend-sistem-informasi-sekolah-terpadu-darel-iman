@@ -273,11 +273,16 @@ class SystemMaintenanceController extends Controller
         try {
             DB::beginTransaction();
 
-            // Nonaktifkan foreign key checks untuk menghindari integrity constraint violation saat bulk delete
-            if ($driver === 'pgsql') {
-                DB::statement("SET session_replication_role = 'replica';");
-            } elseif ($driver === 'mysql') {
-                DB::statement('SET FOREIGN_KEY_CHECKS = 0;');
+            // Nonaktifkan foreign key checks jika memiliki hak akses (Superuser), abaikan jika non-superuser
+            try {
+                if ($driver === 'pgsql') {
+                    DB::statement("SET session_replication_role = 'replica';");
+                } elseif ($driver === 'mysql') {
+                    DB::statement('SET FOREIGN_KEY_CHECKS = 0;');
+                }
+            } catch (\Throwable) {
+                // Abaikan kesalahan permission denied jika user PostgreSQL bukan superuser.
+                // Tabel telah diurutkan secara hierarkis (child-to-parent) sehingga penghapusan tetap aman.
             }
 
             // 1. Bersihkan tabel operasional (Presensi, Nilai, LMS, Mutabaah, Tahfizh, Notifikasi, Chat)
@@ -399,6 +404,18 @@ class SystemMaintenanceController extends Controller
                     $cleared['parents'] = $cnt;
                 }
 
+                // Putus referensi foreign key ke pegawai sebelum pegawai dihapus
+                if (Schema::hasTable('tbl_kelas') && Schema::hasColumn('tbl_kelas', 'wali_kelas_id')) {
+                    try {
+                        DB::table('tbl_kelas')->update(['wali_kelas_id' => null]);
+                    } catch (\Throwable) {}
+                }
+                if (Schema::hasTable('education_units') && Schema::hasColumn('education_units', 'principal_id')) {
+                    try {
+                        DB::table('education_units')->update(['principal_id' => null]);
+                    } catch (\Throwable) {}
+                }
+
                 if (Schema::hasTable('employees')) {
                     $cnt = DB::table('employees')
                         ->whereNotIn('user_id', $superAdminUserIds)
@@ -441,11 +458,13 @@ class SystemMaintenanceController extends Controller
             }
 
             // Kembalikan foreign key checks
-            if ($driver === 'pgsql') {
-                DB::statement("SET session_replication_role = 'origin';");
-            } elseif ($driver === 'mysql') {
-                DB::statement('SET FOREIGN_KEY_CHECKS = 1;');
-            }
+            try {
+                if ($driver === 'pgsql') {
+                    DB::statement("SET session_replication_role = 'origin';");
+                } elseif ($driver === 'mysql') {
+                    DB::statement('SET FOREIGN_KEY_CHECKS = 1;');
+                }
+            } catch (\Throwable) {}
 
             DB::commit();
 
@@ -651,6 +670,27 @@ class SystemMaintenanceController extends Controller
             }
         }
 
+        $totalBerhasil = 0;
+        $totalDiperbarui = 0;
+        $totalGagal = 0;
+        $allErrors = [];
+
+        foreach ($summary as $tabKey => $tabRes) {
+            $totalBerhasil += ($tabRes['berhasil'] ?? 0);
+            $totalDiperbarui += ($tabRes['diperbarui'] ?? 0);
+            $totalGagal += ($tabRes['gagal'] ?? 0);
+            if (!empty($tabRes['errors'])) {
+                foreach ($tabRes['errors'] as $e) {
+                    $allErrors[] = "[$tabKey] " . $e;
+                }
+            }
+        }
+
+        $summary['berhasil'] = $totalBerhasil;
+        $summary['diperbarui'] = $totalDiperbarui;
+        $summary['gagal'] = $totalGagal;
+        $summary['errors'] = array_slice($allErrors, 0, 20);
+
         return $summary;
     }
 
@@ -737,42 +777,97 @@ class SystemMaintenanceController extends Controller
             $parentId = null;
             $namaAyah = $mapped['namaayah'] ?? '';
             $namaIbu = $mapped['namaibu'] ?? '';
+            $nikAyah = (!empty($mapped['nikayah']) && $mapped['nikayah'] !== '-') ? trim((string)$mapped['nikayah']) : null;
+            $nikIbu = (!empty($mapped['nikibu']) && $mapped['nikibu'] !== '-') ? trim((string)$mapped['nikibu']) : null;
+            $primaryNik = $nikAyah ?: $nikIbu;
+            $parentName = $namaAyah ?: $namaIbu;
             $noHpOrtu = $mapped['nomorwaayah'] ?? $mapped['hpayah'] ?? $mapped['nomorwaibu'] ?? $mapped['hpibu'] ?? '';
 
-            if ($namaAyah || $namaIbu) {
-                $parentName = $namaAyah ?: $namaIbu;
-                $parent = ParentModel::firstOrCreate(
-                    ['full_name' => $parentName, 'phone' => $noHpOrtu ?: null],
-                    [
-                        'occupation' => $mapped['pekerjaanayah'] ?? ($mapped['pekerjaanibu'] ?? null),
-                        'address' => $mapped['alamatayah'] ?? ($mapped['alamatibu'] ?? ($mapped['alamatsiswa'] ?? null)),
-                        'metadata' => [
-                            'ayah' => array_filter([
-                                'nama' => $namaAyah,
-                                'nik' => $mapped['nikayah'] ?? null,
-                                'pekerjaan' => $mapped['pekerjaanayah'] ?? null,
-                                'penghasilan' => $mapped['penghasilanayah'] ?? null,
-                                'no_hp' => $mapped['hpayah'] ?? null,
-                            ]),
-                            'ibu' => array_filter([
-                                'nama' => $namaIbu,
-                                'nik' => $mapped['nikibu'] ?? null,
-                                'pekerjaan' => $mapped['pekerjaanibu'] ?? null,
-                                'penghasilan' => $mapped['penghasilanibu'] ?? null,
-                                'no_hp' => $mapped['hpibu'] ?? null,
-                            ]),
-                        ],
-                    ]
-                );
-                $parentId = $parent->id;
+            if ($primaryNik || $parentName) {
+                $parent = null;
+                if ($primaryNik) {
+                    $parent = ParentModel::where('nik', $primaryNik)
+                        ->orWhere('father_nik', $primaryNik)
+                        ->orWhere('mother_nik', $primaryNik)
+                        ->first();
+                }
+                if (!$parent && $parentName) {
+                    $parent = ParentModel::where('full_name', $parentName)
+                        ->when($noHpOrtu, fn ($q) => $q->where('phone', $noHpOrtu))
+                        ->first();
+                }
+
+                if (!$parent && $parentName) {
+                    try {
+                        $parent = ParentModel::create([
+                            'full_name' => $parentName,
+                            'phone' => $noHpOrtu ?: null,
+                            'nik' => $primaryNik,
+                            'father_nik' => $nikAyah,
+                            'mother_nik' => $nikIbu,
+                            'occupation' => $mapped['pekerjaanayah'] ?? ($mapped['pekerjaanibu'] ?? null),
+                            'address' => $mapped['alamatayah'] ?? ($mapped['alamatibu'] ?? ($mapped['alamatsiswa'] ?? null)),
+                            'metadata' => [
+                                'ayah' => array_filter([
+                                    'nama' => $namaAyah,
+                                    'nik' => $nikAyah,
+                                    'pekerjaan' => $mapped['pekerjaanayah'] ?? null,
+                                    'penghasilan' => $mapped['penghasilanayah'] ?? null,
+                                    'no_hp' => $mapped['hpayah'] ?? null,
+                                ]),
+                                'ibu' => array_filter([
+                                    'nama' => $namaIbu,
+                                    'nik' => $nikIbu,
+                                    'pekerjaan' => $mapped['pekerjaanibu'] ?? null,
+                                    'penghasilan' => $mapped['penghasilanibu'] ?? null,
+                                    'no_hp' => $mapped['hpibu'] ?? null,
+                                ]),
+                            ],
+                        ]);
+                    } catch (\Throwable $pe) {
+                        $parent = ParentModel::where('nik', $primaryNik)
+                            ->orWhere('full_name', $parentName)
+                            ->first();
+                    }
+                }
+                $parentId = $parent?->id;
             }
 
             $existing = Student::withTrashed()->where('nis', $nis)->first();
 
+            // Pre-check duplicate NISN across other students
+            $cleanNisn = trim((string) $nisn);
+            $cleanNisn = ($cleanNisn !== '' && $cleanNisn !== '-' && $cleanNisn !== '0') ? $cleanNisn : null;
+            if ($cleanNisn) {
+                $dupNisn = Student::withTrashed()
+                    ->where('nisn', $cleanNisn)
+                    ->when($existing, fn ($q) => $q->where('id', '!=', $existing->id))
+                    ->first();
+                if ($dupNisn) {
+                    $gagal++;
+                    $errors[] = "Baris " . ($i + 1) . ": Siswa '{$nama}' dilewati karena NISN '{$cleanNisn}' sudah terdaftar pada siswa '{$dupNisn->full_name}' (NIS: {$dupNisn->nis}).";
+                    continue;
+                }
+            }
+
+            // Pre-check duplicate NIS in unit if different student
+            if ($matchedUnit?->id) {
+                $dupUnitNis = Student::withTrashed()
+                    ->where('unit_id', $matchedUnit->id)
+                    ->where('nis', $nis)
+                    ->when($existing, fn ($q) => $q->where('id', '!=', $existing->id))
+                    ->first();
+                if ($dupUnitNis) {
+                    $gagal++;
+                    $errors[] = "Baris " . ($i + 1) . ": Siswa '{$nama}' dilewati karena NIS '{$nis}' sudah terdaftar pada unit {$matchedUnit->name}.";
+                    continue;
+                }
+            }
+
             $dataPayload = [
                 'full_name' => $nama,
                 'nis' => $nis,
-                'nisn' => $nisn,
+                'nisn' => $cleanNisn,
                 'gender' => $gender,
                 'unit_id' => $matchedUnit?->id,
                 'kelas_id' => $matchedClass?->id,
@@ -785,12 +880,22 @@ class SystemMaintenanceController extends Controller
                 'metadata' => $metadata,
             ];
 
-            if ($existing) {
-                $existing->update($dataPayload);
-                $diperbarui++;
-            } else {
-                Student::create($dataPayload);
-                $berhasil++;
+            try {
+                if ($existing) {
+                    $existing->update($dataPayload);
+                    $diperbarui++;
+                } else {
+                    Student::create($dataPayload);
+                    $berhasil++;
+                }
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Siswa '{$nama}' (NIS: {$nis}) dilewati karena terdapat data kunci unik yang sudah terdaftar di sistem.";
+                continue;
+            } catch (\Throwable $te) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Siswa '{$nama}' gagal disimpan: " . $te->getMessage();
+                continue;
             }
         }
 
@@ -799,7 +904,7 @@ class SystemMaintenanceController extends Controller
             'berhasil' => $berhasil,
             'diperbarui' => $diperbarui,
             'gagal' => $gagal,
-            'errors' => array_slice($errors, 0, 10),
+            'errors' => array_slice($errors, 0, 15),
         ];
     }
 
@@ -882,6 +987,20 @@ class SystemMaintenanceController extends Controller
 
             $existing = Employee::withTrashed()->where('niy', $niy)->first();
 
+            // Pre-check duplicate email if provided
+            $cleanEmail = trim((string)($mapped['email'] ?? ''));
+            if ($cleanEmail) {
+                $dupEmail = Employee::withTrashed()
+                    ->where('email', $cleanEmail)
+                    ->when($existing, fn($q) => $q->where('id', '!=', $existing->id))
+                    ->first();
+                if ($dupEmail) {
+                    $gagal++;
+                    $errors[] = "Baris " . ($i + 1) . ": Pegawai '{$nama}' dilewati karena Email '{$cleanEmail}' sudah digunakan oleh '{$dupEmail->nama_lengkap}'.";
+                    continue;
+                }
+            }
+
             $dataPayload = [
                 'nama_lengkap' => $nama,
                 'niy' => $niy,
@@ -890,32 +1009,46 @@ class SystemMaintenanceController extends Controller
                 'unit_id' => $matchedUnit?->id,
                 'jabatan_id' => $matchedPosition?->id,
                 'no_hp' => $mapped['nomorhp'] ?? $mapped['nohp'] ?? null,
-                'email' => $mapped['email'] ?? null,
+                'email' => $cleanEmail ?: null,
                 'status' => 'Aktif',
                 'status_pegawai' => 'Tetap',
                 'metadata' => $metadata,
             ];
 
-            if ($existing) {
-                $existing->update($dataPayload);
-                $diperbarui++;
-                $empRecord = $existing;
-            } else {
-                $empRecord = Employee::create($dataPayload);
-                $berhasil++;
+            try {
+                if ($existing) {
+                    $existing->update($dataPayload);
+                    $diperbarui++;
+                    $empRecord = $existing;
+                } else {
+                    $empRecord = Employee::create($dataPayload);
+                    $berhasil++;
+                }
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Pegawai '{$nama}' (NIY: {$niy}) dilewati karena terdapat data kunci unik yang sudah terdaftar di sistem.";
+                continue;
+            } catch (\Throwable $te) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Pegawai '{$nama}' gagal disimpan: " . $te->getMessage();
+                continue;
             }
 
             // Bind Wali Kelas if Kelas Perwalian is filled
             $kelasWaliRaw = $mapped['kelasperwalian'] ?? '';
             if ($kelasWaliRaw && $kelasWaliRaw !== '-' && $empRecord) {
-                $cleanKW = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $kelasWaliRaw));
-                $targetClass = $allClasses->first(function ($c) use ($cleanKW, $matchedUnit) {
-                    $cName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $c->nama_kelas));
-                    $unitMatch = $matchedUnit ? ($c->unit_pendidikan_id === $matchedUnit->id) : true;
-                    return $unitMatch && (str_contains($cleanKW, $cName) || str_contains($cName, $cleanKW));
-                });
-                if ($targetClass) {
-                    $targetClass->update(['wali_kelas_id' => $empRecord->id]);
+                try {
+                    $cleanKW = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $kelasWaliRaw));
+                    $targetClass = $allClasses->first(function ($c) use ($cleanKW, $matchedUnit) {
+                        $cName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $c->nama_kelas));
+                        $unitMatch = $matchedUnit ? ($c->unit_pendidikan_id === $matchedUnit->id) : true;
+                        return $unitMatch && (str_contains($cleanKW, $cName) || str_contains($cName, $cleanKW));
+                    });
+                    if ($targetClass) {
+                        $targetClass->update(['wali_kelas_id' => $empRecord->id]);
+                    }
+                } catch (\Throwable $we) {
+                    // Ignore wali kelas assignment errors
                 }
             }
         }
@@ -996,12 +1129,22 @@ class SystemMaintenanceController extends Controller
                 'metadata' => ['satuan_kerja' => $satuanKerja, 'level_user' => $level],
             ];
 
-            if ($existing) {
-                $existing->update($dataPayload);
-                $diperbarui++;
-            } else {
-                Position::create($dataPayload);
-                $berhasil++;
+            try {
+                if ($existing) {
+                    $existing->update($dataPayload);
+                    $diperbarui++;
+                } else {
+                    Position::create($dataPayload);
+                    $berhasil++;
+                }
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Jabatan '{$nama}' dilewati karena kode/nama unik sudah ada.";
+                continue;
+            } catch (\Throwable $te) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Jabatan '{$nama}' gagal disimpan: " . $te->getMessage();
+                continue;
             }
         }
 
@@ -1010,7 +1153,7 @@ class SystemMaintenanceController extends Controller
             'berhasil' => $berhasil,
             'diperbarui' => $diperbarui,
             'gagal' => $gagal,
-            'errors' => $errors,
+            'errors' => array_slice($errors, 0, 10),
         ];
     }
 
@@ -1029,6 +1172,7 @@ class SystemMaintenanceController extends Controller
         $berhasil = 0;
         $diperbarui = 0;
         $gagal = 0;
+        $errors = [];
 
         for ($i = 1; $i < count($rows); $i++) {
             $r = $rows[$i];
@@ -1053,16 +1197,26 @@ class SystemMaintenanceController extends Controller
                 'is_active' => true,
             ];
 
-            if ($existing) {
-                $existing->update($payload);
-                $diperbarui++;
-            } else {
-                EducationUnit::create($payload);
-                $berhasil++;
+            try {
+                if ($existing) {
+                    $existing->update($payload);
+                    $diperbarui++;
+                } else {
+                    EducationUnit::create($payload);
+                    $berhasil++;
+                }
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Unit '{$nama}' ({$code}) dilewati karena sudah ada.";
+                continue;
+            } catch (\Throwable $te) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Unit '{$nama}' gagal disimpan: " . $te->getMessage();
+                continue;
             }
         }
 
-        return ['total' => count($rows) - 1, 'berhasil' => $berhasil, 'diperbarui' => $diperbarui, 'gagal' => $gagal, 'errors' => []];
+        return ['total' => count($rows) - 1, 'berhasil' => $berhasil, 'diperbarui' => $diperbarui, 'gagal' => $gagal, 'errors' => array_slice($errors, 0, 10)];
     }
 
     /**
@@ -1081,6 +1235,7 @@ class SystemMaintenanceController extends Controller
         $berhasil = 0;
         $diperbarui = 0;
         $gagal = 0;
+        $errors = [];
 
         for ($i = 1; $i < count($rows); $i++) {
             $r = $rows[$i];
@@ -1109,16 +1264,26 @@ class SystemMaintenanceController extends Controller
                 ->when($matchedUnit, fn($q) => $q->where('unit_pendidikan_id', $matchedUnit->id))
                 ->first();
 
-            if ($existing) {
-                $existing->update($payload);
-                $diperbarui++;
-            } else {
-                Kelas::create($payload);
-                $berhasil++;
+            try {
+                if ($existing) {
+                    $existing->update($payload);
+                    $diperbarui++;
+                } else {
+                    Kelas::create($payload);
+                    $berhasil++;
+                }
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Kelas '{$nama}' dilewati karena sudah ada pada unit terkait.";
+                continue;
+            } catch (\Throwable $te) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Kelas '{$nama}' gagal disimpan: " . $te->getMessage();
+                continue;
             }
         }
 
-        return ['total' => count($rows) - 1, 'berhasil' => $berhasil, 'diperbarui' => $diperbarui, 'gagal' => $gagal, 'errors' => []];
+        return ['total' => count($rows) - 1, 'berhasil' => $berhasil, 'diperbarui' => $diperbarui, 'gagal' => $gagal, 'errors' => array_slice($errors, 0, 10)];
     }
 
     /**
@@ -1136,6 +1301,7 @@ class SystemMaintenanceController extends Controller
         $berhasil = 0;
         $diperbarui = 0;
         $gagal = 0;
+        $errors = [];
 
         for ($i = 1; $i < count($rows); $i++) {
             $r = $rows[$i];
@@ -1164,15 +1330,25 @@ class SystemMaintenanceController extends Controller
 
             $existing = Subject::where('code', $code)->orWhere('name', $nama)->first();
 
-            if ($existing) {
-                $existing->update($payload);
-                $diperbarui++;
-            } else {
-                Subject::create($payload);
-                $berhasil++;
+            try {
+                if ($existing) {
+                    $existing->update($payload);
+                    $diperbarui++;
+                } else {
+                    Subject::create($payload);
+                    $berhasil++;
+                }
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Mata Pelajaran '{$nama}' ({$code}) dilewati karena sudah terdaftar.";
+                continue;
+            } catch (\Throwable $te) {
+                $gagal++;
+                $errors[] = "Baris " . ($i + 1) . ": Mata Pelajaran '{$nama}' gagal disimpan: " . $te->getMessage();
+                continue;
             }
         }
 
-        return ['total' => count($rows) - 1, 'berhasil' => $berhasil, 'diperbarui' => $diperbarui, 'gagal' => $gagal, 'errors' => []];
+        return ['total' => count($rows) - 1, 'berhasil' => $berhasil, 'diperbarui' => $diperbarui, 'gagal' => $gagal, 'errors' => array_slice($errors, 0, 10)];
     }
 }

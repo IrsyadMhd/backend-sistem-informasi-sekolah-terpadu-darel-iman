@@ -819,7 +819,15 @@ class StudentController extends Controller
 
             if (Student::withTrashed()->where('nis', $nis)->exists()) {
                 $duplikat++;
-                $errors[] = "Baris {$rowNum}: NIS '{$nis}' sudah terdaftar.";
+                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NIS '{$nis}' sudah terdaftar.";
+                continue;
+            }
+
+            $cleanNisn = trim((string)$nisn);
+            $cleanNisn = ($cleanNisn !== '' && $cleanNisn !== '-' && $cleanNisn !== '0') ? $cleanNisn : null;
+            if ($cleanNisn && Student::withTrashed()->where('nisn', $cleanNisn)->exists()) {
+                $duplikat++;
+                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NISN '{$cleanNisn}' sudah terdaftar.";
                 continue;
             }
 
@@ -839,6 +847,12 @@ class StudentController extends Controller
                     });
                     $resolvedUnitId = $matchedUnit?->id;
                 }
+            }
+
+            if ($resolvedUnitId && Student::withTrashed()->where('unit_id', $resolvedUnitId)->where('nis', $nis)->exists()) {
+                $duplikat++;
+                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NIS '{$nis}' sudah terdaftar pada unit tersebut.";
+                continue;
             }
 
             // Resolve Kelas ID safely to prevent UUID cast errors in PostgreSQL
@@ -869,7 +883,7 @@ class StudentController extends Controller
             try {
                 Student::query()->create([
                     'nis' => $nis,
-                    'nisn' => $nisn ?: null,
+                    'nisn' => $cleanNisn,
                     'full_name' => $nama,
                     'gender' => in_array(strtolower($row['gender'] ?? $row['jeniskelamin'] ?? ''), ['female', 'p', 'perempuan']) ? 'female' : 'male',
                     'unit_id' => $resolvedUnitId,
@@ -881,9 +895,13 @@ class StudentController extends Controller
                     'metadata' => $rowMetadata,
                 ]);
                 $berhasil++;
+            } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
+                $duplikat++;
+                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' (NIS: {$nis}) dilewati karena terdapat kunci unik (NIS/NISN) yang sudah terdaftar.";
+                continue;
             } catch (\Throwable $e) {
                 $gagal++;
-                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
+                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' gagal disimpan: ".$e->getMessage();
             }
         }
 
