@@ -484,6 +484,11 @@ class SystemMaintenanceController extends Controller
      */
     public function export(string $table): BinaryFileResponse
     {
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
+
+        require_once app_path('Exports/AllMasterDataExport.php');
+
         $timestamp = date('Ymd_His');
 
         switch ($table) {
@@ -546,6 +551,9 @@ class SystemMaintenanceController extends Controller
      */
     public function import(Request $request, string $table): JsonResponse
     {
+        @ini_set('memory_limit', '512M');
+        @set_time_limit(300);
+
         if (! $request->hasFile('file')) {
             return response()->json([
                 'success' => false,

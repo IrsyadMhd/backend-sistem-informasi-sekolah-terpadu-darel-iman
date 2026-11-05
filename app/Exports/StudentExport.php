@@ -6,14 +6,20 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+use Maatwebsite\Excel\Concerns\WithColumnFormatting;
+use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 use Maatwebsite\Excel\Concerns\WithStyles;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Cell\DefaultValueBinder;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class StudentExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoSize, WithStyles
+class StudentExport extends DefaultValueBinder implements FromQuery, WithHeadings, WithMapping, ShouldAutoSize, WithStyles, WithCustomValueBinder, WithColumnFormatting
 {
     private int $rowNumber = 0;
 
@@ -154,6 +160,9 @@ class StudentExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
         $ibu = $meta['ibu'] ?? [];
         $wali = $meta['wali'] ?? [];
         $akademik = $meta['akademik'] ?? [];
+        $sekolahAsal = is_array($meta['sekolah_asal'] ?? null)
+            ? $meta['sekolah_asal']
+            : (is_string($meta['sekolah_asal'] ?? null) ? ['nama' => $meta['sekolah_asal']] : []);
 
         // Helper boolean to ya/tidak
         $toYaTidak = function ($val) {
@@ -210,11 +219,11 @@ class StudentExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
             $meta['jenis_tempat_tinggal'] ?? '-',
             $meta['jarak_tempuh_ke_sekolah'] ?? $meta['jarak_ke_sekolah'] ?? '-',
             $meta['moda_transportasi'] ?? '-',
-            $meta['sekolah_asal'] ?? '-',
-            $meta['status_sekolah_asal'] ?? '-',
-            $meta['kecamatan_sekolah_asal'] ?? '-',
-            $meta['kota_kab_sekolah_asal'] ?? '-',
-            $meta['nomor_hp_wa_sekolah_asal'] ?? $meta['hp_wa_sekolah_asal'] ?? '-',
+            $sekolahAsal['nama'] ?? (is_string($meta['sekolah_asal'] ?? null) ? $meta['sekolah_asal'] : '-'),
+            $meta['status_sekolah_asal'] ?? $sekolahAsal['status'] ?? '-',
+            $meta['kecamatan_sekolah_asal'] ?? $sekolahAsal['kecamatan'] ?? '-',
+            $meta['kota_kab_sekolah_asal'] ?? $sekolahAsal['kota_kab'] ?? '-',
+            $meta['nomor_hp_wa_sekolah_asal'] ?? $meta['hp_wa_sekolah_asal'] ?? $sekolahAsal['no_hp'] ?? '-',
             $meta['hobi'] ?? '-',
             $meta['cita_cita'] ?? '-',
             $meta['nominal_spp'] ?? '-',
@@ -318,4 +327,69 @@ class StudentExport implements FromQuery, WithHeadings, WithMapping, ShouldAutoS
             ],
         ];
     }
+
+    public function columnFormats(): array
+    {
+        return [
+            'B' => NumberFormat::FORMAT_TEXT,  // No Pendaftaran
+            'C' => NumberFormat::FORMAT_TEXT,  // NIK
+            'D' => NumberFormat::FORMAT_TEXT,  // No Registrasi Akta Lahir
+            'E' => NumberFormat::FORMAT_TEXT,  // No KK
+            'T' => NumberFormat::FORMAT_TEXT,  // RT
+            'U' => NumberFormat::FORMAT_TEXT,  // RW
+            'Y' => NumberFormat::FORMAT_TEXT,  // Kode Pos
+            'AI' => NumberFormat::FORMAT_TEXT, // Nomor Hp/Wa Sekolah Asal
+            'AR' => NumberFormat::FORMAT_TEXT, // NIK Ayah
+            'AV' => NumberFormat::FORMAT_TEXT, // Telfon Ayah
+            'AW' => NumberFormat::FORMAT_TEXT, // HP Ayah
+            'BF' => NumberFormat::FORMAT_TEXT, // Nomor WA Ayah
+            'BI' => NumberFormat::FORMAT_TEXT, // NIK Ibu
+            'BL' => NumberFormat::FORMAT_TEXT, // Telfon Ibu
+            'BM' => NumberFormat::FORMAT_TEXT, // HP Ibu
+            'BV' => NumberFormat::FORMAT_TEXT, // Nomor WA Ibu
+            'BZ' => NumberFormat::FORMAT_TEXT, // NIK Wali
+            'CD' => NumberFormat::FORMAT_TEXT, // Telfon Wali
+            'CE' => NumberFormat::FORMAT_TEXT, // HP Wali
+            'CN' => NumberFormat::FORMAT_TEXT, // Nomor WA Wali
+            'CQ' => NumberFormat::FORMAT_TEXT, // NIS (Sekolah)
+            'CR' => NumberFormat::FORMAT_TEXT, // NISN (Nasional)
+            'CS' => NumberFormat::FORMAT_TEXT, // No. VA BSI / NIS Pembayaran
+            'CZ' => NumberFormat::FORMAT_TEXT, // NIY Ortu Jika Pegawai
+            'DB' => NumberFormat::FORMAT_TEXT, // NIY Wali Kelas
+        ];
+    }
+
+    public function bindValue(Cell $cell, $value): bool
+    {
+        if ($value === null || $value === '') {
+            $cell->setValueExplicit('', DataType::TYPE_STRING);
+            return true;
+        }
+
+        if (is_array($value)) {
+            $flat = implode(', ', array_filter(array_map('strval', $value), fn ($v) => $v !== '')) ?: '-';
+            $cell->setValueExplicit($flat, DataType::TYPE_STRING);
+            return true;
+        }
+
+        // Nilai numerik berdigit panjang (seperti NIK 16 digit, KK 16 digit, NISN, No HP, No VA)
+        // atau angka berawalan '0' (RT/RW, No HP) wajib dibind eksplisit sebagai teks (STRING)
+        // agar Microsoft Excel tidak mengubahnya menjadi notasi ilmiah (e.g. 1.37112E+15)
+        // dan menghindari pemangkasan presisi 15-digit bawaan Excel.
+        if (is_numeric($value)) {
+            $str = (string) $value;
+            if (strlen($str) >= 8 || (strlen($str) > 1 && $str[0] === '0')) {
+                $cell->setValueExplicit($str, DataType::TYPE_STRING);
+                return true;
+            }
+        }
+
+        if (is_string($value) && ctype_digit($value)) {
+            $cell->setValueExplicit($value, DataType::TYPE_STRING);
+            return true;
+        }
+
+        return parent::bindValue($cell, $value);
+    }
 }
+

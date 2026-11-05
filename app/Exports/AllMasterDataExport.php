@@ -152,7 +152,7 @@ class MapelExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAuto
     }
 }
 
-class PegawaiExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAutoSize
+class PegawaiExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     public function title(): string
     {
@@ -178,6 +178,15 @@ class PegawaiExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAu
         ];
     }
 
+    public function columnFormats(): array
+    {
+        return [
+            'C' => \PhpOffice\PhpSpreadsheet\Style\NumberFormat::FORMAT_TEXT, // NIY
+            'K' => \PhpOffice\PhpSpreadsheet\Style\NumberFormat::FORMAT_TEXT, // Nomor HP
+            'M' => \PhpOffice\PhpSpreadsheet\Style\NumberFormat::FORMAT_TEXT, // NIK
+        ];
+    }
+
     public function array(): array
     {
         $employees = Employee::with(['unit', 'position'])->orderBy('nama_lengkap')->get();
@@ -187,7 +196,7 @@ class PegawaiExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAu
             $rows[] = [
                 $idx + 1,
                 $e->unit?->name ?? ($meta['unit_pendidikan'] ?? '-'),
-                $e->niy ?? '-',
+                $e->niy ? (string) $e->niy : '-',
                 $e->nama_lengkap,
                 ($e->jenis_kelamin === 'L' || $e->jenis_kelamin === 'male') ? 'Laki-laki' : 'Perempuan',
                 $meta['satuan_kerja_asal'] ?? ($e->unit?->name ?? '-'),
@@ -195,35 +204,28 @@ class PegawaiExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAu
                 $meta['kelas_perwalian'] ?? '-',
                 $meta['kelas_diajar'] ?? '-',
                 $meta['mapel_diajar'] ?? '-',
-                $e->no_hp ?? '-',
+                $e->no_hp ? (string) $e->no_hp : '-',
                 $e->email ?? '-',
-                $e->nik ?? '-',
+                $e->nik ? (string) $e->nik : '-',
             ];
         }
         return $rows;
     }
 }
 
-class SiswaExportSheet implements FromArray, WithTitle, WithHeadings, ShouldAutoSize
+class SiswaExportSheet extends StudentExport implements WithTitle
 {
+    public function __construct()
+    {
+        parent::__construct(
+            Student::query()
+                ->with(['educationUnit', 'kelas.waliKelas', 'schoolClass', 'parent', 'user'])
+                ->orderBy('full_name', 'asc')
+        );
+    }
+
     public function title(): string
     {
         return 'Siswa & Santri';
-    }
-
-    public function headings(): array
-    {
-        return (new StudentExport(Student::query()))->headings();
-    }
-
-    public function array(): array
-    {
-        $exporter = new StudentExport(Student::with(['educationUnit', 'kelas', 'parent']));
-        $students = Student::with(['educationUnit', 'kelas', 'parent'])->orderBy('full_name')->get();
-        $rows = [];
-        foreach ($students as $std) {
-            $rows[] = $exporter->map($std);
-        }
-        return $rows;
     }
 }
