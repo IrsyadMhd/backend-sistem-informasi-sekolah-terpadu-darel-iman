@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Exports\AllMasterDataExport;
 use App\Exports\StudentExport;
 use App\Http\Controllers\Controller;
+use App\Models\AcademicYear;
 use App\Models\EducationUnit;
 use App\Models\Employee;
 use App\Models\Kelas;
@@ -1232,6 +1233,44 @@ class SystemMaintenanceController extends Controller
         $headers = array_map(fn($h) => strtolower(preg_replace('/[^a-zA-Z0-9]/', '', (string)$h)), $rows[0]);
         $allUnits = EducationUnit::all();
 
+        $academicPeriod = app(\App\Services\AcademicPeriodService::class);
+        $activeAcademicYear = $academicPeriod->getActiveYear();
+        if (!$activeAcademicYear) {
+            $activeAcademicYear = AcademicYear::where('is_active', true)->first()
+                ?? AcademicYear::latest()->first();
+        }
+
+        if (!$activeAcademicYear) {
+            $activeAcademicYear = AcademicYear::create([
+                'name' => '2026/2027',
+                'start_date' => '2026-07-01',
+                'end_date' => '2027-06-30',
+                'is_active' => true,
+            ]);
+        }
+
+        $activeSemester = $academicPeriod->getActiveSemester($activeAcademicYear?->id);
+        if (!$activeSemester && Schema::hasTable('semesters')) {
+            $activeSemester = DB::table('semesters')->where('is_active', true)->first()
+                ?? DB::table('semesters')->where('academic_year_id', $activeAcademicYear->id)->first()
+                ?? DB::table('semesters')->first();
+            if (!$activeSemester) {
+                $semId = (string) Str::uuid();
+                DB::table('semesters')->insert([
+                    'id' => $semId,
+                    'academic_year_id' => $activeAcademicYear->id,
+                    'name' => 'Semester Ganjil',
+                    'sequence' => 1,
+                    'start_date' => '2026-07-01',
+                    'end_date' => '2026-12-31',
+                    'is_active' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                $activeSemester = (object) ['id' => $semId];
+            }
+        }
+
         $berhasil = 0;
         $diperbarui = 0;
         $gagal = 0;
@@ -1252,11 +1291,21 @@ class SystemMaintenanceController extends Controller
             $unitRaw = $mapped['unitpendidikan'] ?? $mapped['unit'] ?? '';
             $matchedUnit = $allUnits->first(fn($u) => str_contains(strtolower($u->name), strtolower($unitRaw)));
 
+            $tingkat = $mapped['tingkat'] ?? '1';
+            $tingkat = ($tingkat !== '' && $tingkat !== '-') ? $tingkat : '1';
+            $kodeKelas = $mapped['kodekelas'] ?? $mapped['kode'] ?? ('K-' . $tingkat . '-' . Str::slug($nama));
+            $jenjang = $matchedUnit?->level ?? ($mapped['jenjang'] ?? 'SD');
+
             $payload = [
                 'nama_kelas' => $nama,
-                'tingkat' => $mapped['tingkat'] ?? '1',
+                'kode_kelas' => $kodeKelas,
+                'tingkat' => $tingkat,
+                'jenjang' => $jenjang,
+                'ruangan' => 'Utama',
                 'kapasitas' => (int) ($mapped['kapasitas'] ?? 30),
                 'unit_pendidikan_id' => $matchedUnit?->id,
+                'tahun_ajaran_id' => $activeAcademicYear?->id,
+                'semester_id' => $activeSemester?->id,
                 'status' => 'Aktif',
             ];
 

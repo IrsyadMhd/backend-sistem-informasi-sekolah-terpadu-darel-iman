@@ -22,6 +22,7 @@ class UserAccountController extends Controller
     {
         $search = trim((string) $request->query('search', ''));
         $unitId = trim((string) $request->query('unit_id', ''));
+        $category = trim((string) $request->query('category', 'semua'));
 
         if ($unitId) {
             $this->accessScope->assertEducationUnitAccess($request->user(), $unitId);
@@ -31,21 +32,53 @@ class UserAccountController extends Controller
         $isGlobalAdmin = $this->isGlobalAdmin($request->user());
 
         $users = User::query()
-            ->with(['roles:id,name', 'employee.unit', 'student.educationUnit'])
+            ->with([
+                'roles:id,name',
+                'employee.unit',
+                'student.educationUnit',
+                'parent.students.educationUnit',
+                'parent.studentsPivot.educationUnit',
+            ])
             ->when($request->query('status') === 'aktif', fn ($query) => $query->where('is_active', true))
             ->when($request->query('status') === 'nonaktif', fn ($query) => $query->where('is_active', false))
             ->when($request->query('role_status') === 'without_role', fn ($query) => $query->doesntHave('roles'))
+            ->when($category && $category !== 'semua', function ($query) use ($category) {
+                if ($category === 'pegawai') {
+                    $query->where(function ($q) {
+                        $q->whereHas('employee')
+                          ->orWhereHas('roles', fn ($r) => $r->whereIn('name', ['Pegawai', 'Tata Usaha', 'Kepala Sekolah', 'Staf', 'tata_usaha', 'kepala_sekolah']));
+                    })->whereDoesntHave('roles', fn ($r) => $r->where('name', 'like', '%Guru%'));
+                } elseif ($category === 'guru') {
+                    $query->whereHas('roles', fn ($r) => $r->where('name', 'like', '%Guru%')->orWhereIn('name', ['Wali Kelas', 'Musyrif', 'Guru Tahfizh', 'Pembimbing']));
+                } elseif ($category === 'siswa') {
+                    $query->where(function ($q) {
+                        $q->whereHas('roles', fn ($r) => $r->whereIn('name', ['Siswa', 'siswa', 'student']))
+                          ->orWhereHas('student');
+                    });
+                } elseif ($category === 'orangtua' || $category === 'parent') {
+                    $query->where(function ($q) {
+                        $q->whereHas('roles', fn ($r) => $r->whereIn('name', ['Orang Tua', 'orang_tua', 'Orangtua', 'Wali Murid', 'parent']))
+                          ->orWhereHas('parent');
+                    });
+                } elseif ($category === 'standalone') {
+                    $query->doesntHave('employee')->doesntHave('student')->doesntHave('parent');
+                }
+            })
             ->when($unitId !== '', function ($query) use ($unitId) {
                 $query->where(function ($q) use ($unitId) {
                     $q->whereHas('employee', fn ($e) => $e->where('unit_id', $unitId))
-                      ->orWhereHas('student', fn ($s) => $s->where('unit_id', $unitId));
+                      ->orWhereHas('student', fn ($s) => $s->where('unit_id', $unitId))
+                      ->orWhereHas('parent.students', fn ($s) => $s->where('unit_id', $unitId))
+                      ->orWhereHas('parent.studentsPivot', fn ($s) => $s->where('unit_id', $unitId));
                 });
             })
             ->when(! $isGlobalAdmin && $unitId === '', function ($query) use ($accessibleUnitIds, $request) {
                 $query->where(function ($q) use ($accessibleUnitIds, $request) {
                     $q->where('id', $request->user()->id)
                       ->orWhereHas('employee', fn ($e) => $e->whereIn('unit_id', $accessibleUnitIds))
-                      ->orWhereHas('student', fn ($s) => $s->whereIn('unit_id', $accessibleUnitIds));
+                      ->orWhereHas('student', fn ($s) => $s->whereIn('unit_id', $accessibleUnitIds))
+                      ->orWhereHas('parent.students', fn ($s) => $s->whereIn('unit_id', $accessibleUnitIds))
+                      ->orWhereHas('parent.studentsPivot', fn ($s) => $s->whereIn('unit_id', $accessibleUnitIds));
                 });
             })
             ->when($search, fn ($query) => $query->where(function ($query) use ($search) {
@@ -255,6 +288,14 @@ class UserAccountController extends Controller
         $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($authUser)->pluck('id');
         $targetUnitId = $targetUser->employee?->unit_id ?? $targetUser->student?->unit_id;
 
+        if (! $targetUnitId && $targetUser->parent) {
+            $parentChildUnits = collect($targetUser->parent->students ?? [])
+                ->merge($targetUser->parent->studentsPivot ?? [])
+                ->pluck('unit_id')
+                ->filter();
+            $targetUnitId = $parentChildUnits->first(fn ($uId) => $accessibleUnitIds->contains($uId));
+        }
+
         abort_unless(
             $this->accessScope->canManageUnitAccess($authUser)
                 && $targetUnitId
@@ -285,19 +326,49 @@ class UserAccountController extends Controller
 
     private function serialize(User $user): array
     {
-        $unit = $user->employee?->unit ? [
-            'id' => $user->employee->unit->id,
-            'nama' => $user->employee->unit->nama_unit ?? $user->employee->unit->name ?? '-',
-        ] : ($user->student?->educationUnit ? [
-            'id' => $user->student->educationUnit->id,
-            'nama' => $user->student->educationUnit->nama_unit ?? $user->student->educationUnit->name ?? '-',
-        ] : null);
+        $unit = null;
+        if ($user->employee?->unit) {
+            $unit = [
+                'id' => $user->employee->unit->id,
+                'nama' => $user->employee->unit->nama_unit ?? $user->employee->unit->name ?? '-',
+                'is_parent_unit' => false,
+            ];
+        } elseif ($user->student?->educationUnit) {
+            $unit = [
+                'id' => $user->student->educationUnit->id,
+                'nama' => $user->student->educationUnit->nama_unit ?? $user->student->educationUnit->name ?? '-',
+                'is_parent_unit' => false,
+            ];
+        } elseif ($user->parent) {
+            $childrenUnits = collect($user->parent->students ?? [])
+                ->merge($user->parent->studentsPivot ?? [])
+                ->pluck('educationUnit')
+                ->filter()
+                ->unique('id');
+            if ($childrenUnits->isNotEmpty()) {
+                $unit = [
+                    'id' => $childrenUnits->first()->id,
+                    'nama' => $childrenUnits->map(fn ($u) => $u->nama_unit ?? $u->name)->join(', '),
+                    'is_parent_unit' => true,
+                ];
+            }
+        }
+
+        $personType = 'standalone';
+        if ($user->employee) {
+            $personType = 'employee';
+        } elseif ($user->student) {
+            $personType = 'student';
+        } elseif ($user->parent) {
+            $personType = 'parent';
+        }
 
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'phone' => $user->phone,
+            'person_type' => $personType,
             'is_active' => $user->is_active,
             'roles' => $user->roles->pluck('name')->values(),
             'unit' => $unit,
