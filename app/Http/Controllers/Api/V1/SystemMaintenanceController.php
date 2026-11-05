@@ -270,25 +270,40 @@ class SystemMaintenanceController extends Controller
         $scope = $request->input('scope', 'all_except_superadmin');
         $cleared = [];
         $driver = DB::getDriverName();
+        $isPgsqlSuperuser = false;
+
+        // Cek apakah database pgsql dijalankan oleh superuser sebelum mencoba SET session_replication_role
+        if ($driver === 'pgsql') {
+            try {
+                $row = DB::selectOne("SELECT current_setting('is_superuser') AS is_sup");
+                $isPgsqlSuperuser = ($row && in_array(strtolower((string) $row->is_sup), ['on', 'true', '1'], true));
+            } catch (\Throwable) {
+                $isPgsqlSuperuser = false;
+            }
+        }
 
         try {
             DB::beginTransaction();
 
-            // Nonaktifkan foreign key checks jika memiliki hak akses (Superuser), abaikan jika non-superuser
+            // Nonaktifkan foreign key checks jika memiliki hak akses superuser.
+            // PENTING: Pada PostgreSQL, jika non-superuser mengeksekusi 'SET session_replication_role',
+            // Postgres langsung membatalkan transaksi (state aborted) dan menggagalkan semua query setelahnya (SQLSTATE[25P02]).
             try {
-                if ($driver === 'pgsql') {
+                if ($driver === 'pgsql' && $isPgsqlSuperuser) {
                     DB::statement("SET session_replication_role = 'replica';");
                 } elseif ($driver === 'mysql') {
                     DB::statement('SET FOREIGN_KEY_CHECKS = 0;');
                 }
             } catch (\Throwable) {
-                // Abaikan kesalahan permission denied jika user PostgreSQL bukan superuser.
-                // Tabel telah diurutkan secara hierarkis (child-to-parent) sehingga penghapusan tetap aman.
+                // Abaikan kesalahan permission denied jika user bukan superuser.
             }
 
-            // 1. Bersihkan tabel operasional (Presensi, Nilai, LMS, Mutabaah, Tahfizh, Notifikasi, Chat)
+            // 1. Bersihkan tabel operasional (Presensi, Nilai, LMS, Mutabaah, Tahfizh, Keuangan, Notifikasi, Chat)
             $operationalTables = [
                 'attendance_scan_logs',
+                'lesson_attendance_corrections',
+                'lms_presensi',
+                'lesson_attendance_sessions',
                 'student_attendance_permissions',
                 'homeroom_attendance_follow_ups',
                 'worship_attendance_details',
@@ -308,12 +323,16 @@ class SystemMaintenanceController extends Controller
                 'mutabaah_activity_logs',
                 'tahfizh_ayah_achievements',
                 'tahfizh_exams',
+                'munaqasyah_tahfizhs',
                 'tahfizh_records',
                 'tahfizh_targets',
                 'student_prayer_assessments',
                 'assessment_scores',
                 'student_grades',
                 'grades',
+                'kurasi_soals',
+                'supervisi_kbms',
+                'pelatihan_gurus',
                 'lms_pengumpulan_tugas',
                 'lms_penugasan',
                 'lms_ujian_sesi',
@@ -326,6 +345,8 @@ class SystemMaintenanceController extends Controller
                 'lms_materi',
                 'lms_bank_soal',
                 'lms_kisi_kisi',
+                'bill_payments',
+                'student_bills',
                 'dormitory_permits',
                 'dormitory_deposits',
                 'clinic_logs',
@@ -458,9 +479,9 @@ class SystemMaintenanceController extends Controller
                 $cleared['users'] = $userCnt;
             }
 
-            // Kembalikan foreign key checks
+            // Kembalikan foreign key checks jika sebelumnya dinonaktifkan
             try {
-                if ($driver === 'pgsql') {
+                if ($driver === 'pgsql' && $isPgsqlSuperuser) {
                     DB::statement("SET session_replication_role = 'origin';");
                 } elseif ($driver === 'mysql') {
                     DB::statement('SET FOREIGN_KEY_CHECKS = 1;');
@@ -483,9 +504,9 @@ class SystemMaintenanceController extends Controller
         } catch (\Throwable $e) {
             DB::rollBack();
 
-            // Pastikan foreign key checks dipulihkan kembali saat rollback
+            // Pastikan foreign key checks dipulihkan kembali saat rollback jika superuser
             try {
-                if ($driver === 'pgsql') {
+                if ($driver === 'pgsql' && $isPgsqlSuperuser) {
                     DB::statement("SET session_replication_role = 'origin';");
                 } elseif ($driver === 'mysql') {
                     DB::statement('SET FOREIGN_KEY_CHECKS = 1;');

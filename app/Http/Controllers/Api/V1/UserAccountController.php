@@ -165,6 +165,7 @@ class UserAccountController extends Controller
                 'role' => ['required', 'string', Rule::exists(Role::class, 'name')],
                 'additional_roles' => ['nullable', 'array'],
                 'additional_roles.*' => ['string', Rule::exists(Role::class, 'name')],
+                'password' => ['nullable', 'string', 'min:8', 'confirmed'],
             ]
             : $this->rules($user, false));
         $this->accessScope->assertRoleAssignmentAllowed($request->user(), $validated['role']);
@@ -195,6 +196,13 @@ class UserAccountController extends Controller
                     'phone' => $validated['phone'] ?? null,
                     'is_active' => $validated['is_active'] ?? $user->is_active,
                 ]);
+            }
+            if (! empty($validated['password'])) {
+                $user->password = $validated['password'];
+                $metadata = $user->metadata ?? [];
+                $metadata['must_change_password'] = false;
+                $metadata['password_reset_at'] = now()->toISOString();
+                $user->metadata = $metadata;
             }
             $user->save();
 
@@ -319,6 +327,8 @@ class UserAccountController extends Controller
 
         if ($withPassword) {
             $rules['password'] = ['required', 'confirmed', Password::min(8)->mixedCase()->letters()->numbers()->symbols()];
+        } else {
+            $rules['password'] = ['nullable', 'string', 'min:8', 'confirmed'];
         }
 
         return $rules;

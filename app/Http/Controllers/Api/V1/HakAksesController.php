@@ -530,6 +530,13 @@ class HakAksesController extends Controller
                     ]);
 
                     $employee->user_id = $user->id;
+                } elseif (! empty($validated['password'])) {
+                    $user->password = $validated['password'];
+                    $metadata = $user->metadata ?? [];
+                    $metadata['must_change_password'] = false;
+                    $metadata['password_reset_at'] = now()->toISOString();
+                    $user->metadata = $metadata;
+                    $user->save();
                 }
 
                 $role = Role::where('name', $validated['role_name'])->first();
