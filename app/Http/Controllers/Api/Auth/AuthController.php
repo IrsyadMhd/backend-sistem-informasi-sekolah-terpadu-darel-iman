@@ -267,6 +267,27 @@ class AuthController extends Controller
             $targetQuery->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', ['Kepala Sekolah', 'Tata Usaha', 'Yayasan', 'Ketua Yayasan', 'Divisi Pendidikan']));
         }
 
+        // Khusus role Musyrif: Hanya ambil akun yang bertugas di unit boarding (pesantren/asrama), bukan fullday
+        if ($validated['role'] === 'Musyrif') {
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $targetQuery->where(function ($mq) use ($likeOp) {
+                $mq->where('email', 'musyrif.test@dareliman.sch.id')
+                   ->orWhereHas('employee.unit', function ($uq) use ($likeOp) {
+                       $uq->where(function ($sub) use ($likeOp) {
+                           $sub->where('program_type', 'boarding')
+                              ->orWhere('name', $likeOp, '%ponpes%')
+                              ->orWhere('name', $likeOp, '%asrama%')
+                              ->orWhere('name', $likeOp, '%pesantren%')
+                              ->orWhere('name', $likeOp, "%ma'had%")
+                              ->orWhere('name', $likeOp, '%mahad%');
+                       })->where(function ($sub) {
+                           $sub->whereNull('program_type')
+                              ->orWhere('program_type', '!=', 'fullday');
+                       });
+                   });
+            });
+        }
+
         $target = $targetQuery->orderBy('name')->first();
 
         if (! $target) {
