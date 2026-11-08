@@ -91,61 +91,166 @@ class MasterKurikulumService
         $gagal = 0;
         $errors = [];
 
-        DB::beginTransaction();
-        try {
-            foreach ($rows as $index => $row) {
-                try {
-                    $kode = trim($row['kode_kurikulum'] ?? '');
-                    if (empty($kode)) {
-                        $jenjang = strtoupper($row['jenjang'] ?? 'SIT');
-                        $kode = CodeGeneratorService::generate('curriculum_code', $unitId, $tahunId, ['extra' => $jenjang]);
-                    }
+        // Preload default active academic year & semester
+        $academicPeriod = app(\App\Services\AcademicPeriodService::class);
+        $defaultTahun = $academicPeriod->getActiveYear()
+            ?? \App\Models\AcademicYear::where('is_active', true)->first()
+            ?? \App\Models\AcademicYear::orderBy('created_at', 'desc')->first();
 
-                    $nama = trim($row['nama_kurikulum'] ?? '');
-                    $unitId = $row['unit_pendidikan_id'] ?? null;
-                    $tahunId = $row['tahun_ajaran_id'] ?? null;
+        $defaultUnit = \App\Models\EducationUnit::first();
 
-                    if (empty($nama) || empty($unitId) || empty($tahunId)) {
-                        $gagal++;
-                        $errors[] = 'Baris '.($index + 1).': Nama kurikulum, Unit Pendidikan, dan Tahun Ajaran wajib diisi.';
-
-                        continue;
-                    }
-
-                    MasterKurikulum::updateOrCreate(
-                        ['kode_kurikulum' => $kode],
-                        [
-                            'nama_kurikulum' => $nama,
-                            'jenis_kurikulum' => $row['jenis_kurikulum'] ?? 'SIT',
-                            'unit_pendidikan_id' => $unitId,
-                            'jenjang' => $row['jenjang'] ?? 'SD',
-                            'tahun_ajaran_id' => $tahunId,
-                            'semester_id' => $row['semester_id'] ?? null,
-                            'tanggal_mulai' => $row['tanggal_mulai'] ?? now()->toDateString(),
-                            'tanggal_selesai' => $row['tanggal_selesai'] ?? null,
-                            'status' => filter_var($row['status'] ?? true, FILTER_VALIDATE_BOOLEAN),
-                            'deskripsi' => $row['deskripsi'] ?? null,
-                            'created_by' => $userId,
-                            'updated_by' => $userId,
-                        ]
-                    );
-
-                    $berhasil++;
-                } catch (\Exception $e) {
-                    $gagal++;
-                    $errors[] = 'Baris '.($index + 1).': '.$e->getMessage();
+        foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
+            \Illuminate\Support\Facades\DB::beginTransaction();
+            try {
+                $nama = trim((string) ($row['nama_kurikulum'] ?? $row['nama'] ?? ''));
+                if (empty($nama)) {
+                    throw new \InvalidArgumentException('Nama kurikulum wajib diisi.');
                 }
+
+                // 1. Resolusi Unit Pendidikan (UUID, Nama, Kode, atau Jenjang)
+                $unitId = null;
+                $rawUnit = trim((string) ($row['unit_pendidikan_id'] ?? $row['unit_id'] ?? $row['unit_pendidikan'] ?? $row['unit'] ?? ''));
+                if (!empty($rawUnit)) {
+                    if (\Illuminate\Support\Str::isUuid($rawUnit)) {
+                        $unitId = \App\Models\EducationUnit::where('id', $rawUnit)->value('id');
+                    } else {
+                        $unitId = \App\Models\EducationUnit::where('code', $rawUnit)
+                            ->orWhere('name', 'ILIKE', '%' . $rawUnit . '%')
+                            ->orWhere('level', 'ILIKE', '%' . $rawUnit . '%')
+                            ->value('id');
+                    }
+                }
+
+                $rawJenjang = trim((string) ($row['jenjang'] ?? ''));
+                if (!$unitId && !empty($rawJenjang)) {
+                    $unitId = \App\Models\EducationUnit::where('level', 'ILIKE', '%' . $rawJenjang . '%')
+                        ->orWhere('name', 'ILIKE', '%' . $rawJenjang . '%')
+                        ->orWhere('code', 'ILIKE', '%' . $rawJenjang . '%')
+                        ->value('id');
+                }
+
+                $unitId = $unitId ?: $defaultUnit?->id;
+                if (!$unitId) {
+                    throw new \InvalidArgumentException('Unit Pendidikan tidak valid atau tidak ditemukan.');
+                }
+
+                // 2. Resolusi Tahun Ajaran (UUID, Nama, atau Default Aktif)
+                $tahunId = null;
+                $rawTahun = trim((string) ($row['tahun_ajaran_id'] ?? $row['tahun_ajaran'] ?? $row['tahun'] ?? ''));
+                if (!empty($rawTahun)) {
+                    if (\Illuminate\Support\Str::isUuid($rawTahun)) {
+                        $tahunId = \App\Models\AcademicYear::where('id', $rawTahun)->value('id');
+                    } else {
+                        $tahunId = \App\Models\AcademicYear::where('name', $rawTahun)
+                            ->orWhere('name', 'ILIKE', '%' . $rawTahun . '%')
+                            ->value('id');
+                    }
+                }
+                $tahunId = $tahunId ?: $defaultTahun?->id;
+                if (!$tahunId) {
+                    throw new \InvalidArgumentException('Tahun Ajaran tidak valid atau tidak ditemukan.');
+                }
+
+                // 3. Resolusi Semester (Opsional)
+                $semesterId = null;
+                $rawSemester = trim((string) ($row['semester_id'] ?? $row['semester'] ?? ''));
+                if (!empty($rawSemester) && $rawSemester !== '-') {
+                    if (\Illuminate\Support\Str::isUuid($rawSemester)) {
+                        $semesterId = \App\Models\Semester::where('id', $rawSemester)->value('id');
+                    } else {
+                        $semesterId = \App\Models\Semester::where('academic_year_id', $tahunId)
+                            ->where(function ($q) use ($rawSemester) {
+                                $q->where('name', $rawSemester)
+                                    ->orWhere('name', 'ILIKE', '%' . $rawSemester . '%');
+                            })->value('id');
+                    }
+                }
+
+                // 4. Resolusi Jenjang
+                $jenjang = !empty($rawJenjang) ? strtoupper($rawJenjang) : null;
+                if (!$jenjang && $unitId) {
+                    $unitObj = \App\Models\EducationUnit::find($unitId);
+                    $jenjang = strtoupper($unitObj?->level ?? 'SD');
+                }
+                if (!in_array($jenjang, ['TK', 'PAUD', 'TAUD', 'SD', 'MI', 'SMP', 'MTS', 'SMA', 'MA', 'SMK', 'PESANTREN', 'PONDOK', 'SIT', 'UMUM'])) {
+                    $jenjang = 'SD';
+                }
+
+                // 5. Resolusi Kode Kurikulum
+                $kode = trim((string) ($row['kode_kurikulum'] ?? $row['kode'] ?? ''));
+                if (empty($kode)) {
+                    $kode = CodeGeneratorService::generate('curriculum_code', $unitId, $tahunId, ['extra' => $jenjang]);
+                }
+
+                // 6. Tanggal Mulai & Tanggal Selesai
+                $tanggalMulai = trim((string) ($row['tanggal_mulai'] ?? ''));
+                if (empty($tanggalMulai) || $tanggalMulai === '-' || !strtotime($tanggalMulai)) {
+                    $tanggalMulai = now()->toDateString();
+                } else {
+                    $tanggalMulai = date('Y-m-d', strtotime($tanggalMulai));
+                }
+
+                $tanggalSelesai = trim((string) ($row['tanggal_selesai'] ?? ''));
+                if (empty($tanggalSelesai) || $tanggalSelesai === '-' || !strtotime($tanggalSelesai)) {
+                    $tanggalSelesai = null;
+                } else {
+                    $tanggalSelesai = date('Y-m-d', strtotime($tanggalSelesai));
+                }
+
+                // 7. Resolusi Status
+                $rawStatus = $row['status'] ?? true;
+                $status = true;
+                if (is_bool($rawStatus)) {
+                    $status = $rawStatus;
+                } else {
+                    $strStatus = strtolower(trim((string) $rawStatus));
+                    if (in_array($strStatus, ['nonaktif', 'non-aktif', 'inactive', 'false', '0', 'tidak'])) {
+                        $status = false;
+                    } elseif (in_array($strStatus, ['aktif', 'active', 'true', '1', 'ya'])) {
+                        $status = true;
+                    }
+                }
+
+                // 8. Jenis Kurikulum
+                $rawJenis = trim((string) ($row['jenis_kurikulum'] ?? $row['jenis'] ?? 'SIT'));
+                $validJenis = ['Nasional', 'Merdeka', 'SIT', 'Lokal', 'Pesantren', 'Lainnya'];
+                $jenisKurikulum = 'SIT';
+                foreach ($validJenis as $vj) {
+                    if (strcasecmp($vj, $rawJenis) === 0) {
+                        $jenisKurikulum = $vj;
+                        break;
+                    }
+                }
+
+                MasterKurikulum::updateOrCreate(
+                    ['kode_kurikulum' => $kode],
+                    [
+                        'nama_kurikulum' => $nama,
+                        'jenis_kurikulum' => $jenisKurikulum,
+                        'unit_pendidikan_id' => $unitId,
+                        'jenjang' => $jenjang,
+                        'tahun_ajaran_id' => $tahunId,
+                        'semester_id' => $semesterId,
+                        'tanggal_mulai' => $tanggalMulai,
+                        'tanggal_selesai' => $tanggalSelesai,
+                        'status' => $status,
+                        'deskripsi' => $row['deskripsi'] ?? null,
+                        'created_by' => $userId,
+                        'updated_by' => $userId,
+                    ]
+                );
+
+                \Illuminate\Support\Facades\DB::commit();
+                $berhasil++;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\DB::rollBack();
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: " . $e->getMessage();
+                \Illuminate\Support\Facades\Log::warning("Gagal impor baris {$rowNum} kurikulum: " . $e->getMessage(), [
+                    'row' => $row,
+                ]);
             }
-
-            DB::commit();
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return [
-                'berhasil' => 0,
-                'gagal' => count($rows),
-                'errors' => [$e->getMessage()],
-            ];
         }
 
         return [
@@ -163,19 +268,18 @@ class MasterKurikulumService
         foreach ($paginated->items() as $index => $item) {
             $result[] = [
                 'no' => $index + 1,
-                'id' => $item->id,
                 'kode_kurikulum' => $item->kode_kurikulum,
                 'nama_kurikulum' => $item->nama_kurikulum,
                 'jenis_kurikulum' => $item->jenis_kurikulum,
-                'unit_pendidikan' => $item->unitPendidikan?->name ?? '-',
                 'jenjang' => $item->jenjang,
-                'tahun_ajaran' => $item->tahunAjaran?->name ?? '-',
-                'semester' => $item->semester?->name ?? '-',
-                'tanggal_mulai' => $item->tanggal_mulai ? $item->tanggal_mulai->format('Y-m-d') : '-',
-                'tanggal_selesai' => $item->tanggal_selesai ? $item->tanggal_selesai->format('Y-m-d') : '-',
+                'unit_pendidikan' => $item->unitPendidikan?->name ?? '',
+                'tahun_ajaran' => $item->tahunAjaran?->name ?? '',
+                'semester' => $item->semester?->name ?? '',
+                'tanggal_mulai' => $item->tanggal_mulai ? $item->tanggal_mulai->format('Y-m-d') : '',
+                'tanggal_selesai' => $item->tanggal_selesai ? $item->tanggal_selesai->format('Y-m-d') : '',
                 'status' => $item->status ? 'Aktif' : 'Nonaktif',
                 'deskripsi' => $item->deskripsi ?? '',
-                'created_at' => $item->created_at ? $item->created_at->format('Y-m-d H:i:s') : '-',
+                'created_at' => $item->created_at ? $item->created_at->format('Y-m-d H:i:s') : '',
             ];
         }
 

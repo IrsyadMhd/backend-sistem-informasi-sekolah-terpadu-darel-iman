@@ -243,7 +243,7 @@ class AppNavigationSeeder extends Seeder
                     ],
                     [
                         'id' => 'master-tata-tertib',
-                        'name' => 'Tata Tertib & Poin Kedisiplinan',
+                        'name' => 'Tata Tertib & Poin',
                         'path' => '/dashboard/tata-tertib',
                         'icon' => 'ShieldCheck',
                         'required_permissions' => ['discipline.point.view', 'discipline.point.manage', 'sistem.master_data'],
