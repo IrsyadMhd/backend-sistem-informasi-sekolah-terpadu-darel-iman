@@ -262,8 +262,13 @@ class ProfileController extends Controller
             ], 422);
         }
 
+        $metadata = $user->metadata ?? [];
+        $metadata['must_change_password'] = false;
+        $metadata['password_changed_at'] = now()->toISOString();
+
         $user->forceFill([
             'password' => Hash::make($validated['password']),
+            'metadata' => $metadata,
         ])->save();
 
         return response()->json([

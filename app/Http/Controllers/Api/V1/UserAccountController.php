@@ -3,12 +3,17 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Employee;
+use App\Models\ParentModel;
 use App\Models\Role;
+use App\Models\Student;
 use App\Models\User;
 use App\Services\AccessScopeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -500,6 +505,206 @@ class UserAccountController extends Controller
         ]);
     }
 
+    /**
+     * Sinkronisasi massal seluruh entitas Pegawai, Siswa, dan Orang Tua yang belum memiliki akun user.
+     */
+    public function syncEntities(Request $request): JsonResponse
+    {
+        @set_time_limit(300);
+        @ini_set('memory_limit', '512M');
+
+        $user = $request->user();
+        if (! $this->accessScope->canManageGlobalAccess($user) && ! $this->accessScope->canManageUnitAccess($user)) {
+            abort(403, 'Anda tidak memiliki hak akses untuk menyinkronkan akun pengguna.');
+        }
+
+        $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+        $isGlobalAdmin = $this->isGlobalAdmin($user);
+
+        $defaultPassword = 'Password123!';
+        $createdEmployees = 0;
+        $createdStudents = 0;
+        $createdParents = 0;
+
+        DB::beginTransaction();
+        try {
+            // 1. SINKRONISASI PEGAWAI & GURU
+            $employeeQuery = Employee::query()
+                ->where(function ($q) {
+                    $q->whereNull('user_id')
+                      ->orWhereDoesntHave('user');
+                });
+            if (! $isGlobalAdmin) {
+                $employeeQuery->whereIn('unit_id', $accessibleUnitIds);
+            }
+
+            $employees = $employeeQuery->get();
+            foreach ($employees as $emp) {
+                $rawEmail = strtolower(trim((string) $emp->email));
+                if (! empty($rawEmail) && filter_var($rawEmail, FILTER_VALIDATE_EMAIL) && ! User::where('email', $rawEmail)->exists()) {
+                    $email = $rawEmail;
+                } else {
+                    $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', (string) ($emp->niy ?: $emp->nik ?: Str::slug($emp->nama_lengkap, '')));
+                    if (empty($cleanId)) {
+                        $cleanId = substr((string) $emp->id, 0, 8);
+                    }
+                    $candidateEmail = "{$cleanId}@pegawai.darel-iman.sch.id";
+                    $counter = 1;
+                    while (User::where('email', $candidateEmail)->exists()) {
+                        $candidateEmail = "{$cleanId}{$counter}@pegawai.darel-iman.sch.id";
+                        $counter++;
+                    }
+                    $email = $candidateEmail;
+                }
+
+                $newUser = User::create([
+                    'name' => $emp->nama_lengkap ?: 'Pegawai',
+                    'email' => $email,
+                    'phone' => $emp->no_hp ?: null,
+                    'password' => $defaultPassword,
+                    'is_active' => true,
+                    'metadata' => [
+                        'must_change_password' => true,
+                        'created_by' => 'entity_sync',
+                        'sync_date' => now()->toISOString(),
+                    ],
+                ]);
+
+                $roleName = 'Pegawai';
+                $nameLower = strtolower($emp->nama_lengkap ?? '');
+                if (str_contains($nameLower, 'ustadz') || str_contains($nameLower, 'ustadzah') || str_contains($nameLower, 'guru')) {
+                    $roleName = 'Guru';
+                } elseif (Role::where('name', 'Guru')->exists()) {
+                    $roleName = 'Guru';
+                }
+
+                if (Role::where('name', $roleName)->exists()) {
+                    $newUser->assignRole($roleName);
+                }
+
+                $emp->update(['user_id' => $newUser->id]);
+                $createdEmployees++;
+            }
+
+            // 2. SINKRONISASI SISWA
+            $studentQuery = Student::query()
+                ->where(function ($q) {
+                    $q->whereNull('user_id')
+                      ->orWhereDoesntHave('user');
+                });
+            if (! $isGlobalAdmin) {
+                $studentQuery->whereIn('unit_id', $accessibleUnitIds);
+            }
+
+            $students = $studentQuery->get();
+            foreach ($students as $stu) {
+                $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', (string) ($stu->nisn ?: $stu->nis ?: $stu->id));
+                if (empty($cleanId)) {
+                    $cleanId = substr((string) $stu->id, 0, 8);
+                }
+                $candidateEmail = "{$cleanId}@siswa.darel-iman.sch.id";
+                $counter = 1;
+                while (User::where('email', $candidateEmail)->exists()) {
+                    $candidateEmail = "{$cleanId}{$counter}@siswa.darel-iman.sch.id";
+                    $counter++;
+                }
+
+                $newUser = User::create([
+                    'name' => $stu->full_name ?: 'Siswa',
+                    'email' => $candidateEmail,
+                    'phone' => null,
+                    'password' => $defaultPassword,
+                    'is_active' => true,
+                    'metadata' => [
+                        'must_change_password' => true,
+                        'created_by' => 'entity_sync',
+                        'sync_date' => now()->toISOString(),
+                    ],
+                ]);
+
+                if (Role::where('name', 'Siswa')->exists()) {
+                    $newUser->assignRole('Siswa');
+                }
+
+                $stu->update(['user_id' => $newUser->id]);
+                $createdStudents++;
+            }
+
+            // 3. SINKRONISASI ORANG TUA / WALI
+            $parentQuery = ParentModel::query()
+                ->where(function ($q) {
+                    $q->whereNull('user_id')
+                      ->orWhereDoesntHave('user');
+                });
+
+            $parents = $parentQuery->get();
+            foreach ($parents as $par) {
+                $rawEmail = strtolower(trim((string) $par->email));
+                if (! empty($rawEmail) && filter_var($rawEmail, FILTER_VALIDATE_EMAIL) && ! User::where('email', $rawEmail)->exists()) {
+                    $email = $rawEmail;
+                } else {
+                    $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', (string) ($par->nik ?: $par->phone ?: substr((string) $par->id, 0, 8)));
+                    if (empty($cleanId)) {
+                        $cleanId = substr((string) $par->id, 0, 8);
+                    }
+                    $candidateEmail = "{$cleanId}@ortu.darel-iman.sch.id";
+                    $counter = 1;
+                    while (User::where('email', $candidateEmail)->exists()) {
+                        $candidateEmail = "{$cleanId}{$counter}@ortu.darel-iman.sch.id";
+                        $counter++;
+                    }
+                    $email = $candidateEmail;
+                }
+
+                $newUser = User::create([
+                    'name' => $par->full_name ?: 'Orang Tua',
+                    'email' => $email,
+                    'phone' => $par->phone ?: null,
+                    'password' => $defaultPassword,
+                    'is_active' => true,
+                    'metadata' => [
+                        'must_change_password' => true,
+                        'created_by' => 'entity_sync',
+                        'sync_date' => now()->toISOString(),
+                    ],
+                ]);
+
+                if (Role::where('name', 'Orang Tua')->exists()) {
+                    $newUser->assignRole('Orang Tua');
+                }
+
+                $par->update(['user_id' => $newUser->id]);
+                $createdParents++;
+            }
+
+            DB::commit();
+
+            $totalBaru = $createdEmployees + $createdStudents + $createdParents;
+
+            return response()->json([
+                'success' => true,
+                'status' => 'success',
+                'message' => $totalBaru > 0
+                    ? "Sinkronisasi berhasil. {$totalBaru} akun login baru berhasil dibuat ({$createdEmployees} Pegawai/Guru, {$createdStudents} Siswa, {$createdParents} Orang Tua) dengan password default 'Password123!' (Status: Wajib Ganti Password)."
+                    : "Seluruh data Pegawai, Siswa, dan Orang Tua sudah memiliki akun login aktif. Tidak ada akun baru yang perlu dibuat.",
+                'data' => [
+                    'total_baru' => $totalBaru,
+                    'pegawai' => $createdEmployees,
+                    'siswa' => $createdStudents,
+                    'orang_tua' => $createdParents,
+                    'default_password' => $defaultPassword,
+                ],
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'status' => 'error',
+                'message' => 'Gagal menyinkronkan akun: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
     private function isGlobalAdmin(User $user): bool
     {
         return $this->accessScope->hasGlobalScope($user);
@@ -602,6 +807,7 @@ class UserAccountController extends Controller
             'unit' => $unit,
             'must_change_password' => (bool) data_get($user->metadata, 'must_change_password', false),
             'last_password_reset_at' => data_get($user->metadata, 'password_reset_at'),
+            'password_changed_at' => data_get($user->metadata, 'password_changed_at'),
             'created_at' => $user->created_at,
         ];
     }

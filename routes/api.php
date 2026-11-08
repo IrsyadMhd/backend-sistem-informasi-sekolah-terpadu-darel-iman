@@ -835,6 +835,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // CRUD akun login dan reset password
         Route::get('/users/import-template', [UserAccountController::class, 'importTemplate']);
         Route::post('/users/import', [UserAccountController::class, 'import']);
+        Route::post('/users/sync-entities', [UserAccountController::class, 'syncEntities']);
         Route::get('/users', [UserAccountController::class, 'index']);
         Route::post('/users', [UserAccountController::class, 'store']);
         Route::get('/users/{user}', [UserAccountController::class, 'show']);
