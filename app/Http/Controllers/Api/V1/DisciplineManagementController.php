@@ -450,10 +450,14 @@ class DisciplineManagementController extends Controller
         if ($request->filled('student_id')) {
             $query->where('student_id', $request->query('student_id'));
         }
-        if ($request->filled('unit_id')) {
-            $query->whereHas('student', fn ($sq) => $sq->where('unit_id', $request->query('unit_id')));
+        if ($request->filled('unit_id') && $request->query('unit_id') !== 'all') {
+            $unitId = $request->query('unit_id');
+            $query->whereHas('student', function ($sq) use ($unitId) {
+                $sq->where('unit_id', $unitId)
+                   ->orWhereHas('kelas', fn ($kq) => $kq->where('unit_pendidikan_id', $unitId));
+            });
         }
-        if ($request->filled('class_id')) {
+        if ($request->filled('class_id') && $request->query('class_id') !== 'all') {
             $classId = $request->query('class_id');
             $query->whereHas('student', fn ($sq) => $sq->where('kelas_id', $classId)->orWhere('class_id', $classId));
         }
@@ -478,7 +482,18 @@ class DisciplineManagementController extends Controller
             });
         }
 
-        $paginated = $query->orderByDesc('transaction_date')->latest('created_at')->paginate($request->integer('per_page', 15));
+        $sortBy = $request->query('sort_by', 'date_desc');
+        if ($sortBy === 'points_desc') {
+            $query->orderByDesc('points')->latest('created_at');
+        } elseif ($sortBy === 'points_asc') {
+            $query->orderBy('points', 'asc')->latest('created_at');
+        } elseif ($sortBy === 'date_asc') {
+            $query->orderBy('transaction_date', 'asc')->oldest('created_at');
+        } else {
+            $query->orderByDesc('transaction_date')->latest('created_at');
+        }
+
+        $paginated = $query->paginate($request->integer('per_page', 15));
 
         return response()->json([
             'success' => true,
@@ -820,19 +835,31 @@ class DisciplineManagementController extends Controller
     public function divisiOverview(Request $request): JsonResponse
     {
         $activeYear = AcademicYear::where('is_active', true)->first();
-        $units = EducationUnit::orderBy('level')->orderBy('name')->get();
+        $unitParam = $request->query('unit_id');
+        $selectedUnitId = ($unitParam && $unitParam !== 'all') ? (string) $unitParam : null;
 
-        $allStudentsCount = Student::count();
+        $classParam = $request->query('class_id');
+        $selectedClassId = ($classParam && $classParam !== 'all') ? (string) $classParam : null;
+
+        $sortBy = $request->query('sort_by', 'points_desc');
+
+        $units = EducationUnit::orderBy('level')->orderBy('name')->get();
+        $allStudentsCount = Student::when($selectedUnitId, fn ($q) => $q->where('unit_id', $selectedUnitId))
+            ->when($selectedClassId, fn ($q) => $q->where('kelas_id', $selectedClassId))
+            ->count();
 
         // Points grouped by student
         $pointsByStudent = DB::table('student_point_transactions')
             ->join('students', 'student_point_transactions.student_id', '=', 'students.id')
+            ->where('student_point_transactions.status', '!=', 'dibatalkan')
             ->when($activeYear, fn ($q) => $q->where('student_point_transactions.academic_year_id', $activeYear->id))
+            ->when($selectedUnitId, fn ($q) => $q->where('students.unit_id', $selectedUnitId))
+            ->when($selectedClassId, fn ($q) => $q->where('students.kelas_id', $selectedClassId))
             ->groupBy('students.id', 'students.unit_id')
             ->select('students.id', 'students.unit_id', DB::raw('SUM(student_point_transactions.points) as total_points'))
             ->get();
 
-        $unitBenchmarks = $units->map(function ($u) use ($pointsByStudent) {
+        $unitBenchmarks = $units->map(function ($u) use ($pointsByStudent, $selectedUnitId) {
             $uStudentsCount = Student::where('unit_id', $u->id)->count();
             $uPoints = $pointsByStudent->where('unit_id', $u->id);
             $uViolationsCount = $uPoints->count();
@@ -851,6 +878,7 @@ class DisciplineManagementController extends Controller
                 'unit_name' => $u->name,
                 'level' => $u->level,
                 'program_type' => $u->program_type ?? 'fullday',
+                'is_selected' => $selectedUnitId === $u->id,
                 'total_students' => $uStudentsCount,
                 'clean_students' => $uCleanCount,
                 'compliance_rate' => $uComplianceRate,
@@ -869,6 +897,8 @@ class DisciplineManagementController extends Controller
 
         $complianceAuditStudents = Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas'])
             ->whereIn('id', $unissuedSpStudentIds)
+            ->when($selectedUnitId, fn ($q) => $q->where('unit_id', $selectedUnitId))
+            ->when($selectedClassId, fn ($q) => $q->where('kelas_id', $selectedClassId))
             ->get()
             ->map(function ($st) use ($pointsByStudent) {
                 return [
@@ -882,16 +912,155 @@ class DisciplineManagementController extends Controller
                 ];
             });
 
+        // Rincian Siswa/Santri & Ranking Poin (Tertinggi / Terendah)
+        $studentRankingsQuery = DB::table('students')
+            ->leftJoin('student_point_transactions', function ($join) use ($activeYear) {
+                $join->on('students.id', '=', 'student_point_transactions.student_id')
+                     ->where('student_point_transactions.status', '!=', 'dibatalkan');
+                if ($activeYear) {
+                    $join->where('student_point_transactions.academic_year_id', $activeYear->id);
+                }
+            })
+            ->leftJoin('education_units', 'students.unit_id', '=', 'education_units.id')
+            ->leftJoin('tbl_kelas', 'students.kelas_id', '=', 'tbl_kelas.id')
+            ->when($selectedUnitId, fn ($q) => $q->where('students.unit_id', $selectedUnitId))
+            ->when($selectedClassId, fn ($q) => $q->where('students.kelas_id', $selectedClassId))
+            ->select(
+                'students.id',
+                'students.full_name',
+                'students.nis',
+                'students.gender',
+                'students.unit_id',
+                'education_units.name as unit_name',
+                'education_units.program_type as program_type',
+                'tbl_kelas.nama_kelas as kelas_name',
+                DB::raw('COALESCE(SUM(student_point_transactions.points), 0) as total_points'),
+                DB::raw('COUNT(student_point_transactions.id) as violations_count'),
+                DB::raw('MAX(student_point_transactions.transaction_date) as last_violation_date')
+            )
+            ->groupBy(
+                'students.id',
+                'students.full_name',
+                'students.nis',
+                'students.gender',
+                'students.unit_id',
+                'education_units.name',
+                'education_units.program_type',
+                'tbl_kelas.nama_kelas'
+            );
+
+        if ($sortBy === 'points_asc') {
+            $studentRankingsQuery->orderBy('total_points', 'asc')->orderBy('students.full_name', 'asc');
+        } else {
+            $studentRankingsQuery->orderByDesc('total_points')->orderBy('students.full_name', 'asc');
+        }
+
+        $studentRankingsRaw = $studentRankingsQuery->limit(60)->get();
+        $studentIdsInRankings = $studentRankingsRaw->pluck('id')->filter();
+
+        $warningLettersMap = StudentWarningLetter::whereIn('student_id', $studentIdsInRankings)
+            ->orderByDesc('issue_date')
+            ->get()
+            ->groupBy('student_id');
+
+        $studentRankings = $studentRankingsRaw->map(function ($st) use ($warningLettersMap) {
+            $pts = (int) $st->total_points;
+            $riskStatus = 'Aman (0 Poin)';
+            $riskBadgeColor = 'success';
+            if ($pts >= 250) {
+                $riskStatus = 'Sanksi Kritis (Dikeluarkan)';
+                $riskBadgeColor = 'danger';
+            } elseif ($pts >= 200) {
+                $riskStatus = 'SP 2 (200 - 249 Poin)';
+                $riskBadgeColor = 'danger';
+            } elseif ($pts >= 150) {
+                $riskStatus = 'SP 1 (150 - 199 Poin)';
+                $riskBadgeColor = 'danger';
+            } elseif ($pts >= 100) {
+                $riskStatus = 'Surat Teguran (100 - 149 Poin)';
+                $riskBadgeColor = 'warning';
+            } elseif ($pts >= 31) {
+                $riskStatus = 'Sanksi Sedang (31 - 99 Poin)';
+                $riskBadgeColor = 'warning';
+            } elseif ($pts >= 1) {
+                $riskStatus = 'Sanksi Ringan (1 - 30 Poin)';
+                $riskBadgeColor = 'primary';
+            }
+
+            $spLetters = $warningLettersMap->get($st->id, collect());
+            $latestSp = $spLetters->first();
+
+            return [
+                'id' => $st->id,
+                'full_name' => $st->full_name,
+                'nis' => $st->nis ?: '-',
+                'gender' => $st->gender ?? 'male',
+                'unit_id' => $st->unit_id,
+                'unit_name' => $st->unit_name ?: 'Unit Sekolah',
+                'program_type' => $st->program_type ?? 'fullday',
+                'kelas_name' => $st->kelas_name ?: 'Belum Ditentukan',
+                'total_points' => $pts,
+                'violations_count' => (int) $st->violations_count,
+                'last_violation_date' => $st->last_violation_date,
+                'risk_status' => $riskStatus,
+                'risk_badge_color' => $riskBadgeColor,
+                'has_sp' => $latestSp ? true : false,
+                'latest_sp_type' => $latestSp ? strtoupper($latestSp->letter_type) : null,
+                'latest_sp_date' => $latestSp ? $latestSp->issue_date : null,
+            ];
+        });
+
         // Kluster Se-Yayasan
         $clusterDistribution = DB::table('student_point_transactions')
             ->join('discipline_categories', 'student_point_transactions.category_id', '=', 'discipline_categories.id')
+            ->where('student_point_transactions.status', '!=', 'dibatalkan')
             ->when($activeYear, fn ($q) => $q->where('student_point_transactions.academic_year_id', $activeYear->id))
+            ->when($selectedUnitId, function ($q) use ($selectedUnitId) {
+                $q->join('students', 'student_point_transactions.student_id', '=', 'students.id')
+                  ->where('students.unit_id', $selectedUnitId);
+            })
             ->groupBy('discipline_categories.cluster')
             ->select('discipline_categories.cluster', DB::raw('count(*) as count'), DB::raw('sum(student_point_transactions.points) as total_points'))
             ->get();
 
-        $totalCleanAll = $unitBenchmarks->sum('clean_students');
+        $totalCleanAll = $selectedUnitId
+            ? ($unitBenchmarks->firstWhere('unit_id', $selectedUnitId)['clean_students'] ?? 0)
+            : $unitBenchmarks->sum('clean_students');
         $overallCompliance = $allStudentsCount > 0 ? round(($totalCleanAll / $allStudentsCount) * 100, 1) : 100;
+
+        $highestRiskUnit = $unitBenchmarks->sortByDesc('total_points')->first();
+        $selectedUnitModel = $selectedUnitId ? $units->firstWhere('id', $selectedUnitId) : null;
+        $selectedClassModel = $selectedClassId ? DB::table('tbl_kelas')->where('id', $selectedClassId)->first() : null;
+
+        $unitClassScope = $selectedUnitModel ? $selectedUnitModel->name : 'Seluruh Satuan Pendidikan (Lintas Unit)';
+        if ($selectedClassModel) {
+            $unitClassScope .= ' — Kelas ' . ($selectedClassModel->nama_kelas ?? $selectedClassModel->kode_kelas);
+        }
+
+        $executiveSummary = [
+            'report_title' => 'Laporan Eksekutif Supervisi Ketertiban & Mutu Adab Santri',
+            'audience' => 'Pengurus Yayasan & Badan Pembina Pesantren',
+            'period' => $activeYear?->name ?? 'Tahun Ajaran 2026/2027',
+            'generated_at' => now()->translatedFormat('d F Y, H:i') . ' WIB',
+            'selected_unit' => $unitClassScope,
+            'selected_class' => $selectedClassModel ? ($selectedClassModel->nama_kelas ?? $selectedClassModel->kode_kelas) : 'Semua Kelas / Rombel',
+            'total_students_monitored' => $allStudentsCount,
+            'clean_students' => $totalCleanAll,
+            'overall_compliance_rate' => $overallCompliance,
+            'high_risk_students_count' => $pointsByStudent->where('total_points', '>=', 100)->count(),
+            'total_sp_issued' => StudentWarningLetter::when($selectedUnitId, fn ($q) => $q->whereHas('student', fn ($sq) => $sq->where('unit_id', $selectedUnitId)))->count(),
+            'unissued_sp_count' => $unissuedSpStudentIds->count(),
+            'highest_risk_unit' => $highestRiskUnit ? [
+                'unit_name' => $highestRiskUnit['unit_name'],
+                'total_points' => $highestRiskUnit['total_points'],
+                'compliance_rate' => $highestRiskUnit['compliance_rate'],
+            ] : null,
+            'recommendations' => [
+                'Percepatan penerbitan Surat Peringatan (SP) dan pemanggilan orang tua bagi santri dengan akumulasi poin >= 100.',
+                'Penguatan koordinasi terpadu antara Kepala Sekolah, Wali Asrama/Musyrif, dan Guru BK dalam pembinaan adab berkala.',
+                'Apresiasi dan penghargaan adab (bintang kebaikan) bagi unit dan kelas dengan tingkat kepatuhan di atas 95%.',
+            ],
+        ];
 
         return response()->json([
             'success' => true,
@@ -902,12 +1071,17 @@ class DisciplineManagementController extends Controller
                     'overall_compliance_rate' => $overallCompliance,
                     'total_units' => $units->count(),
                     'total_high_risk_students' => $pointsByStudent->where('total_points', '>=', 100)->count(),
-                    'total_warning_letters' => StudentWarningLetter::count(),
+                    'total_warning_letters' => StudentWarningLetter::when($selectedUnitId, fn ($q) => $q->whereHas('student', fn ($sq) => $sq->where('unit_id', $selectedUnitId)))->count(),
                     'unissued_sp_count' => $unissuedSpStudentIds->count(),
                 ],
+                'selected_unit_id' => $selectedUnitId,
+                'selected_class_id' => $selectedClassId,
+                'sort_by' => $sortBy,
                 'unit_benchmarks' => $unitBenchmarks,
+                'student_rankings' => $studentRankings,
                 'compliance_audit' => $complianceAuditStudents,
                 'cluster_distribution' => $clusterDistribution,
+                'executive_summary' => $executiveSummary,
             ],
         ]);
     }
@@ -1039,7 +1213,7 @@ class DisciplineManagementController extends Controller
                 || Str::contains(strtoupper($unitName), ['PONPES', 'MAHAD', 'PESANTREN', 'ASRAMA']);
 
             $activePoints = (int) StudentPointTransaction::where('student_id', $st->id)
-                ->where('is_active', true)
+                ->where('status', '!=', 'dibatalkan')
                 ->sum('points');
 
             $riskStatus = 'Aman (0 Poin)';
