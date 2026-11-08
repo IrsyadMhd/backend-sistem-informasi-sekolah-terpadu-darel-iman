@@ -217,25 +217,33 @@ class KelasService
 
     /**
      * Proses impor data kelas dari array data Excel/CSV.
+     *
+     * @param  array  $rows
+     * @param  bool   $overwrite Jika true, data yang sudah ada akan ditimpa/diperbarui. Jika false, dilewati.
+     * @return array
      */
-    public function prosesImport(array $rows): array
+    public function prosesImport(array $rows, bool $overwrite = false): array
     {
         $berhasil = 0;
+        $diperbarui = 0;
+        $duplikat = 0;
         $gagal = 0;
+        $duplicates = [];
         $errors = [];
 
         $academicPeriod = app(\App\Services\AcademicPeriodService::class);
-        $tahunDefault = $academicPeriod->getActiveYear();
-        $semesterDefault = $academicPeriod->getActiveSemester($tahunDefault?->id);
+        $tahunDefault = $academicPeriod->getActiveYear() ?? AcademicYear::where('status', 'Aktif')->first() ?? AcademicYear::first();
+        $semesterDefault = $academicPeriod->getActiveSemester($tahunDefault?->id) ?? ($tahunDefault ? Semester::where('academic_year_id', $tahunDefault->id)->first() : null) ?? Semester::first();
 
         foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
             try {
-                $kode = trim($row['kode_kelas'] ?? $row['kode'] ?? '');
-                $nama = trim($row['nama_kelas'] ?? $row['nama'] ?? '');
+                $kode = trim((string) ($row['kode_kelas'] ?? $row['kode'] ?? ''));
+                $nama = trim((string) ($row['nama_kelas'] ?? $row['nama'] ?? ''));
 
                 if (empty($kode) || empty($nama)) {
                     $gagal++;
-                    $errors[] = 'Baris '.($index + 1).': Kode dan Nama kelas wajib diisi.';
+                    $errors[] = "Baris {$rowNum}: Kode dan Nama kelas wajib diisi.";
 
                     continue;
                 }
@@ -243,35 +251,102 @@ class KelasService
                 $unitId = $row['unit_pendidikan_id'] ?? null;
                 if (! $unitId) {
                     $gagal++;
-                    $errors[] = 'Baris '.($index + 1).': Unit pendidikan wajib diisi.';
+                    $errors[] = "Baris {$rowNum}: Unit pendidikan wajib diisi.";
 
                     continue;
                 }
 
-                Kelas::updateOrCreate(
-                    ['kode_kelas' => $kode],
-                    [
-                        'unit_pendidikan_id' => $unitId,
-                        'tahun_ajaran_id' => $row['tahun_ajaran_id'] ?? $tahunDefault?->id,
-                        'semester_id' => $row['semester_id'] ?? $semesterDefault?->id,
-                        'jenjang' => $row['jenjang'] ?? 'SDIT',
-                        'tingkat' => $row['tingkat'] ?? '1',
-                        'nama_kelas' => $nama,
-                        'ruangan' => $row['ruangan'] ?? 'Utama',
-                        'kapasitas' => (int) ($row['kapasitas'] ?? 30),
-                        'status' => $row['status'] ?? 'Aktif',
-                    ]
-                );
+                $rawTahun = trim((string) ($row['tahun_ajaran_id'] ?? ''));
+                $tahunId = null;
+                if ($rawTahun !== '') {
+                    $tahunId = AcademicYear::where('id', $rawTahun)->orWhere('name', $rawTahun)->value('id');
+                }
+                $tahunId = $tahunId ?: $tahunDefault?->id;
+
+                $rawSem = trim((string) ($row['semester_id'] ?? ''));
+                $semId = null;
+                if ($rawSem !== '') {
+                    $semId = Semester::where('id', $rawSem)->orWhere('name', $rawSem)->value('id');
+                }
+                $semId = $semId ?: $semesterDefault?->id;
+
+                // Cek apakah data kelas sudah ada berdasarkan kode_kelas atau kombinasi (nama_kelas dan unit_pendidikan_id)
+                $existing = Kelas::withTrashed()
+                    ->where(function ($q) use ($kode, $nama, $unitId) {
+                        $q->where('kode_kelas', $kode)
+                            ->orWhere(function ($sub) use ($nama, $unitId) {
+                                $sub->where('unit_pendidikan_id', $unitId)
+                                    ->where('nama_kelas', $nama);
+                            });
+                    })
+                    ->first();
+
+                if ($existing) {
+                    if ($overwrite) {
+                        if ($existing->trashed()) {
+                            $existing->restore();
+                        }
+                        $existing->update([
+                            'unit_pendidikan_id' => $unitId,
+                            'tahun_ajaran_id' => $tahunId ?? $existing->tahun_ajaran_id ?? $tahunDefault?->id,
+                            'semester_id' => $semId ?? $existing->semester_id ?? $semesterDefault?->id,
+                            'jenjang' => $row['jenjang'] ?? $existing->jenjang ?? 'SDIT',
+                            'tingkat' => $row['tingkat'] ?? $existing->tingkat ?? '1',
+                            'nama_kelas' => $nama,
+                            'ruangan' => $row['ruangan'] ?? $existing->ruangan ?? 'Utama',
+                            'kapasitas' => (int) ($row['kapasitas'] ?? $existing->kapasitas ?? 30),
+                            'status' => $row['status'] ?? $existing->status ?? 'Aktif',
+                        ]);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $kode,
+                            'nama' => $nama,
+                            'status' => 'Ditimpa',
+                            'keterangan' => "Data kelas '{$nama}' ({$kode}) sudah ada dan berhasil ditimpa.",
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $kode,
+                            'nama' => $nama,
+                            'status' => 'Duplikat (Dilewati)',
+                            'keterangan' => "Data kelas '{$nama}' ({$kode}) sudah ada dan dilewati karena opsi timpa tidak aktif.",
+                        ];
+                    }
+
+                    continue;
+                }
+
+                // Buat data kelas baru
+                Kelas::create([
+                    'unit_pendidikan_id' => $unitId,
+                    'tahun_ajaran_id' => $tahunId,
+                    'semester_id' => $semId,
+                    'jenjang' => $row['jenjang'] ?? 'SDIT',
+                    'tingkat' => $row['tingkat'] ?? '1',
+                    'kode_kelas' => $kode,
+                    'nama_kelas' => $nama,
+                    'ruangan' => $row['ruangan'] ?? 'Utama',
+                    'kapasitas' => (int) ($row['kapasitas'] ?? 30),
+                    'status' => $row['status'] ?? 'Aktif',
+                ]);
                 $berhasil++;
             } catch (\Exception $e) {
                 $gagal++;
-                $errors[] = 'Baris '.($index + 1).': '.$e->getMessage();
+                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
             }
         }
 
         return [
+            'total' => count($rows),
             'berhasil' => $berhasil,
+            'diperbarui' => $diperbarui,
+            'duplikat' => $duplikat,
             'gagal' => $gagal,
+            'overwrite' => $overwrite,
+            'duplicates' => $duplicates,
             'errors' => $errors,
         ];
     }

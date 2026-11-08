@@ -184,8 +184,60 @@ class JenisUnitPendidikanController extends Controller
      */
     public function import(Request $request): JsonResponse
     {
-        $rows = $request->input('data', []);
-        if (! is_array($rows) || empty($rows)) {
+        $rows = [];
+        $overwrite = $request->boolean('overwrite', false);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            try {
+                $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+                $sheet = $spreadsheet->getActiveSheet();
+                $sheetData = $sheet->toArray(null, true, true, true);
+
+                if (! empty($sheetData)) {
+                    $headerRow = array_shift($sheetData);
+                    $headers = [];
+                    foreach ($headerRow as $colKey => $colName) {
+                        $colName = trim((string) $colName);
+                        if (! empty($colName)) {
+                            $headers[$colKey] = $colName;
+                        }
+                    }
+
+                    foreach ($sheetData as $row) {
+                        $rowData = [];
+                        $hasVal = false;
+                        foreach ($headers as $colKey => $colName) {
+                            $val = isset($row[$colKey]) ? trim((string) $row[$colKey]) : '';
+                            if ($val !== '') {
+                                $hasVal = true;
+                            }
+                            $rowData[$colName] = $val;
+                        }
+                        if ($hasVal) {
+                            $rows[] = $rowData;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas Excel/CSV: '.$e->getMessage(),
+                ], Response::HTTP_UNPROCESSABLE_ENTITY);
+            }
+        } else {
+            $inputData = $request->input('data', $request->input('rows', []));
+            if (is_string($inputData)) {
+                $decoded = json_decode($inputData, true);
+                if (is_array($decoded)) {
+                    $rows = $decoded;
+                }
+            } elseif (is_array($inputData)) {
+                $rows = $inputData;
+            }
+        }
+
+        if (empty($rows)) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Payload data impor tidak boleh kosong.',
@@ -193,11 +245,11 @@ class JenisUnitPendidikanController extends Controller
         }
 
         $userId = $request->user()?->id;
-        $hasil = $this->service->prosesImport($rows, $userId);
+        $hasil = $this->service->prosesImport($rows, $userId, $overwrite);
 
         return response()->json([
             'status' => 'success',
-            'message' => "Proses impor selesai. Berhasil: {$hasil['berhasil']}, Gagal: {$hasil['gagal']}.",
+            'message' => "Proses impor selesai. Berhasil: {$hasil['berhasil']}, Ditimpa: {$hasil['diperbarui']}, Dilewati: {$hasil['duplikat']}, Gagal: {$hasil['gagal']}.",
             'data' => $hasil,
         ]);
     }

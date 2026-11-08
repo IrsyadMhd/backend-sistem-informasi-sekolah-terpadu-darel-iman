@@ -35,6 +35,9 @@ use App\Models\DormitoryPermit;
 use App\Models\StudentBill;
 use App\Models\StudentGrade;
 use App\Models\StudentNote;
+use App\Models\StudentPointTransaction;
+use App\Models\DisciplineThresholdRule;
+use App\Models\StudentWarningLetter;
 use App\Models\Subject;
 use App\Models\WorshipAttendanceDetail;
 use App\Models\WorshipAttendanceSession;
@@ -6246,6 +6249,88 @@ class StudentParentPortalController extends Controller
                 ],
                 'tahfizh' => $tahfizhInfo,
                 'mutabaah' => $mutabaahInfo,
+            ],
+        ]);
+    }
+
+    /**
+     * Rekapitulasi Buku Poin & Tata Tertib Kedisiplinan Santri untuk Orang Tua / Siswa
+     */
+    public function disciplineSummary(Request $request): JsonResponse
+    {
+        $student = $this->getStudentContext($request);
+        if (! $student) {
+            return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+        }
+
+        $activeYear = AcademicYear::where('is_active', true)->first();
+
+        // 1. Transaksi Poin Siswa (Pelanggaran & Prestasi)
+        $transactions = StudentPointTransaction::with(['category', 'reportedBy:id,name'])
+            ->where('student_id', $student->id)
+            ->when($activeYear, fn ($q) => $q->where('academic_year_id', $activeYear->id))
+            ->orderByDesc('transaction_date')
+            ->latest('created_at')
+            ->get();
+
+        $violationPoints = abs($transactions->filter(fn ($t) => (int) $t->points < 0)->sum('points'));
+        $achievementPoints = $transactions->filter(fn ($t) => (int) $t->points > 0)->sum('points');
+        $maxStandardPoints = 250; // Ambang batas maksimum sanksi TU (Level 6: Keluar / Kembali ke Ortu)
+        $safePointsRemaining = max(0, $maxStandardPoints - $violationPoints);
+        $riskPercentage = min(100, round(($violationPoints / $maxStandardPoints) * 100, 1));
+
+        // Ambang Batas SP / Kedisiplinan dari Master TU
+        $currentStage = DisciplineThresholdRule::where('is_active', true)
+            ->where('min_points', '<=', $violationPoints)
+            ->where(function ($q) use ($violationPoints) {
+                $q->whereNull('max_points')
+                  ->orWhere('max_points', '>=', $violationPoints);
+            })
+            ->orderByDesc('stage_order')
+            ->first();
+
+        $allThresholds = DisciplineThresholdRule::where('is_active', true)
+            ->orderBy('stage_order')
+            ->get();
+
+        // Surat Peringatan yang Sudah Diterbitkan
+        $warningLetters = StudentWarningLetter::where('student_id', $student->id)
+            ->with('issuedBy:id,name')
+            ->orderByDesc('issue_date')
+            ->get();
+
+        $statusLabel = $violationPoints === 0 ? 'Sangat Baik' : ($violationPoints < 31 ? 'Baik (Sanksi Ringan)' : ($violationPoints < 100 ? 'Sanksi Sedang' : 'Peringatan Khusus (ST/SP)'));
+        $statusColor = $violationPoints === 0 ? 'success' : ($violationPoints < 31 ? 'primary' : ($violationPoints < 100 ? 'warning' : 'danger'));
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'student' => [
+                    'id' => $student->id,
+                    'full_name' => $student->full_name,
+                    'nis' => $student->nis,
+                    'nisn' => $student->nisn,
+                    'kelas' => $student->kelas?->nama_kelas,
+                    'unit' => $student->educationUnit?->name,
+                    'program_type' => $student->educationUnit?->program_type,
+                    'is_boarding' => (bool) $student->is_boarding,
+                ],
+                'initial_points' => $maxStandardPoints,
+                'max_standard_points' => $maxStandardPoints,
+                'cumulative_points' => $violationPoints,
+                'violation_points' => $violationPoints,
+                'achievement_points' => $achievementPoints,
+                'current_points' => $violationPoints,
+                'safe_points_remaining' => $safePointsRemaining,
+                'risk_percentage' => $riskPercentage,
+                'status_label' => $statusLabel,
+                'status_color' => $statusColor,
+                'current_stage' => $currentStage,
+                'all_thresholds' => $allThresholds,
+                'total_violations_count' => $transactions->filter(fn ($t) => (int) $t->points < 0)->count(),
+                'total_achievements_count' => $transactions->filter(fn ($t) => (int) $t->points > 0)->count(),
+                'transactions' => $transactions,
+                'warning_letters' => $warningLetters,
             ],
         ]);
     }

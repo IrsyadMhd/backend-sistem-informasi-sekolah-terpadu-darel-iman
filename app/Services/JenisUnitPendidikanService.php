@@ -116,11 +116,14 @@ class JenisUnitPendidikanService
         })->toArray();
     }
 
-    public function prosesImport(array $rows, int|string|null $userId = null): array
+    public function prosesImport(array $rows, int|string|null $userId = null, bool $overwrite = false): array
     {
         $berhasil = 0;
+        $diperbarui = 0;
+        $duplikat = 0;
         $gagal = 0;
         $errors = [];
+        $duplicates = [];
 
         foreach ($rows as $index => $row) {
             $rowNum = $index + 1;
@@ -194,22 +197,65 @@ class JenisUnitPendidikanService
                     ? $rawStatus
                     : in_array(strtolower(trim((string) $rawStatus)), ['1', 'true', 'aktif', 'active']);
 
-                JenisUnitPendidikan::updateOrCreate(
-                    ['kode_jenis' => $kode],
-                    [
-                        'uuid' => (string) Str::uuid(),
-                        'nama_jenis' => $nama,
-                        'singkatan' => $singkatan ?: $kode,
-                        'jenjang' => $jenjang,
-                        'warna_badge' => $warnaBadge ?: '#10B981',
-                        'icon' => $icon ?: 'School',
-                        'urutan' => $urutan,
-                        'keterangan' => $keterangan,
-                        'status' => $status,
-                        'updated_by' => $userId,
-                        'created_by' => $userId,
-                    ]
-                );
+                // Cek duplikasi berdasarkan kode_jenis atau nama_jenis
+                $existing = JenisUnitPendidikan::withTrashed()
+                    ->where(function ($q) use ($kode, $nama) {
+                        $q->where('kode_jenis', $kode)
+                            ->orWhere('nama_jenis', $nama);
+                    })
+                    ->first();
+
+                if ($existing) {
+                    if ($overwrite) {
+                        if ($existing->trashed()) {
+                            $existing->restore();
+                        }
+                        $existing->update([
+                            'nama_jenis' => $nama,
+                            'singkatan' => $singkatan ?: $kode,
+                            'jenjang' => $jenjang,
+                            'warna_badge' => $warnaBadge ?: '#10B981',
+                            'icon' => $icon ?: 'School',
+                            'urutan' => $urutan,
+                            'keterangan' => $keterangan,
+                            'status' => $status,
+                            'updated_by' => $userId,
+                        ]);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $kode,
+                            'nama' => $nama,
+                            'status' => 'Ditimpa',
+                            'keterangan' => 'Data jenis unit diperbarui dengan data impor terbaru.',
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $kode,
+                            'nama' => $nama,
+                            'status' => 'Dilewati',
+                            'keterangan' => 'Kode atau nama jenis sudah terdaftar di database.',
+                        ];
+                    }
+                    continue;
+                }
+
+                JenisUnitPendidikan::create([
+                    'uuid' => (string) Str::uuid(),
+                    'kode_jenis' => $kode,
+                    'nama_jenis' => $nama,
+                    'singkatan' => $singkatan ?: $kode,
+                    'jenjang' => $jenjang,
+                    'warna_badge' => $warnaBadge ?: '#10B981',
+                    'icon' => $icon ?: 'School',
+                    'urutan' => $urutan,
+                    'keterangan' => $keterangan,
+                    'status' => $status,
+                    'created_by' => $userId,
+                    'updated_by' => $userId,
+                ]);
                 $berhasil++;
             } catch (\Exception $e) {
                 $gagal++;
@@ -220,7 +266,11 @@ class JenisUnitPendidikanService
         return [
             'total' => count($rows),
             'berhasil' => $berhasil,
+            'diperbarui' => $diperbarui,
+            'duplikat' => $duplikat,
             'gagal' => $gagal,
+            'overwrite' => $overwrite,
+            'duplicates' => $duplicates,
             'errors' => $errors,
         ];
     }

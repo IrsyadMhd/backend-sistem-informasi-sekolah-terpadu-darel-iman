@@ -399,6 +399,45 @@ class AccessScopeService
         }
 
         $unitIds = $unitIds->filter()->unique();
+
+        // Khusus Guru Musyrif / Musyrifah: Hanya dapat melihat unit pendidikan bertipe boarding (pesantren/asrama), tidak bisa fullday.
+        $isMusyrifOnly = $this->hasAnyRole($user, [
+            'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah', 'Musyrif / Musyrifah',
+        ]) && ! $this->hasAnyRole($user, array_merge(self::GLOBAL_SCOPE_ROLES, [
+            'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Tata Usaha', 'TU', 'tu', 'tata_usaha',
+        ]));
+
+        if ($isMusyrifOnly) {
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $boardingScope = function ($q) use ($likeOp) {
+                $q->where(function ($sub) use ($likeOp) {
+                    $sub->where('program_type', 'boarding')
+                        ->orWhere('name', $likeOp, '%ponpes%')
+                        ->orWhere('name', $likeOp, '%asrama%')
+                        ->orWhere('name', $likeOp, '%pesantren%')
+                        ->orWhere('name', $likeOp, "%ma'had%")
+                        ->orWhere('name', $likeOp, '%mahad%')
+                        ->orWhere('code', $likeOp, '%ponpes%')
+                        ->orWhere('code', $likeOp, '%asrama%')
+                        ->orWhere('code', $likeOp, '%mahad%');
+                });
+            };
+
+            if ($unitIds->isNotEmpty()) {
+                $assignedBoardingIds = EducationUnit::query()
+                    ->whereIn('id', $unitIds)
+                    ->where($boardingScope)
+                    ->pluck('id');
+
+                if ($assignedBoardingIds->isNotEmpty()) {
+                    return EducationUnit::query()->whereIn('id', $assignedBoardingIds);
+                }
+            }
+
+            return EducationUnit::query()->where($boardingScope);
+        }
+
         if ($unitIds->isNotEmpty()) {
             return EducationUnit::query()->whereIn('id', $unitIds);
         }

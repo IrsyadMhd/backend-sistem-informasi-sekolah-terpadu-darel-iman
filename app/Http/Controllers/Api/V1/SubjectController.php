@@ -329,19 +329,101 @@ class SubjectController extends Controller
      */
     public function import(Request $request): JsonResponse
     {
-        $request->validate([
-            'file' => ['required', 'file', 'mimes:xlsx,xls,csv,json'],
-        ]);
+        $overwrite = filter_var($request->input('overwrite', false), FILTER_VALIDATE_BOOLEAN);
+        $rows = $request->input('data', $request->input('rows', []));
+        if (is_string($rows)) {
+            $decoded = json_decode($rows, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $rows = $decoded;
+            }
+        }
 
-        $sheet = Excel::toCollection(null, $request->file('file'))->first();
-        abort_if(! $sheet || $sheet->isEmpty(), 422, 'File tidak memiliki data mata pelajaran.');
-        $headings = $sheet->shift()->map(fn ($value) => str($value)->trim()->snake()->value())->all();
-        $rows = $sheet->map(fn ($row) => array_filter(array_combine($headings, $row->all()), fn ($value) => $value !== null && $value !== ''))->all();
-        $result = $this->subjectService->prosesImport($rows, $request->user()?->id);
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'xlsx');
+            $tmpDir = storage_path('app/imports');
+            if (! is_dir($tmpDir)) {
+                @mkdir($tmpDir, 0755, true);
+            }
+            $tmpName = 'import_subj_' . uniqid() . '.' . $ext;
+            $file->move($tmpDir, $tmpName);
+            $tmpPath = $tmpDir . '/' . $tmpName;
+
+            try {
+                if (in_array($ext, ['csv', 'txt'])) {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Csv();
+                } elseif ($ext === 'xls') {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+                } else {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+                }
+                $spreadsheet = $reader->load($tmpPath);
+                $sheetData = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+                if (count($sheetData) > 1) {
+                    $headers = array_map(function ($h) {
+                        $norm = strtolower(trim((string)$h));
+                        return str_replace([' ', '_', '-', '.', ':', '/'], '', $norm);
+                    }, $sheetData[0]);
+
+                    $rows = [];
+                    for ($i = 1; $i < count($sheetData); $i++) {
+                        $rawRow = $sheetData[$i];
+                        if (empty(array_filter($rawRow, fn($v) => $v !== null && $v !== ''))) {
+                            continue;
+                        }
+                        $item = [];
+                        foreach ($headers as $idx => $normHeader) {
+                            $val = isset($rawRow[$idx]) ? trim((string)$rawRow[$idx]) : '';
+                            if (in_array($normHeader, ['kodemapel', 'kode', 'code', 'kodematapelajaran'])) {
+                                $item['kode_mapel'] = $val;
+                            } elseif (in_array($normHeader, ['namamapel', 'nama', 'name', 'namamatapelajaran'])) {
+                                $item['nama_mapel'] = $val;
+                            } elseif (in_array($normHeader, ['kelompok', 'kelompokmapel', 'group'])) {
+                                $item['kelompok_mapel'] = $val;
+                            } elseif (in_array($normHeader, ['kategori', 'category'])) {
+                                $item['kategori'] = $val;
+                            } elseif (in_array($normHeader, ['jenjang', 'level'])) {
+                                $item['jenjang'] = $val;
+                            } elseif (in_array($normHeader, ['tingkat', 'tingkatkelas', 'grade'])) {
+                                $item['tingkat_kelas'] = $val;
+                            } elseif (in_array($normHeader, ['jampelajaran', 'jp', 'hours'])) {
+                                $item['jam_pelajaran'] = $val;
+                            } elseif (in_array($normHeader, ['kkm', 'passinggrade'])) {
+                                $item['kkm'] = $val;
+                            } elseif (in_array($normHeader, ['status', 'isactive', 'aktif'])) {
+                                $item['status'] = $val;
+                            } elseif (in_array($normHeader, ['deskripsi', 'description', 'keterangan'])) {
+                                $item['deskripsi'] = $val;
+                            }
+                        }
+                        if (!empty($item['nama_mapel']) || !empty($item['kode_mapel'])) {
+                            $rows[] = $item;
+                        }
+                    }
+                }
+                @unlink($tmpPath);
+            } catch (\Exception $e) {
+                @unlink($tmpPath);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
+
+        if (! is_array($rows) || empty($rows)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Payload data impor mata pelajaran tidak boleh kosong.',
+            ], 422);
+        }
+
+        $result = $this->subjectService->prosesImport($rows, $request->user()?->id, $overwrite);
+        $totalBerhasil = ($result['berhasil'] ?? 0) + ($result['diperbarui'] ?? 0);
 
         return response()->json([
             'status' => 'success',
-            'message' => "Impor selesai. {$result['imported_rows']} data berhasil diproses.",
+            'message' => "Proses impor selesai. Total: {$result['total']}, Berhasil: {$totalBerhasil} ({$result['berhasil']} baru, {$result['diperbarui']} ditimpa), {$result['duplikat']} dilewati, {$result['gagal']} gagal.",
             'data' => $result,
         ]);
     }

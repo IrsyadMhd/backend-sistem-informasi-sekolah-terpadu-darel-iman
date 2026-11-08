@@ -422,6 +422,7 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('can:dashboard.guru-bk.view');
     Route::get('/dashboard/operator', [OperatorDashboardController::class, 'index'])
         ->middleware('can:dashboard.operator.view');
+    Route::get('/dashboard/musyrif', [MusyrifModuleController::class, 'dashboard']);
     Route::get('/dashboard-v1', DashboardController::class)
         ->middleware('can:dashboard.view');
 
@@ -516,6 +517,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Student Statuses CRUD & Dropdown (SSOT Master Data Status Siswa)
     Route::get('/student-statuses/dropdown', [StudentStatusController::class, 'dropdown']);
+    Route::get('/student-statuses/import-template', [StudentStatusController::class, 'importTemplate']);
+    Route::post('/student-statuses/import', [StudentStatusController::class, 'import']);
     Route::apiResource('student-statuses', StudentStatusController::class);
 
     // Student Mutations & Internal Transfers (Alur Dua Arah & Approval TU)
@@ -571,6 +574,8 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middleware('permission:kesiswaan.kelas_rombel|academic.schedule.view|sistem.master_data');
     Route::get('/kelas/export', [KelasController::class, 'export'])
         ->middleware('permission:kesiswaan.kelas_rombel|academic.schedule.view|master.view|sistem.master_data|report.export');
+    Route::get('/kelas/import-template', [KelasController::class, 'template'])
+        ->middleware('permission:master.create|academic.schedule.create|sistem.master_data');
     Route::post('/kelas/import', [KelasController::class, 'import'])
         ->middleware('permission:master.create|academic.schedule.create|sistem.master_data');
     Route::post('/kelas/{id}/restore', [KelasController::class, 'restore'])
@@ -679,6 +684,8 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('permission:master.view|report.export|sistem.master_data');
         Route::post('/tahun-ajaran/import', [TahunAjaranController::class, 'import'])
             ->middleware('permission:master.create|master.update|sistem.master_data');
+        Route::get('/tahun-ajaran/import-template', [TahunAjaranController::class, 'importTemplate'])
+            ->middleware('permission:master.view|sistem.master_data');
         Route::post('/tahun-ajaran/{id}/set-aktif', [TahunAjaranController::class, 'setAktif'])
             ->middleware('permission:master.update|sistem.master_data');
         Route::post('/tahun-ajaran/{id}/restore', [TahunAjaranController::class, 'restore'])
@@ -826,6 +833,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/pegawai/{id}/assign-role', [HakAksesController::class, 'assignPegawaiRole']);
 
         // CRUD akun login dan reset password
+        Route::get('/users/import-template', [UserAccountController::class, 'importTemplate']);
+        Route::post('/users/import', [UserAccountController::class, 'import']);
         Route::get('/users', [UserAccountController::class, 'index']);
         Route::post('/users', [UserAccountController::class, 'store']);
         Route::get('/users/{user}', [UserAccountController::class, 'show']);
@@ -1372,6 +1381,8 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/children/{studentId}/tahfizh-achievement', [ParentWorshipInputController::class, 'tahfizhSummary'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
             Route::get('/student-notes', [StudentParentPortalController::class, 'studentNotes']);
             Route::post('/student-notes/{id}/sign', [StudentParentPortalController::class, 'signStudentNote'])->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent');
+            Route::get('/discipline-summary', [StudentParentPortalController::class, 'disciplineSummary']);
+            Route::get('/children/{studentId}/discipline-summary', [StudentParentPortalController::class, 'disciplineSummary']);
             Route::get('/achievements', [StudentParentPortalController::class, 'achievements']);
             Route::get('/announcements', [StudentParentPortalController::class, 'announcements']);
             Route::get('/school-information', [StudentParentPortalController::class, 'schoolInformation']);
@@ -1458,8 +1469,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Dedicated Musyrif, Tata Usaha Pondok & Boarding Module Routes (/api/v1/musyrif/*)
         Route::prefix('musyrif')->middleware('role:Musyrif|musyrif|Musyrifah|Musyrif / Musyrifah|Pengasuh|Wali Asrama|Pembimbing|Super Admin|Admin|super_admin|Tata Usaha|TU|tu|tata_usaha|Operator')->group(function () {
+            // Dashboard Overview & KPI Santri Binaan
+            Route::get('/dashboard', [MusyrifModuleController::class, 'dashboard']);
+
             // Master Santri, Presensi Sholat 5 Waktu & Setoran Hafalan Harian
             Route::get('/students', [MusyrifModuleController::class, 'students']);
+            Route::get('/students/{studentId}/worship-breakdown', [MusyrifModuleController::class, 'studentWorshipBreakdown']);
             Route::post('/worship-attendance', [MusyrifModuleController::class, 'storeWorshipAttendance']);
             Route::get('/tahfizh/last-log', [MusyrifModuleController::class, 'lastLog']);
             Route::post('/tahfizh', [MusyrifModuleController::class, 'storeSetoranTahfizh']);
@@ -1540,3 +1555,31 @@ Route::prefix('finance')->middleware([
     Route::delete('/bills/{id}', [\App\Http\Controllers\Api\V1\StudentBillManagementController::class, 'destroy']);
     Route::post('/bills/{id}/payments', [\App\Http\Controllers\Api\V1\StudentBillManagementController::class, 'recordPayment']);
 });
+
+// ==========================================
+// MODUL TATA TERTIB & POIN KEDISIPLINAN SANTRI / SISWA
+// ==========================================
+Route::prefix('discipline')->middleware('auth:sanctum')->group(function () {
+    Route::get('/categories', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'indexCategories']);
+    Route::post('/categories', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'storeCategory']);
+    Route::put('/categories/{id}', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'updateCategory']);
+    Route::delete('/categories/{id}', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'destroyCategory']);
+
+    Route::get('/thresholds', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'indexThresholds']);
+    Route::put('/thresholds/{id}', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'updateThreshold']);
+
+    Route::get('/violations', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'indexViolations']);
+    Route::post('/violations', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'storeViolation']);
+
+    Route::get('/students', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'searchStudents']);
+    Route::get('/students/{studentId}/summary', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'studentSummary']);
+
+    Route::post('/warning-letters', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'storeWarningLetter']);
+    Route::put('/warning-letters/{id}/attendance', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'updateParentSummon']);
+
+    Route::get('/stats', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'dashboardStats']);
+    Route::get('/principal-overview', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'principalOverview']);
+    Route::get('/divisi-overview', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'divisiOverview']);
+    Route::get('/foundation-overview', [\App\Http\Controllers\Api\V1\DisciplineManagementController::class, 'foundationOverview']);
+});
+

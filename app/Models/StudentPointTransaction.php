@@ -14,11 +14,17 @@ class StudentPointTransaction extends Model
 
     protected $fillable = [
         'student_id',
+        'academic_year_id',
+        'semester_id',
         'category_id',
         'reported_by_id',
+        'recorder_role',
         'points',
         'transaction_date',
+        'incident_location',
         'description',
+        'direct_consequence_notes',
+        'evidence_path',
         'status',
     ];
 
@@ -35,6 +41,16 @@ class StudentPointTransaction extends Model
     public function category()
     {
         return $this->belongsTo(DisciplineCategory::class, 'category_id');
+    }
+
+    public function academicYear()
+    {
+        return $this->belongsTo(AcademicYear::class, 'academic_year_id');
+    }
+
+    public function semester()
+    {
+        return $this->belongsTo(Semester::class, 'semester_id');
     }
 
     public function reportedBy()

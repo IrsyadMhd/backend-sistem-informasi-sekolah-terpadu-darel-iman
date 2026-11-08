@@ -241,6 +241,15 @@ class AppNavigationSeeder extends Seeder
                         'sort_order' => 10,
                         'platform' => 'web',
                     ],
+                    [
+                        'id' => 'master-tata-tertib',
+                        'name' => 'Tata Tertib & Poin Kedisiplinan',
+                        'path' => '/dashboard/tata-tertib',
+                        'icon' => 'ShieldCheck',
+                        'required_permissions' => ['discipline.point.view', 'discipline.point.manage', 'sistem.master_data'],
+                        'sort_order' => 11,
+                        'platform' => 'both',
+                    ],
                 ],
             ],
             [

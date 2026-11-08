@@ -205,17 +205,109 @@ class TahunAjaranController extends Controller
 
     public function import(Request $request): JsonResponse
     {
-        $request->validate([
-            'rows' => ['required', 'array'],
-        ]);
+        $overwrite = filter_var($request->input('overwrite', false), FILTER_VALIDATE_BOOLEAN);
+        $rows = $request->input('data', $request->input('rows', []));
+        if (is_string($rows)) {
+            $decoded = json_decode($rows, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $rows = $decoded;
+            }
+        }
 
-        $rows = $request->input('rows', []);
-        $totalImported = $this->service->prosesImport($rows);
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            $ext = strtolower($file->getClientOriginalExtension() ?: 'xlsx');
+            $tmpDir = storage_path('app/imports');
+            if (! is_dir($tmpDir)) {
+                @mkdir($tmpDir, 0755, true);
+            }
+            $tmpName = 'import_ta_' . uniqid() . '.' . $ext;
+            $file->move($tmpDir, $tmpName);
+            $tmpPath = $tmpDir . '/' . $tmpName;
+
+            try {
+                if (in_array($ext, ['csv', 'txt'])) {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Csv();
+                } elseif ($ext === 'xls') {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+                } else {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+                }
+                $spreadsheet = $reader->load($tmpPath);
+                $sheetData = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+                if (count($sheetData) > 1) {
+                    $headers = array_map(function ($h) {
+                        $norm = strtolower(trim((string)$h));
+                        return str_replace([' ', '_', '-', '.', ':', '/'], '', $norm);
+                    }, $sheetData[0]);
+
+                    $rows = [];
+                    for ($i = 1; $i < count($sheetData); $i++) {
+                        $rawRow = $sheetData[$i];
+                        if (empty(array_filter($rawRow, fn($v) => $v !== null && $v !== ''))) {
+                            continue;
+                        }
+                        $item = [];
+                        foreach ($headers as $idx => $normHeader) {
+                            $val = isset($rawRow[$idx]) ? trim((string)$rawRow[$idx]) : '';
+                            if (in_array($normHeader, ['nama', 'namatahunajaran', 'tahunajaran', 'name', 'tahun'])) {
+                                $item['name'] = $val;
+                            } elseif (in_array($normHeader, ['startdate', 'tanggalmulai', 'tglmulai', 'mulai'])) {
+                                $item['start_date'] = $val;
+                            } elseif (in_array($normHeader, ['enddate', 'tanggalselesai', 'tglselesai', 'selesai', 'akhir'])) {
+                                $item['end_date'] = $val;
+                            } elseif (in_array($normHeader, ['isactive', 'status', 'aktif', 'keaktifan'])) {
+                                $item['is_active'] = $val;
+                            } elseif (in_array($normHeader, ['keterangan', 'deskripsi', 'catatan'])) {
+                                $item['keterangan'] = $val;
+                            }
+                        }
+                        if (!empty($item['name'])) {
+                            $rows[] = $item;
+                        }
+                    }
+                }
+                @unlink($tmpPath);
+            } catch (\Exception $e) {
+                @unlink($tmpPath);
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas: ' . $e->getMessage(),
+                ], 422);
+            }
+        }
+
+        if (! is_array($rows) || empty($rows)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Payload data impor tahun ajaran tidak boleh kosong.',
+            ], 422);
+        }
+
+        $result = $this->service->prosesImport($rows, $overwrite);
+        $totalBerhasil = $result['berhasil'] + $result['diperbarui'];
 
         return response()->json([
             'status' => 'success',
-            'message' => "Berhasil mengimpor {$totalImported} data tahun ajaran.",
-            'total_imported' => $totalImported,
+            'message' => "Proses impor selesai. Total: {$result['total']}, Berhasil: {$totalBerhasil} ({$result['berhasil']} baru, {$result['diperbarui']} ditimpa), {$result['duplikat']} dilewati, {$result['gagal']} gagal.",
+            'data' => $result,
+        ]);
+    }
+
+    public function importTemplate(): JsonResponse
+    {
+        return response()->json([
+            'status' => 'success',
+            'columns' => ['name', 'start_date', 'end_date', 'is_active', 'keterangan'],
+            'sample' => [
+                [
+                    'name' => '2026/2027',
+                    'start_date' => '2026-07-01',
+                    'end_date' => '2027-06-30',
+                    'is_active' => '1',
+                    'keterangan' => 'Tahun Ajaran 2026/2027',
+                ],
+            ],
         ]);
     }
 }

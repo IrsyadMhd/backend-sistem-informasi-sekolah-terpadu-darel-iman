@@ -11,6 +11,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class UserAccountController extends Controller
 {
@@ -279,6 +281,222 @@ class UserAccountController extends Controller
         return response()->json([
             'success' => true,
             'message' => "Akun {$user->name} berhasil dihapus.",
+        ]);
+    }
+
+    /**
+     * Impor data akun pengguna dari berkas Excel/CSV atau payload JSON.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $this->accessScope->assertGlobalAccessManagement($request->user());
+
+        $rows = [];
+        $overwrite = $request->boolean('overwrite', false);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            try {
+                $spreadsheet = IOFactory::load($file->getRealPath());
+                $sheet = $spreadsheet->getActiveSheet();
+                $sheetData = $sheet->toArray(null, true, true, true);
+
+                if (! empty($sheetData)) {
+                    $headerRow = array_shift($sheetData);
+                    $headers = [];
+                    foreach ($headerRow as $colKey => $colName) {
+                        $colNameClean = strtolower(trim((string) $colName));
+                        $headers[$colKey] = $colNameClean;
+                    }
+
+                    foreach ($sheetData as $rowData) {
+                        $row = [];
+                        $hasData = false;
+                        foreach ($rowData as $colKey => $cellValue) {
+                            $header = $headers[$colKey] ?? $colKey;
+                            $trimmed = is_string($cellValue) ? trim($cellValue) : $cellValue;
+                            if ($trimmed !== null && $trimmed !== '') {
+                                $hasData = true;
+                            }
+                            $row[$header] = $trimmed;
+                        }
+                        if ($hasData) {
+                            $rows[] = $row;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas: '.$e->getMessage(),
+                ], 422);
+            }
+        } else {
+            $inputData = $request->input('data', $request->input('rows', []));
+            if (is_string($inputData)) {
+                $decoded = json_decode($inputData, true);
+                if (is_array($decoded)) {
+                    $rows = $decoded;
+                }
+            } elseif (is_array($inputData)) {
+                $rows = $inputData;
+            }
+        }
+
+        if (empty($rows)) {
+            return response()->json([
+                'success' => false,
+                'status' => 'error',
+                'message' => 'Payload data impor tidak boleh kosong.',
+            ], 422);
+        }
+
+        $berhasil = 0;
+        $diperbarui = 0;
+        $duplikat = 0;
+        $gagal = 0;
+        $errors = [];
+        $duplicates = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
+            $normalized = [];
+            foreach ($row as $k => $v) {
+                $cleanKey = strtolower(trim(str_replace([' ', '-', '/'], '_', (string) $k)));
+                $normalized[$cleanKey] = $v;
+            }
+
+            $name = trim((string) ($normalized['name'] ?? $normalized['nama'] ?? $normalized['nama_lengkap'] ?? $row['name'] ?? ''));
+            $email = strtolower(trim((string) ($normalized['email'] ?? $normalized['surel'] ?? $normalized['email_address'] ?? $row['email'] ?? '')));
+
+            if (empty($name) || empty($email)) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: Nama dan Email akun wajib diisi.";
+                continue;
+            }
+
+            if (! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: Format email '{$email}' tidak valid.";
+                continue;
+            }
+
+            $phone = trim((string) ($normalized['phone'] ?? $normalized['telepon'] ?? $normalized['no_hp'] ?? $normalized['whatsapp'] ?? $row['phone'] ?? ''));
+            $roleName = trim((string) ($normalized['role'] ?? $normalized['peran'] ?? $normalized['hak_akses'] ?? $row['role'] ?? ''));
+            $password = trim((string) ($normalized['password'] ?? $normalized['kata_sandi'] ?? $row['password'] ?? ''));
+            $rawActive = $normalized['is_active'] ?? $normalized['status'] ?? $row['is_active'] ?? true;
+            $isActive = is_bool($rawActive) ? $rawActive : in_array(strtolower(trim((string) $rawActive)), ['1', 'true', 'aktif', 'active', 'ya']);
+
+            try {
+                $existing = User::where('email', $email)->first();
+
+                if ($existing) {
+                    if ($overwrite) {
+                        $updateData = [
+                            'name' => $name,
+                            'is_active' => $isActive,
+                        ];
+                        if (! empty($phone)) {
+                            $updateData['phone'] = $phone;
+                        }
+                        if (! empty($password)) {
+                            $updateData['password'] = $password;
+                            $metadata = $existing->metadata ?? [];
+                            $metadata['must_change_password'] = false;
+                            $metadata['password_reset_at'] = now()->toISOString();
+                            $updateData['metadata'] = $metadata;
+                        }
+                        $existing->update($updateData);
+
+                        if (! empty($roleName) && Role::where('name', $roleName)->exists()) {
+                            $existing->syncRoles([$roleName]);
+                        }
+
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $email,
+                            'nama' => $name,
+                            'status' => 'Ditimpa',
+                            'keterangan' => 'Akun diperbarui dengan data impor terbaru.',
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $email,
+                            'nama' => $name,
+                            'status' => 'Dilewati',
+                            'keterangan' => 'Email akun sudah terdaftar di sistem.',
+                        ];
+                    }
+                    continue;
+                }
+
+                $newUser = User::create([
+                    'name' => $name,
+                    'email' => $email,
+                    'phone' => $phone ?: null,
+                    'password' => $password ?: 'Password123!',
+                    'is_active' => $isActive,
+                    'metadata' => [
+                        'must_change_password' => empty($password),
+                        'created_by' => 'user_account_import',
+                    ],
+                ]);
+
+                if (! empty($roleName) && Role::where('name', $roleName)->exists()) {
+                    $newUser->assignRole($roleName);
+                }
+
+                $berhasil++;
+            } catch (\Exception $e) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
+            }
+        }
+
+        $resultData = [
+            'total' => count($rows),
+            'berhasil' => $berhasil,
+            'diperbarui' => $diperbarui,
+            'duplikat' => $duplikat,
+            'gagal' => $gagal,
+            'overwrite' => $overwrite,
+            'duplicates' => $duplicates,
+            'errors' => $errors,
+        ];
+
+        return response()->json([
+            'success' => true,
+            'status' => 'success',
+            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Ditimpa: {$diperbarui}, Dilewati: {$duplikat}, Gagal: {$gagal}.",
+            'data' => $resultData,
+        ]);
+    }
+
+    /**
+     * Unduh berkas format template CSV untuk impor akun pengguna.
+     */
+    public function importTemplate(): StreamedResponse
+    {
+        $headers = ['name', 'email', 'role', 'phone', 'password', 'is_active'];
+        $sample = [
+            ['Ahmad Dahlan', 'ahmad.dahlan@sekolah.sch.id', 'Guru', '081234567890', 'Password123!', 'true'],
+            ['Siti Nurhaliza', 'siti.nur@sekolah.sch.id', 'Tata Usaha', '081298765432', 'Password123!', 'true'],
+            ['Budi Santoso', 'budi.santoso@sekolah.sch.id', 'Siswa', '081311223344', 'Password123!', 'true'],
+        ];
+
+        return response()->streamDownload(function () use ($headers, $sample) {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, $headers);
+            foreach ($sample as $row) {
+                fputcsv($handle, $row);
+            }
+            fclose($handle);
+        }, 'Template_Import_Akun_Pengguna.csv', [
+            'Content-Type' => 'text/csv',
         ]);
     }
 

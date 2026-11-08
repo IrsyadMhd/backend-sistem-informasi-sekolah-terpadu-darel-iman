@@ -1775,6 +1775,8 @@ class TeacherPortalController extends Controller
             'grades.*.nilai_uts' => 'nullable|numeric|min:0|max:100',
             'grades.*.nilai_uas' => 'nullable|numeric|min:0|max:100',
             'grades.*.nilai_akhir' => 'nullable|numeric|min:0|max:100',
+            'grades.*.catatan' => 'nullable|string|max:1000',
+            'grades.*.notes' => 'nullable|string|max:1000',
         ]);
 
         [$schedule] = $this->assignedTeachingContext($request, $request->class_id, $request->subject_id);
@@ -1793,6 +1795,7 @@ class TeacherPortalController extends Controller
             $kuis = $g['nilai_kuis'] ?? $g['score_quiz'] ?? null;
             $uts = $g['nilai_uts'] ?? null;
             $uas = $g['nilai_uas'] ?? null;
+            $catatan = $g['catatan'] ?? $g['notes'] ?? null;
             $calcAkhir = null;
             if ($tugas !== null || $kuis !== null || $uts !== null || $uas !== null) {
                 $calcAkhir = round((($tugas ?? 0) * 0.2) + (($kuis ?? 0) * 0.2) + (($uts ?? 0) * 0.3) + (($uas ?? 0) * 0.3), 1);
@@ -1813,6 +1816,7 @@ class TeacherPortalController extends Controller
                     'score_midterm' => $uts,
                     'score_final' => $uas,
                     'final_score' => $g['nilai_akhir'] ?? $calcAkhir,
+                    'notes' => $catatan,
                 ]
             );
         }

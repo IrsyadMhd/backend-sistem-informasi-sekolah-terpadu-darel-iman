@@ -692,6 +692,7 @@ class RolePermissionSeeder extends Seeder
             'student.view', 'student.create', 'student.update', 'student.delete', 'student.export', 'student.import',
             'employee.view', 'employee.create', 'employee.update', 'employee.export',
             'teacher.student_note.view',
+            'discipline.point.view', 'discipline.point.manage',
             'dormitory.view', 'dormitory.manage', 'dormitory.permission.approve', 'dashboard.musyrif.view',
         ];
         foreach (['Tata Usaha', 'TU', 'tu', 'operator', 'tata_usaha', 'Operator'] as $roleName) {
@@ -788,6 +789,7 @@ class RolePermissionSeeder extends Seeder
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],
                 $teacherPortalCommon,
                 $teacherAcademicPermissions,
+                ['discipline.point.view', 'discipline.point.manage'],
             )));
         }
 
@@ -796,7 +798,8 @@ class RolePermissionSeeder extends Seeder
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],
                 $teacherPortalCommon,
                 ['teacher.attendance.view', 'teacher.assignment.view', 'teacher.grade.view',
-                    'teacher.student_note.view', 'teacher.student_note.create', 'teacher.student_note.update'],
+                    'teacher.student_note.view', 'teacher.student_note.create', 'teacher.student_note.update',
+                    'discipline.point.view', 'discipline.point.manage'],
             )));
         }
 
@@ -806,7 +809,8 @@ class RolePermissionSeeder extends Seeder
                 $teacherPortalCommon,
                 $teacherAcademicPermissions,
                 ['teacher.tahfizh.view', 'teacher.tahfizh.create', 'teacher.tahfizh.update',
-                    'teacher.mutabaah.view', 'teacher.mutabaah.create', 'teacher.mutabaah.update'],
+                    'teacher.mutabaah.view', 'teacher.mutabaah.create', 'teacher.mutabaah.update',
+                    'discipline.point.view', 'discipline.point.manage'],
             )));
         }
 
@@ -837,7 +841,8 @@ class RolePermissionSeeder extends Seeder
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],
                 $teacherPortalCommon,
-                ['teacher.student_note.view', 'teacher.student_note.create', 'teacher.student_note.update'],
+                ['teacher.student_note.view', 'teacher.student_note.create', 'teacher.student_note.update',
+                    'discipline.point.view', 'discipline.point.manage'],
             )));
         }
 
@@ -845,10 +850,12 @@ class RolePermissionSeeder extends Seeder
             'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
             'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
             'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus',
+            'Waka Kesantrian', 'waka_kesantrian', 'Wakil Kesantrian', 'Kepala Asrama',
+            'Waka Kesiswaan', 'waka_kesiswaan', 'Wakil Kesiswaan',
         ] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],
-                ['academic.grade.view'],
+                ['academic.grade.view', 'discipline.point.view', 'discipline.point.manage'],
             )));
         }
 
