@@ -522,6 +522,18 @@ class UserAccountController extends Controller
         $isGlobalAdmin = $this->isGlobalAdmin($user);
 
         $defaultPassword = 'Password123!';
+        $precomputedHash = Hash::make($defaultPassword);
+        $rolesByName = Role::all()->keyBy('name');
+
+        // Preload all existing user emails into memory hash-map for O(1) collision check
+        $existingEmails = User::withTrashed()
+            ->whereNotNull('email')
+            ->pluck('email')
+            ->map(fn ($e) => strtolower(trim((string) $e)))
+            ->flip()
+            ->toArray();
+
+        $roleAssignments = [];
         $createdEmployees = 0;
         $createdStudents = 0;
         $createdParents = 0;
@@ -533,7 +545,9 @@ class UserAccountController extends Controller
                 ->where(function ($q) {
                     $q->whereNull('user_id')
                       ->orWhereDoesntHave('user');
-                });
+                })
+                ->select(['id', 'nama_lengkap', 'email', 'niy', 'nik', 'no_hp', 'unit_id', 'user_id']);
+
             if (! $isGlobalAdmin) {
                 $employeeQuery->whereIn('unit_id', $accessibleUnitIds);
             }
@@ -541,7 +555,7 @@ class UserAccountController extends Controller
             $employees = $employeeQuery->get();
             foreach ($employees as $emp) {
                 $rawEmail = strtolower(trim((string) $emp->email));
-                if (! empty($rawEmail) && filter_var($rawEmail, FILTER_VALIDATE_EMAIL) && ! User::where('email', $rawEmail)->exists()) {
+                if (! empty($rawEmail) && filter_var($rawEmail, FILTER_VALIDATE_EMAIL) && ! isset($existingEmails[$rawEmail])) {
                     $email = $rawEmail;
                 } else {
                     $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', (string) ($emp->niy ?: $emp->nik ?: Str::slug($emp->nama_lengkap, '')));
@@ -550,18 +564,19 @@ class UserAccountController extends Controller
                     }
                     $candidateEmail = "{$cleanId}@pegawai.darel-iman.sch.id";
                     $counter = 1;
-                    while (User::where('email', $candidateEmail)->exists()) {
+                    while (isset($existingEmails[$candidateEmail])) {
                         $candidateEmail = "{$cleanId}{$counter}@pegawai.darel-iman.sch.id";
                         $counter++;
                     }
                     $email = $candidateEmail;
                 }
+                $existingEmails[$email] = true;
 
                 $newUser = User::create([
                     'name' => $emp->nama_lengkap ?: 'Pegawai',
                     'email' => $email,
                     'phone' => $emp->no_hp ?: null,
-                    'password' => $defaultPassword,
+                    'password' => $precomputedHash,
                     'is_active' => true,
                     'metadata' => [
                         'must_change_password' => true,
@@ -574,12 +589,16 @@ class UserAccountController extends Controller
                 $nameLower = strtolower($emp->nama_lengkap ?? '');
                 if (str_contains($nameLower, 'ustadz') || str_contains($nameLower, 'ustadzah') || str_contains($nameLower, 'guru')) {
                     $roleName = 'Guru';
-                } elseif (Role::where('name', 'Guru')->exists()) {
+                } elseif (isset($rolesByName['Guru'])) {
                     $roleName = 'Guru';
                 }
 
-                if (Role::where('name', $roleName)->exists()) {
-                    $newUser->assignRole($roleName);
+                if (isset($rolesByName[$roleName])) {
+                    $roleAssignments[] = [
+                        'role_id' => $rolesByName[$roleName]->id,
+                        'model_type' => User::class,
+                        'model_id' => $newUser->id,
+                    ];
                 }
 
                 $emp->update(['user_id' => $newUser->id]);
@@ -591,7 +610,9 @@ class UserAccountController extends Controller
                 ->where(function ($q) {
                     $q->whereNull('user_id')
                       ->orWhereDoesntHave('user');
-                });
+                })
+                ->select(['id', 'full_name', 'nisn', 'nis', 'unit_id', 'user_id']);
+
             if (! $isGlobalAdmin) {
                 $studentQuery->whereIn('unit_id', $accessibleUnitIds);
             }
@@ -604,16 +625,18 @@ class UserAccountController extends Controller
                 }
                 $candidateEmail = "{$cleanId}@siswa.darel-iman.sch.id";
                 $counter = 1;
-                while (User::where('email', $candidateEmail)->exists()) {
+                while (isset($existingEmails[$candidateEmail])) {
                     $candidateEmail = "{$cleanId}{$counter}@siswa.darel-iman.sch.id";
                     $counter++;
                 }
+                $email = $candidateEmail;
+                $existingEmails[$email] = true;
 
                 $newUser = User::create([
                     'name' => $stu->full_name ?: 'Siswa',
                     'email' => $candidateEmail,
                     'phone' => null,
-                    'password' => $defaultPassword,
+                    'password' => $precomputedHash,
                     'is_active' => true,
                     'metadata' => [
                         'must_change_password' => true,
@@ -622,8 +645,12 @@ class UserAccountController extends Controller
                     ],
                 ]);
 
-                if (Role::where('name', 'Siswa')->exists()) {
-                    $newUser->assignRole('Siswa');
+                if (isset($rolesByName['Siswa'])) {
+                    $roleAssignments[] = [
+                        'role_id' => $rolesByName['Siswa']->id,
+                        'model_type' => User::class,
+                        'model_id' => $newUser->id,
+                    ];
                 }
 
                 $stu->update(['user_id' => $newUser->id]);
@@ -635,12 +662,13 @@ class UserAccountController extends Controller
                 ->where(function ($q) {
                     $q->whereNull('user_id')
                       ->orWhereDoesntHave('user');
-                });
+                })
+                ->select(['id', 'full_name', 'email', 'phone', 'nik', 'user_id']);
 
             $parents = $parentQuery->get();
             foreach ($parents as $par) {
                 $rawEmail = strtolower(trim((string) $par->email));
-                if (! empty($rawEmail) && filter_var($rawEmail, FILTER_VALIDATE_EMAIL) && ! User::where('email', $rawEmail)->exists()) {
+                if (! empty($rawEmail) && filter_var($rawEmail, FILTER_VALIDATE_EMAIL) && ! isset($existingEmails[$rawEmail])) {
                     $email = $rawEmail;
                 } else {
                     $cleanId = preg_replace('/[^a-zA-Z0-9]/', '', (string) ($par->nik ?: $par->phone ?: substr((string) $par->id, 0, 8)));
@@ -649,18 +677,19 @@ class UserAccountController extends Controller
                     }
                     $candidateEmail = "{$cleanId}@ortu.darel-iman.sch.id";
                     $counter = 1;
-                    while (User::where('email', $candidateEmail)->exists()) {
+                    while (isset($existingEmails[$candidateEmail])) {
                         $candidateEmail = "{$cleanId}{$counter}@ortu.darel-iman.sch.id";
                         $counter++;
                     }
                     $email = $candidateEmail;
                 }
+                $existingEmails[$email] = true;
 
                 $newUser = User::create([
                     'name' => $par->full_name ?: 'Orang Tua',
                     'email' => $email,
                     'phone' => $par->phone ?: null,
-                    'password' => $defaultPassword,
+                    'password' => $precomputedHash,
                     'is_active' => true,
                     'metadata' => [
                         'must_change_password' => true,
@@ -669,12 +698,24 @@ class UserAccountController extends Controller
                     ],
                 ]);
 
-                if (Role::where('name', 'Orang Tua')->exists()) {
-                    $newUser->assignRole('Orang Tua');
+                if (isset($rolesByName['Orang Tua'])) {
+                    $roleAssignments[] = [
+                        'role_id' => $rolesByName['Orang Tua']->id,
+                        'model_type' => User::class,
+                        'model_id' => $newUser->id,
+                    ];
                 }
 
                 $par->update(['user_id' => $newUser->id]);
                 $createdParents++;
+            }
+
+            // Bulk insert all assigned roles
+            if (! empty($roleAssignments)) {
+                foreach (array_chunk($roleAssignments, 500) as $chunk) {
+                    DB::table('model_has_roles')->insertOrIgnore($chunk);
+                }
+                app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
             }
 
             DB::commit();

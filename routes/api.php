@@ -1287,21 +1287,21 @@ Route::middleware('auth:sanctum')->group(function () {
                 ->whereIn('action', ['approve', 'reject', 'revision'])
                 ->middleware('permission:teacher.attendance.view|teacher.attendance.create|homeroom_attendance.verify_permission|kehadiran.siswa.monitoring|attendance.view|attendance_permission.review');
             Route::get('/materials', [TeacherPortalController::class, 'materials'])
-                ->middleware('permission:teacher.material.view');
+                ->middleware('permission:teacher.material.view|pembelajaran.materi');
             Route::post('/materials', [TeacherPortalController::class, 'saveMaterial'])
-                ->middleware('permission:teacher.material.create');
+                ->middleware('permission:teacher.material.create|pembelajaran.materi');
             Route::put('/materials/{id}', [TeacherPortalController::class, 'updateMaterial'])
-                ->middleware('permission:teacher.material.update');
+                ->middleware('permission:teacher.material.update|pembelajaran.materi');
             Route::delete('/materials/{id}', [TeacherPortalController::class, 'deleteMaterial'])
-                ->middleware('permission:teacher.material.delete');
+                ->middleware('permission:teacher.material.delete|pembelajaran.materi');
             Route::get('/assignments', [TeacherPortalController::class, 'assignments'])
-                ->middleware('permission:teacher.assignment.view');
+                ->middleware('permission:teacher.assignment.view|kesiswaan.penugasan_siswa');
             Route::post('/assignments', [TeacherPortalController::class, 'saveAssignment'])
-                ->middleware('permission:teacher.assignment.create');
+                ->middleware('permission:teacher.assignment.create|kesiswaan.penugasan_siswa');
             Route::match(['put', 'post'], '/assignments/{id}', [TeacherPortalController::class, 'updateAssignment'])
-                ->middleware('permission:teacher.assignment.update');
+                ->middleware('permission:teacher.assignment.update|kesiswaan.penugasan_siswa');
             Route::delete('/assignments/{id}', [TeacherPortalController::class, 'deleteAssignment'])
-                ->middleware('permission:teacher.assignment.delete');
+                ->middleware('permission:teacher.assignment.delete|kesiswaan.penugasan_siswa');
             Route::get('/submissions', [TeacherPortalController::class, 'submissions'])
                 ->middleware('permission:teacher.submission.view');
             Route::post('/submissions/{id}/grade', [TeacherPortalController::class, 'gradeSubmission'])
