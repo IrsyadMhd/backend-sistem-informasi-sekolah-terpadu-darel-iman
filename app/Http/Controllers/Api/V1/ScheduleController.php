@@ -189,11 +189,12 @@ class ScheduleController extends Controller
     {
         $this->authorizeView($request->user());
         $query = $this->scopedQuery($request->user())->with([
-            'kelas',
+            'kelas.unitPendidikan',
             'schoolClass',
             'employee',
             'teacher',
             'subject',
+            'classroom',
             'academicYear',
             'semester',
         ]);
@@ -201,6 +202,29 @@ class ScheduleController extends Controller
         if ($request->filled('unit_pendidikan_id') || $request->filled('unit_id')) {
             $unitId = $request->query('unit_pendidikan_id') ?: $request->query('unit_id');
             $query->whereHas('kelas', fn ($q) => $q->where('unit_pendidikan_id', $unitId));
+        }
+
+        if ($request->filled('program_type')) {
+            $progType = strtolower((string) $request->query('program_type'));
+            $query->whereHas('kelas.unitPendidikan', function ($q) use ($progType) {
+                if ($progType === 'boarding') {
+                    $q->where(function ($sub) {
+                        $sub->where('program_type', 'boarding')
+                            ->orWhere('metadata->is_boarding', true)
+                            ->orWhere('metadata->program_type', 'boarding');
+                    });
+                } elseif ($progType === 'fullday') {
+                    $q->where(function ($sub) {
+                        $sub->where(function ($s2) {
+                            $s2->where('program_type', 'fullday')
+                               ->orWhereNull('program_type');
+                        })->where(function ($s2) {
+                            $s2->whereNull('metadata->is_boarding')
+                               ->orWhere('metadata->is_boarding', false);
+                        });
+                    });
+                }
+            });
         }
 
         if ($request->filled('kelas_id')) {
@@ -231,6 +255,10 @@ class ScheduleController extends Controller
             $query->where('semester_id', $request->query('semester_id'));
         }
 
+        if ($request->filled('day_of_week')) {
+            $query->where('day_of_week', (int) $request->query('day_of_week'));
+        }
+
         if ($request->filled('search')) {
             $search = trim((string) $request->query('search'));
             $query->where(function ($subQuery) use ($search) {
@@ -252,7 +280,7 @@ class ScheduleController extends Controller
 
         $schedules = $query->orderBy('day_of_week')->orderBy('time_start')->get();
 
-        $format = strtolower($request->query('format', 'json'));
+        $format = strtolower($request->query('format', 'xlsx'));
         if (in_array($format, ['xlsx', 'xls', 'csv'])) {
             $excelFormat = match ($format) {
                 'xlsx' => \Maatwebsite\Excel\Excel::XLSX,
