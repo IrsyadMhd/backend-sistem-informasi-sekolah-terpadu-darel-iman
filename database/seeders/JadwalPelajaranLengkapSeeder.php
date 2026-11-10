@@ -202,13 +202,21 @@ class JadwalPelajaranLengkapSeeder extends Seeder
         $subjectCache = [];
         $getOrCreateSubject = function (string $name, $unitId) use (&$subjectCache) {
             $cleanName = trim($name);
-            if (isset($subjectCache[$cleanName])) {
-                return $subjectCache[$cleanName];
+            $cacheKey = $cleanName . '_' . ($unitId ?? 'all');
+            if (isset($subjectCache[$cacheKey])) {
+                return $subjectCache[$cacheKey];
             }
 
-            $subj = Subject::where('name', $cleanName)
-                ->orWhere('nama_mapel', $cleanName)
-                ->first();
+            $query = Subject::where(function ($q) use ($cleanName) {
+                $q->where('name', $cleanName)
+                    ->orWhere('nama_mapel', $cleanName);
+            });
+
+            if ($unitId) {
+                $subj = (clone $query)->where('unit_pendidikan_id', $unitId)->first() ?? $query->first();
+            } else {
+                $subj = $query->first();
+            }
 
             if (! $subj) {
                 $code = 'MAPEL-' . strtoupper(Str::slug(substr($cleanName, 0, 15)));
@@ -217,12 +225,12 @@ class JadwalPelajaranLengkapSeeder extends Seeder
                     'kode_mapel' => $code,
                     'name' => $cleanName,
                     'nama_mapel' => $cleanName,
-                    'unit_id' => $unitId,
+                    'unit_pendidikan_id' => $unitId,
                     'kategori' => 'Wajib',
-                    'status' => 'Aktif',
+                    'status' => true,
                 ]);
             }
-            $subjectCache[$cleanName] = $subj;
+            $subjectCache[$cacheKey] = $subj;
             return $subj;
         };
 

@@ -110,6 +110,15 @@ class Subject extends Model
             }
         });
 
+        static::saving(function ($model) {
+            if (array_key_exists('unit_id', $model->attributes)) {
+                if (empty($model->attributes['unit_pendidikan_id'])) {
+                    $model->attributes['unit_pendidikan_id'] = $model->attributes['unit_id'];
+                }
+                unset($model->attributes['unit_id']);
+            }
+        });
+
         static::deleting(function ($model) {
             if (Auth::check()) {
                 $model->deleted_by = Auth::id();
@@ -119,6 +128,16 @@ class Subject extends Model
     }
 
     // --- Accessors Backward Compatibility ---
+
+    public function setUnitIdAttribute($value): void
+    {
+        $this->attributes['unit_pendidikan_id'] = $value;
+    }
+
+    public function getUnitIdAttribute()
+    {
+        return $this->attributes['unit_pendidikan_id'] ?? null;
+    }
 
     public function getKodeDisplayAttribute(): string
     {
