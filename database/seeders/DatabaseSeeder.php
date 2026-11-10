@@ -38,6 +38,7 @@ class DatabaseSeeder extends Seeder
 
         if (! app()->environment('production')) {
             $bootstrapSeeders[] = TestingRoleAccountsSeeder::class;
+            $bootstrapSeeders[] = UserTestSeeder::class;
         }
 
         $this->call($bootstrapSeeders);
