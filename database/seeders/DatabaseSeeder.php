@@ -29,6 +29,8 @@ class DatabaseSeeder extends Seeder
             CoreAdminUserSeeder::class,
             AppNavigationSeeder::class,
             MasterJenisUnitPendidikanSeeder::class,
+            MasterTahunAjaranSeeder::class,
+            StudentStatusSeeder::class,
             TransportationModeSeeder::class,
             QuranSurahSeeder::class,
             DoaSeeder::class,
@@ -98,6 +100,7 @@ class DatabaseSeeder extends Seeder
             $this->call(RekapPrestasiSiswaSeeder::class);
             $this->call(JadwalBoardingTerpaduSeeder::class);
             $this->call(JadwalSditFullDay2026Seeder::class);
+            $this->call(JadwalPelajaranLengkapSeeder::class);
             $this->call(SimulasiTerpadu2026Seeder::class);
             $this->call(SimulasiSiswaSemuaKelasSeeder::class);
             $this->call(MateriBelajarTahunanSeeder::class);
