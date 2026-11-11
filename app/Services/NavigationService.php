@@ -6,9 +6,23 @@ use App\Models\AppMenu;
 use App\Models\AppModule;
 use App\Models\User;
 use App\Support\RoleName;
+use Illuminate\Support\Facades\Cache;
 
 class NavigationService
 {
+    public const CACHE_VERSION_KEY = 'navigation_cache_version';
+
+    public static function getCacheVersion(): int
+    {
+        return (int) Cache::get(self::CACHE_VERSION_KEY, 1);
+    }
+
+    public static function bumpCacheVersion(): void
+    {
+        $next = self::getCacheVersion() + 1;
+        Cache::forever(self::CACHE_VERSION_KEY, $next);
+    }
+
     /**
      * Return authorized navigation modules and items for the given user,
      * filtered by platform and evaluated strictly against Spatie database permissions.
@@ -70,15 +84,25 @@ class NavigationService
     }
 
     /**
-     * Check if a user can access a given menu based on permissions.
+     * Check if a user can access a given menu based on target_roles and permissions.
      */
     public function canAccessMenu(User $user, AppMenu $menu): bool
     {
-        // 1. Strict contextual scoping for dashboard module menus
+        $targetRoles = array_values(array_filter(
+            (array) $menu->target_roles,
+            fn ($role) => is_string($role) && trim($role) !== ''
+        ));
+        $hasExplicitTargetRoles = ! empty($targetRoles);
+
+        if ($hasExplicitTargetRoles && ! $this->userMatchesTargetRoles($user, $targetRoles)) {
+            return false;
+        }
+
+        // 1. Strict contextual scoping for dashboard module menus when target_roles is not explicitly set.
         // Even if Super Admin / Admin has full bypass permissions, the DASHBOARD accordion
         // should only show executive, administrative & monitoring dashboards for Super Admin & Admin,
         // rather than operational micro-workspaces of specific roles (Guru, Musyrif, Ortu, Siswa, dll).
-        if ($menu->module_id === 'dashboard') {
+        if ($menu->module_id === 'dashboard' && ! $hasExplicitTargetRoles) {
             return $this->canAccessDashboardMenuFallback($user, $menu);
         }
 
@@ -280,6 +304,53 @@ class NavigationService
             ]),
             default => false,
         };
+    }
+
+    /**
+     * Evaluate canonical and Spatie target_roles assigned to a menu item.
+     */
+    protected function userMatchesTargetRoles(User $user, array $targetRoles): bool
+    {
+        $aliasMap = [
+            'student' => ['siswa', 'student'],
+            'parent' => ['orang tua', 'orang_tua', 'orang-tua', 'orangtua', 'wali murid', 'parent'],
+            'teacher' => ['guru', 'teacher', 'guru mata pelajaran', 'guru pai', 'guru tahfizh', 'guru bk', 'wali kelas', 'walas'],
+            'principal' => ['kepala sekolah', 'kepala_sekolah', 'kepsek', 'principal', 'wakil kepala sekolah', 'waka', 'waka_kurikulum', 'waka_kesiswaan', 'waka kurikulum', 'wakil kurikulum'],
+            'tu' => ['tata usaha', 'tu', 'staf_tu', 'staff tu', 'admin tu', 'operator', 'staff', 'staf'],
+            'foundation' => ['yayasan', 'ketua yayasan', 'pengurus yayasan', 'sekretaris yayasan', 'bendahara yayasan', 'foundation'],
+            'divisi' => ['divisi pendidikan', 'divisi_pendidikan', 'kepala bidang pendidikan', 'divisi kurikulum', 'divisi kesiswaan', 'divisi bahasa', 'divisi program khusus', 'divisi'],
+            'musyrif' => ['musyrif', 'musyrifah', 'musyrif / musyrifah', 'pengasuh', 'wali asrama', 'pembimbing asrama', 'asrama', 'pembimbing'],
+            'alumni' => ['alumni'],
+            'super_admin' => ['super admin', 'superadmin', 'super_admin', 'admin'],
+            'admin' => ['super admin', 'superadmin', 'super_admin', 'admin'],
+        ];
+
+        $expanded = [];
+        $allowsSuperAdmin = false;
+
+        foreach ($targetRoles as $role) {
+            $trimmed = trim((string) $role);
+            if ($trimmed === '') {
+                continue;
+            }
+            $expanded[] = $trimmed;
+
+            $key = strtolower(str_replace([' ', '-'], '_', $trimmed));
+            if (isset($aliasMap[$key])) {
+                foreach ($aliasMap[$key] as $alias) {
+                    $expanded[] = $alias;
+                }
+            }
+            if (in_array($key, ['super_admin', 'superadmin', 'admin'], true)) {
+                $allowsSuperAdmin = true;
+            }
+        }
+
+        if ($allowsSuperAdmin && (bool) ($user->is_superadmin ?? false)) {
+            return true;
+        }
+
+        return RoleName::userHasAny($user, array_values(array_unique($expanded)));
     }
 
     /**

@@ -112,5 +112,118 @@ class AdminNavigationTest extends TestCase
         $this->assertNotNull($androidConfig);
         $this->assertArrayHasKey('role_menus', $androidConfig->config);
         $this->assertArrayHasKey('student', $androidConfig->config['role_menus']);
+        $this->assertArrayHasKey('divisi', $androidConfig->config['role_menus']);
+    }
+
+    public function test_web_menu_respects_target_roles_and_invalidates_navigation_cache(): void
+    {
+        $teacher = User::factory()->create();
+        $teacher->assignRole('Guru');
+
+        $tu = User::factory()->create();
+        $tu->assignRole('Tata Usaha');
+
+        // Prime navigation module cache before creating menu
+        $this->actingAs($teacher, 'sanctum')
+            ->getJson('/api/v1/navigation/modules?platform=web')
+            ->assertOk();
+
+        $createRes = $this->actingAs($this->superAdmin, 'sanctum')
+            ->postJson('/api/v1/admin/navigation/menus', [
+                'module_id' => 'akademik',
+                'name' => 'Menu Khusus TU',
+                'path' => '/dashboard/khusus-tu',
+                'icon' => 'Briefcase',
+                'platform' => 'web',
+                'target_roles' => ['tu'],
+                'required_permissions' => [],
+                'is_active' => true,
+            ])
+            ->assertStatus(201);
+
+        $menuId = $createRes->json('data.id');
+
+        // Teacher must NOT see TU-only menu, TU MUST see it
+        $teacherMenus = collect(
+            $this->actingAs($teacher, 'sanctum')
+                ->getJson('/api/v1/navigation/modules?platform=web')
+                ->assertOk()
+                ->json('data.modules')
+        )->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertNotContains($menuId, $teacherMenus);
+
+        $tuMenus = collect(
+            $this->actingAs($tu, 'sanctum')
+                ->getJson('/api/v1/navigation/modules?platform=web')
+                ->assertOk()
+                ->json('data.modules')
+        )->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertContains($menuId, $tuMenus);
+
+        // Update target_roles to include teacher -> cache must bust immediately
+        $this->actingAs($this->superAdmin, 'sanctum')
+            ->putJson("/api/v1/admin/navigation/menus/{$menuId}", [
+                'target_roles' => ['tu', 'teacher'],
+            ])
+            ->assertOk();
+
+        $teacherMenusAfter = collect(
+            $this->actingAs($teacher, 'sanctum')
+                ->getJson('/api/v1/navigation/modules?platform=web')
+                ->assertOk()
+                ->json('data.modules')
+        )->flatMap(fn ($m) => $m['items'])->pluck('id')->all();
+        $this->assertContains($menuId, $teacherMenusAfter);
+    }
+
+    public function test_module_crud_and_mobile_sync_with_empty_target_roles(): void
+    {
+        $modRes = $this->actingAs($this->superAdmin, 'sanctum')
+            ->postJson('/api/v1/admin/navigation/modules', [
+                'name' => 'Modul Ekstra Mobile',
+                'icon' => 'Smartphone',
+                'platform' => 'mobile',
+                'is_active' => true,
+            ])
+            ->assertStatus(201);
+
+        $moduleId = $modRes->json('data.id');
+
+        $menuRes = $this->actingAs($this->superAdmin, 'sanctum')
+            ->postJson('/api/v1/admin/navigation/menus', [
+                'module_id' => $moduleId,
+                'name' => 'Layanan Universal',
+                'name_mobile' => 'Universal',
+                'path' => 'Bantuan',
+                'icon' => 'HelpCircle',
+                'icon_mobile' => 'help-circle-outline',
+                'platform' => 'mobile',
+                'target_roles' => [],
+                'is_active' => true,
+            ])
+            ->assertStatus(201);
+
+        $menuId = $menuRes->json('data.id');
+
+        $androidConfig = MobileAppConfig::android()->fresh();
+        foreach (['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif', 'alumni'] as $roleKey) {
+            $ids = collect($androidConfig->config['role_menus'][$roleKey] ?? [])->pluck('id')->all();
+            $this->assertContains($menuId, $ids, "Expected {$menuId} in role_menus[{$roleKey}]");
+        }
+
+        // Deactivating parent module must exclude its menus from mobile sync
+        $this->actingAs($this->superAdmin, 'sanctum')
+            ->putJson("/api/v1/admin/navigation/modules/{$moduleId}", [
+                'is_active' => false,
+            ])
+            ->assertOk();
+
+        $androidConfigAfter = MobileAppConfig::android()->fresh();
+        $studentIdsAfter = collect($androidConfigAfter->config['role_menus']['student'] ?? [])->pluck('id')->all();
+        $this->assertNotContains($menuId, $studentIdsAfter);
+
+        $this->actingAs($this->superAdmin, 'sanctum')
+            ->deleteJson("/api/v1/admin/navigation/modules/{$moduleId}")
+            ->assertOk();
     }
 }

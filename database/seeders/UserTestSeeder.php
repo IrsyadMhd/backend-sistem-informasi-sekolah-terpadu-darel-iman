@@ -243,99 +243,65 @@ class UserTestSeeder extends Seeder
             return;
         }
 
-        foreach ($units as $unit) {
+        foreach ($units as $index => $unit) {
             $slug = Str::lower(str_replace(['-', ' ', "'", '.'], '', $unit->code));
             $unitName = $unit->name;
+            $unitNumber = str_pad((string) ($index + 1), 6, '0', STR_PAD_LEFT);
 
-            // 1. Kepala Sekolah per Unit
-            $kepsekEmail = "kepsek.{$slug}@dareliman.sch.id";
-            $kepsekName = "Kepala Sekolah {$unitName}";
-            $kepsekUser = $this->createOrUpdateUser(
-                name: $kepsekName,
-                email: $kepsekEmail,
-                password: 'SekolahTest@2026!',
-                primaryRole: 'Kepala Sekolah',
-                phone: '081288' . str_pad((string) $unit->id, 6, '0', STR_PAD_LEFT),
-                scope: 'education_unit',
-                unitId: $unit->id,
-                unitCode: $unit->code,
-                unitName: $unitName
-            );
-
-            $this->createOrUpdateEmployee(
-                user: $kepsekUser,
-                niy: "TEST-NIY-KEPSEK-{$unit->code}",
-                unitId: $unit->id,
-                roleName: 'Kepala Sekolah'
-            );
-
-            $summaryRows[] = [
-                'Kepala Sekolah',
-                $kepsekEmail,
-                'SekolahTest@2026!',
-                'education_unit',
-                $unit->code . ' (' . Str::limit($unitName, 22) . ')',
+            $officialConfigs = [
+                [
+                    'role' => 'Kepala Sekolah',
+                    'emailPrefix' => 'kepsek',
+                    'phonePrefix' => '081288',
+                    'niyPrefix' => 'KEPSEK',
+                ],
+                [
+                    'role' => 'Tata Usaha',
+                    'emailPrefix' => 'tu',
+                    'phonePrefix' => '081287',
+                    'niyPrefix' => 'TU',
+                ],
+                [
+                    'role' => 'Operator',
+                    'emailPrefix' => 'operator',
+                    'phonePrefix' => '081286',
+                    'niyPrefix' => 'OP',
+                ],
             ];
 
-            // 2. Tata Usaha (TU) per Unit
-            $tuEmail = "tu.{$slug}@dareliman.sch.id";
-            $tuName = "Tata Usaha {$unitName}";
-            $tuUser = $this->createOrUpdateUser(
-                name: $tuName,
-                email: $tuEmail,
-                password: 'SekolahTest@2026!',
-                primaryRole: 'Tata Usaha',
-                phone: '081287' . str_pad((string) $unit->id, 6, '0', STR_PAD_LEFT),
-                scope: 'education_unit',
-                unitId: $unit->id,
-                unitCode: $unit->code,
-                unitName: $unitName
-            );
+            foreach ($officialConfigs as $cfg) {
+                $email = "{$cfg['emailPrefix']}.{$slug}@dareliman.sch.id";
+                $name = "{$cfg['role']} {$unitName}";
+                // Batasi maksimal 14 digit agar selalu valid di kolom phone & format nomor telepon.
+                $phone = substr($cfg['phonePrefix'] . $unitNumber, 0, 14);
 
-            $this->createOrUpdateEmployee(
-                user: $tuUser,
-                niy: "TEST-NIY-TU-{$unit->code}",
-                unitId: $unit->id,
-                roleName: 'Tata Usaha'
-            );
+                $officialUser = $this->createOrUpdateUser(
+                    name: $name,
+                    email: $email,
+                    password: 'SekolahTest@2026!',
+                    primaryRole: $cfg['role'],
+                    phone: $phone,
+                    scope: 'education_unit',
+                    unitId: $unit->id,
+                    unitCode: $unit->code,
+                    unitName: $unitName
+                );
 
-            $summaryRows[] = [
-                'Tata Usaha',
-                $tuEmail,
-                'SekolahTest@2026!',
-                'education_unit',
-                $unit->code . ' (' . Str::limit($unitName, 22) . ')',
-            ];
+                $this->createOrUpdateEmployee(
+                    user: $officialUser,
+                    niy: "TEST-NIY-{$cfg['niyPrefix']}-{$unit->code}",
+                    unitId: $unit->id,
+                    roleName: $cfg['role']
+                );
 
-            // 3. Operator per Unit
-            $opEmail = "operator.{$slug}@dareliman.sch.id";
-            $opName = "Operator {$unitName}";
-            $opUser = $this->createOrUpdateUser(
-                name: $opName,
-                email: $opEmail,
-                password: 'SekolahTest@2026!',
-                primaryRole: 'Operator',
-                phone: '081286' . str_pad((string) $unit->id, 6, '0', STR_PAD_LEFT),
-                scope: 'education_unit',
-                unitId: $unit->id,
-                unitCode: $unit->code,
-                unitName: $unitName
-            );
-
-            $this->createOrUpdateEmployee(
-                user: $opUser,
-                niy: "TEST-NIY-OP-{$unit->code}",
-                unitId: $unit->id,
-                roleName: 'Operator'
-            );
-
-            $summaryRows[] = [
-                'Operator',
-                $opEmail,
-                'SekolahTest@2026!',
-                'education_unit',
-                $unit->code . ' (' . Str::limit($unitName, 22) . ')',
-            ];
+                $summaryRows[] = [
+                    $cfg['role'],
+                    $email,
+                    'SekolahTest@2026!',
+                    'education_unit',
+                    $unit->code . ' (' . Str::limit($unitName, 22) . ')',
+                ];
+            }
         }
 
         // Akun generik fallback (untuk kompatibilitas testing lama)
@@ -743,6 +709,9 @@ class UserTestSeeder extends Seeder
             'default_password' => $password,
         ], $extraMeta);
 
+        $resolvedPhone = $phone ?? ('08129999' . str_pad((string) rand(1, 9999), 4, '0', STR_PAD_LEFT));
+        $resolvedPhone = substr(preg_replace('/\D+/', '', $resolvedPhone) ?? $resolvedPhone, 0, 14);
+
         $user = User::withTrashed()->where('email', $email)->first();
 
         if (! $user) {
@@ -750,16 +719,19 @@ class UserTestSeeder extends Seeder
                 'name' => $name,
                 'email' => $email,
                 'password' => Hash::make($password),
-                'phone' => $phone ?? '08129999' . str_pad((string) rand(1, 9999), 4, '0', STR_PAD_LEFT),
+                'phone' => $resolvedPhone,
                 'is_active' => true,
                 'metadata' => $meta,
             ]);
         } else {
             $user->restore();
+            $existingPhone = $user->phone
+                ? substr(preg_replace('/\D+/', '', $user->phone) ?? $user->phone, 0, 14)
+                : null;
             $user->update([
                 'name' => $name,
                 'password' => Hash::make($password),
-                'phone' => $phone ?? $user->phone,
+                'phone' => $phone !== null ? $resolvedPhone : ($existingPhone ?: $resolvedPhone),
                 'is_active' => true,
                 'metadata' => array_merge($user->metadata ?? [], $meta),
             ]);

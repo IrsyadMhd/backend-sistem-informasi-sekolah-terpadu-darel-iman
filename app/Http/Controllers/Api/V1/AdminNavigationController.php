@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AppMenu;
 use App\Models\AppModule;
 use App\Models\MobileAppConfig;
+use App\Services\NavigationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -76,6 +77,10 @@ class AdminNavigationController extends Controller
      */
     public function storeModule(Request $request): JsonResponse
     {
+        if ($request->missing('id') && $request->filled('name')) {
+            $request->merge(['id' => Str::slug($request->input('name')) . '-' . Str::random(4)]);
+        }
+
         $validated = $request->validate([
             'id' => ['required', 'string', 'max:50', 'unique:app_modules,id'],
             'name' => ['required', 'string', 'max:100'],
@@ -93,6 +98,7 @@ class AdminNavigationController extends Controller
 
         $module = AppModule::create($validated);
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -122,6 +128,7 @@ class AdminNavigationController extends Controller
 
         $module->update($validated);
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -139,6 +146,7 @@ class AdminNavigationController extends Controller
         $module = AppModule::findOrFail($id);
         $module->delete();
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -186,6 +194,7 @@ class AdminNavigationController extends Controller
 
         $menu = AppMenu::create($validated);
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -221,6 +230,7 @@ class AdminNavigationController extends Controller
 
         $menu->update($validated);
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -238,6 +248,7 @@ class AdminNavigationController extends Controller
         $menu = AppMenu::findOrFail($id);
         $menu->delete();
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -268,6 +279,7 @@ class AdminNavigationController extends Controller
             }
         }
 
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -281,6 +293,7 @@ class AdminNavigationController extends Controller
      */
     public function syncMobileConfig(): JsonResponse
     {
+        NavigationService::bumpCacheVersion();
         $synced = $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -297,6 +310,7 @@ class AdminNavigationController extends Controller
     {
         \Artisan::call('db:seed', ['--class' => 'AppNavigationSeeder', '--force' => true]);
         $this->seedDefaultMobileMenus();
+        NavigationService::bumpCacheVersion();
         $this->autoSyncMobileMenus();
 
         return response()->json([
@@ -312,6 +326,7 @@ class AdminNavigationController extends Controller
     {
         $mobileMenus = AppMenu::query()
             ->active()
+            ->whereHas('module', fn ($q) => $q->active())
             ->where(function ($q) {
                 $q->where('platform', 'mobile')
                   ->orWhere(function ($sub) {
@@ -322,7 +337,7 @@ class AdminNavigationController extends Controller
             ->orderBy('sort_order', 'asc')
             ->get();
 
-        $canonicalRoles = ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif', 'alumni'];
+        $canonicalRoles = ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif', 'alumni'];
         $roleMenus = [];
         $seenDestinations = [];
 
@@ -334,12 +349,8 @@ class AdminNavigationController extends Controller
         foreach ($mobileMenus as $menu) {
             $roles = $menu->target_roles;
             if (empty($roles)) {
-                // If target_roles is not explicitly set, only include in staff/admin roles
-                if ($menu->module_id === 'mobile-services') {
-                    $roles = ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation'];
-                } else {
-                    $roles = ['principal', 'tu', 'foundation'];
-                }
+                // Empty target_roles means available for all canonical mobile roles
+                $roles = $canonicalRoles;
             }
 
             $item = [
@@ -354,7 +365,8 @@ class AdminNavigationController extends Controller
                 'tab' => $menu->metadata['tab'] ?? null,
                 'badge' => $menu->metadata['badge'] ?? null,
                 'order' => $menu->sort_order,
-                'enabled' => $menu->is_active,
+                'enabled' => (bool) $menu->is_active,
+                'is_active' => (bool) $menu->is_active,
             ];
 
             $destKey = ($item['route'] ?? '') . '__' . ($item['tab'] ?? '');
@@ -397,7 +409,9 @@ class AdminNavigationController extends Controller
                     }
                 } elseif (in_array($rk, ['tata usaha', 'tu', 'staff', 'staf', 'operator'])) {
                     $pushRoleItem('tu');
-                } elseif (in_array($rk, ['yayasan', 'ketua yayasan', 'divisi pendidikan', 'super admin', 'super_admin', 'foundation'])) {
+                } elseif (in_array($rk, ['divisi pendidikan', 'divisi_pendidikan', 'kepala bidang pendidikan', 'divisi'])) {
+                    $pushRoleItem('divisi');
+                } elseif (in_array($rk, ['yayasan', 'ketua yayasan', 'super admin', 'super_admin', 'superadmin', 'admin', 'foundation'])) {
                     $pushRoleItem('foundation');
                 } elseif (in_array($rk, ['musyrif', 'musyrifah', 'asrama', 'pembimbing'])) {
                     $pushRoleItem('musyrif');
@@ -498,7 +512,7 @@ class AdminNavigationController extends Controller
                 'path' => 'Tahfizh',
                 'icon' => 'BookMarked',
                 'icon_mobile' => 'book-marker',
-                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif'],
+                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif'],
                 'metadata' => ['color' => '#059669', 'bg' => '#ECFDF5'],
                 'sort_order' => 5,
             ],
@@ -509,7 +523,7 @@ class AdminNavigationController extends Controller
                 'path' => 'Mutabaah',
                 'icon' => 'Sparkles',
                 'icon_mobile' => 'clipboard-check-outline',
-                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'foundation', 'musyrif'],
+                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'foundation', 'divisi', 'musyrif'],
                 'metadata' => ['color' => '#D97706', 'bg' => '#FFFBEB'],
                 'sort_order' => 6,
             ],
@@ -520,7 +534,7 @@ class AdminNavigationController extends Controller
                 'path' => '__OPEN_DISCIPLINE_MODAL__',
                 'icon' => 'ShieldCheck',
                 'icon_mobile' => 'shield-alert-outline',
-                'target_roles' => ['student', 'parent', 'teacher', 'musyrif', 'principal', 'tu', 'foundation'],
+                'target_roles' => ['student', 'parent', 'teacher', 'musyrif', 'principal', 'tu', 'foundation', 'divisi'],
                 'metadata' => ['color' => '#E11D48', 'bg' => '#FFF1F2'],
                 'sort_order' => 7,
             ],
@@ -619,7 +633,7 @@ class AdminNavigationController extends Controller
                 'path' => 'Kalender',
                 'icon' => 'CalendarDays',
                 'icon_mobile' => 'calendar-month-outline',
-                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif', 'alumni'],
+                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif', 'alumni'],
                 'metadata' => ['color' => '#0284C7', 'bg' => '#F0F9FF'],
                 'sort_order' => 15,
             ],
@@ -630,7 +644,7 @@ class AdminNavigationController extends Controller
                 'path' => 'Informasi',
                 'icon' => 'Megaphone',
                 'icon_mobile' => 'bullhorn-outline',
-                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif', 'alumni'],
+                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif', 'alumni'],
                 'metadata' => ['color' => '#E11D48', 'bg' => '#FFF1F2'],
                 'sort_order' => 16,
             ],
@@ -641,7 +655,7 @@ class AdminNavigationController extends Controller
                 'path' => 'Quran',
                 'icon' => 'BookOpen',
                 'icon_mobile' => 'book-open-variant',
-                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif', 'alumni'],
+                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif', 'alumni'],
                 'metadata' => ['color' => '#059669', 'bg' => '#F0FDF4'],
                 'sort_order' => 17,
             ],
@@ -652,7 +666,7 @@ class AdminNavigationController extends Controller
                 'path' => 'DoaDzikir',
                 'icon' => 'HeartHandshake',
                 'icon_mobile' => 'hands-pray',
-                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'musyrif', 'alumni'],
+                'target_roles' => ['student', 'parent', 'teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif', 'alumni'],
                 'metadata' => ['color' => '#F97316', 'bg' => '#FFF7ED'],
                 'sort_order' => 18,
             ],
@@ -664,7 +678,7 @@ class AdminNavigationController extends Controller
                 'path' => 'PresensiMandiriStaff',
                 'icon' => 'UserCheck',
                 'icon_mobile' => 'account-check-outline',
-                'target_roles' => ['teacher', 'principal', 'tu', 'foundation'],
+                'target_roles' => ['teacher', 'principal', 'tu', 'foundation', 'divisi', 'musyrif'],
                 'metadata' => ['color' => '#10B981', 'bg' => '#ECFDF5'],
                 'sort_order' => 19,
             ],
@@ -686,7 +700,7 @@ class AdminNavigationController extends Controller
                 'path' => 'Data',
                 'icon' => 'Database',
                 'icon_mobile' => 'database-outline',
-                'target_roles' => ['tu', 'principal', 'foundation'],
+                'target_roles' => ['tu', 'principal', 'foundation', 'divisi'],
                 'metadata' => ['color' => '#059669', 'bg' => '#E6F4EA'],
                 'sort_order' => 21,
             ],
@@ -708,7 +722,7 @@ class AdminNavigationController extends Controller
                 'path' => 'PantauKelas',
                 'icon' => 'Compass',
                 'icon_mobile' => 'google-classroom',
-                'target_roles' => ['principal'],
+                'target_roles' => ['principal', 'divisi'],
                 'metadata' => ['color' => '#EA580C', 'bg' => '#FFFBEB'],
                 'sort_order' => 23,
             ],
@@ -719,7 +733,7 @@ class AdminNavigationController extends Controller
                 'path' => 'MasterSiswa',
                 'icon' => 'BookOpen',
                 'icon_mobile' => 'account-school-outline',
-                'target_roles' => ['principal', 'tu', 'foundation'],
+                'target_roles' => ['principal', 'tu', 'foundation', 'divisi'],
                 'metadata' => ['color' => '#2563EB', 'bg' => '#EFF6FF'],
                 'sort_order' => 24,
             ],
@@ -730,7 +744,7 @@ class AdminNavigationController extends Controller
                 'path' => 'SupervisiKbm',
                 'icon' => 'Compass',
                 'icon_mobile' => 'human-male-board',
-                'target_roles' => ['principal', 'foundation'],
+                'target_roles' => ['principal', 'foundation', 'divisi'],
                 'metadata' => ['color' => '#0F766E', 'bg' => '#F0FDFA'],
                 'sort_order' => 25,
             ],
@@ -824,7 +838,14 @@ class AdminNavigationController extends Controller
             ['id' => 'MutasiSiswa', 'label' => 'Kelola Alumni & Mutasi Siswa'],
             ['id' => 'PantauKelas', 'label' => 'Monitoring Guru Mengajar (Pantau Kelas)'],
             ['id' => 'AbsensiGerbangTerminal', 'label' => 'Terminal Absensi Gerbang'],
+            ['id' => 'PresensiKbmPengganti', 'label' => 'Presensi KBM & Pengganti'],
+            ['id' => 'RekapPresensiSiswa', 'label' => 'Rekap Presensi Siswa'],
+            ['id' => 'RekapPresensiGuru', 'label' => 'Rekap Presensi Guru & Pegawai'],
+            ['id' => 'MasterSiswa', 'label' => 'Buku Induk Siswa'],
+            ['id' => 'SupervisiKbm', 'label' => 'Supervisi KBM'],
+            ['id' => 'DivisiWorkspace', 'label' => 'Ruang Kerja Divisi Pendidikan'],
             ['id' => 'PrincipalDashboard', 'label' => 'Dashboard Kepala Sekolah Mobile'],
+            ['id' => 'Bantuan', 'label' => 'Pusat Bantuan & Panduan FAQ'],
             ['id' => 'Profil', 'label' => 'Profil Pengguna & Akun'],
             ['id' => 'Lainnya', 'label' => 'Layar Menu Tambahan (Lainnya)'],
         ];
@@ -902,9 +923,11 @@ class AdminNavigationController extends Controller
             ['id' => 'teacher', 'label' => 'Guru / Pengajar'],
             ['id' => 'principal', 'label' => 'Kepala Sekolah'],
             ['id' => 'tu', 'label' => 'Tata Usaha / Operator'],
+            ['id' => 'divisi', 'label' => 'Divisi Pendidikan'],
             ['id' => 'foundation', 'label' => 'Pengurus Yayasan / Pimpinan'],
             ['id' => 'musyrif', 'label' => 'Musyrif / Pembimbing Asrama'],
             ['id' => 'alumni', 'label' => 'Alumni'],
+            ['id' => 'super_admin', 'label' => 'Super Admin / Admin'],
         ];
     }
 }

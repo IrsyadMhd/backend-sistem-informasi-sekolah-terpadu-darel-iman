@@ -82,6 +82,7 @@ Aplikasi ini membedakan secara tegas antara **Data Master Fondasi Sistem (System
 
 ### 3. Kategori Seeder Dummy / Simulasi (DILARANG SAAT LIVE)
 *Berisi ribuan murid, guru fiktif, nilai rapor fiktif, dan presensi coba-coba. Otomatis di-skip saat mode Live:*
+- `UserTestSeeder`, `TestingRoleAccountsSeeder`, `AkunTestSeeder` (Akun uji coba multi-role: Super Admin, Yayasan, Kepsek/TU/Operator per unit, Musrif, Guru Boarding/Fullday, Orang Tua 4 anak)
 - `DataDummyUnitPendidikanSeeder`, `DataDummyPegawaiSeeder`, `TeacherSeeder`
 - `DataDummySiswaSeeder`, `ParentSeeder`, `SimulasiSiswaSemuaKelasSeeder` (1.050 siswa simulasi)
 - `SimulasiTerpadu2026Seeder`, `SimulasiTahunanRamadhanSeeder`, `AlumniDanMutasiSeeder`
