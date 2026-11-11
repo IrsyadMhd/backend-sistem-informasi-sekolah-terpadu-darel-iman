@@ -173,7 +173,7 @@ class EmployeeController extends Controller
         $data = $request->validated();
 
         if (! $this->accessScopeService->canManageGlobalAccess($request->user())) {
-            $this->accessScopeService->assertEmployeeAssignment(
+            $this->accessScopeService->assertEmployeePositionAssignment(
                 $request->user(),
                 $employee,
                 $data['jabatan_id'] ?? null
@@ -236,7 +236,7 @@ class EmployeeController extends Controller
         ]);
         $hasGlobalScope = $this->accessScopeService->hasGlobalScope($user) || $isDivisi;
 
-        if ($this->accessScopeService->canManageUnitAccess($user) && ! $hasGlobalScope) {
+        if ($this->accessScopeService->canManageUnitPositions($user) && ! $hasGlobalScope) {
             $query = $this->accessScopeService->accessiblePositions($user);
         } else {
             $query = \App\Models\Position::query();
@@ -269,6 +269,18 @@ class EmployeeController extends Controller
                 $sub->where('unit_sekolah_id', $unitId)
                     ->orWhereHas('employees', function ($empQuery) use ($unitId) {
                         $empQuery->where('unit_id', $unitId);
+                    })
+                    ->orWhere(function ($tpl) {
+                        $tpl->whereNull('unit_sekolah_id')
+                            ->where('satuan_kerja', 'Unit Pendidikan')
+                            ->where(function ($scopeQ) {
+                                $scopeQ->whereNull('scope_akses')
+                                    ->orWhereNotIn('scope_akses', ['semua_unit', 'bidang_pendidikan', 'lintas_unit']);
+                            })
+                            ->where(function ($lvlQ) {
+                                $lvlQ->whereNull('level_jabatan')
+                                    ->orWhere('level_jabatan', '>', 2);
+                            });
                     });
             });
         }

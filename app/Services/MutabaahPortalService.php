@@ -77,8 +77,10 @@ class MutabaahPortalService
 
     public function parentStudent(User $user, string $studentId): Student
     {
+        $hasRolesTable = Schema::hasTable('roles');
+
         // 1. Jika pengguna adalah Siswa: hanya boleh mengakses data dirinya sendiri
-        if ($user->hasRole(['Siswa', 'siswa', 'student'])) {
+        if ($hasRolesTable && $user->hasRole(['Siswa', 'siswa', 'student'])) {
             $student = Student::with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])
                 ->where('user_id', $user->id)
                 ->first();
@@ -96,7 +98,7 @@ class MutabaahPortalService
             return $this->parentStudents($parent)->with(['educationUnit:id,name', 'kelas:id,nama_kelas,tingkat,jenjang', 'schoolClass:id,name'])->findOrFail($studentId);
         }
 
-        if ($user->hasRole(['Orang Tua', 'orang_tua', 'orang-tua', 'Orangtua', 'Wali Murid', 'parent'])) {
+        if ($hasRolesTable && $user->hasRole(['Orang Tua', 'orang_tua', 'orang-tua', 'Orangtua', 'Wali Murid', 'parent'])) {
             abort(403, 'Akses ditolak: Data wali murid tidak terhubung dengan santri ini.');
         }
 

@@ -1347,6 +1347,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/chat/parent/{parentUserId}/student/{studentId}', [TeacherPortalController::class, 'sendChatMessage']);
         });
 
+        // Portal Informasi Sekolah (kalender & pengumuman dibaca oleh portal siswa/ortu maupun civitas/TU/guru)
+        Route::prefix('portal')->group(function () {
+            Route::get('/school-information', [StudentParentPortalController::class, 'schoolInformation']);
+            Route::get('/school-information/summary', [StudentParentPortalController::class, 'schoolInformationSummary']);
+        });
+
         // Parent & Student Portal Routes (/api/portal/*)
         Route::prefix('portal')->middleware('role:Orang Tua|orang_tua|orang-tua|Orangtua|Wali Murid|parent|Siswa|siswa|student')->group(function () {
             Route::get('/dashboard', [StudentParentPortalController::class, 'dashboard']);
@@ -1386,8 +1392,6 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/children/{studentId}/discipline-summary', [StudentParentPortalController::class, 'disciplineSummary']);
             Route::get('/achievements', [StudentParentPortalController::class, 'achievements']);
             Route::get('/announcements', [StudentParentPortalController::class, 'announcements']);
-            Route::get('/school-information', [StudentParentPortalController::class, 'schoolInformation']);
-            Route::get('/school-information/summary', [StudentParentPortalController::class, 'schoolInformationSummary']);
             Route::patch('/school-information/read-all', [StudentParentPortalController::class, 'markAllSchoolInformationRead']);
             Route::patch('/school-information/{informationId}/state', [StudentParentPortalController::class, 'updateSchoolInformationState']);
             Route::get('/notifications', [StudentParentPortalController::class, 'notifications']);

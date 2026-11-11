@@ -20,7 +20,7 @@ interface MasterKurikulumRepositoryInterface
 
     public function restore(string $id): bool;
 
-    public function getStats(): array;
+    public function getStats(array $filters = []): array;
 
     public function getDropdownOptions(?string $unitPendidikanId = null): Collection;
 }

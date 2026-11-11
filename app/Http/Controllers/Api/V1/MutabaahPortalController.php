@@ -14,7 +14,7 @@ class MutabaahPortalController extends Controller
 
     public function children(Request $request): JsonResponse
     {
-        $this->allow($request, 'mutabaah.daily.view');
+        $this->allow($request, 'mutabaah.daily.view', 'mutabaah.parent.monitor');
         $filters = $request->only(['unit_id', 'class_id', 'search']);
 
         return $this->ok('Daftar anak berhasil dimuat.', $this->service->children($request->user(), $filters));
@@ -22,7 +22,7 @@ class MutabaahPortalController extends Controller
 
     public function parentOverview(Request $request, string $studentId): JsonResponse
     {
-        $this->allow($request, 'mutabaah.daily.view');
+        $this->allow($request, 'mutabaah.daily.view', 'mutabaah.parent.monitor');
         $data = $request->validate(['date' => ['nullable', 'date']]);
 
         return $this->ok('Mutaba’ah anak berhasil dimuat.', $this->service->overview($this->service->parentStudent($request->user(), $studentId), $data));
@@ -30,7 +30,7 @@ class MutabaahPortalController extends Controller
 
     public function parentHistory(Request $request, string $studentId): JsonResponse
     {
-        $this->allow($request, 'mutabaah.daily.view');
+        $this->allow($request, 'mutabaah.daily.view', 'mutabaah.parent.monitor');
         $data = $this->historyFilters($request);
 
         return $this->ok('Riwayat anak berhasil dimuat.', $this->service->history($this->service->parentStudent($request->user(), $studentId), $data));
@@ -61,7 +61,7 @@ class MutabaahPortalController extends Controller
 
     public function exportWeeklyPdf(Request $request, string $studentId)
     {
-        $this->allow($request, 'mutabaah.daily.view');
+        $this->allow($request, 'mutabaah.daily.view', 'mutabaah.parent.monitor');
         $student = $this->service->parentStudent($request->user(), $studentId);
         $data = $this->service->buildWeeklyPdfData($student, $request->query('date'));
         $filename = 'mutabaah-pekanan-' . \Illuminate\Support\Str::slug($student->full_name) . '-' . now()->format('Ymd') . '.pdf';
@@ -111,9 +111,27 @@ class MutabaahPortalController extends Controller
         return response()->json(['success' => true, 'message' => $message, 'data' => $data, 'meta' => (object) []]);
     }
 
-    private function allow(Request $request, string $permission): void
+    private function allow(Request $request, string ...$permissions): void
     {
-        abort_unless($request->user()->hasRole('Super Admin') || $request->user()->can($permission), 403);
+        $user = $request->user();
+        if (! $user) {
+            abort(403);
+        }
+
+        if ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin')) {
+            return;
+        }
+
+        foreach ($permissions as $permission) {
+            try {
+                if ($user->can($permission)) {
+                    return;
+                }
+            } catch (\Throwable) {
+            }
+        }
+
+        abort(403);
     }
 }
 

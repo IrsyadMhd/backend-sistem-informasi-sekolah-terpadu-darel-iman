@@ -726,17 +726,30 @@ class RolePermissionSeeder extends Seeder
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap[$roleName] ?? [], ['worship_assessment.setting.view'])));
         }
 
-        // Pengelola unit hanya dapat mengubah assignment jabatan/role pada
-        // pegawai di unitnya; definisi role dan permission tetap global.
-        $unitAccessPermissions = ['employee.role_access.manage', 'employee.position.manage', 'employee.update', 'unit.view'];
+        // Pengelola unit hanya dapat mengubah assignment jabatan pada pegawai
+        // di unitnya; hak kelola role & akses (employee.role_access.manage)
+        // hanya diberikan ke pimpinan unit (Kepala Sekolah / Divisi Pendidikan),
+        // BUKAN Tata Usaha / Operator.
+        $unitPositionPermissions = ['employee.position.manage', 'employee.update', 'unit.view'];
         foreach ([
             'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
             'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
-            'Tata Usaha', 'TU', 'tu', 'tata_usaha',
+            'Tata Usaha', 'TU', 'tu', 'tata_usaha', 'Operator', 'operator',
         ] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
                 $rolePermissionMap[$roleName] ?? ['dashboard.view'],
-                $unitAccessPermissions,
+                $unitPositionPermissions,
+            )));
+        }
+
+        $unitRoleAccessManagers = [
+            'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan',
+        ];
+        foreach ($unitRoleAccessManagers as $roleName) {
+            $rolePermissionMap[$roleName] = array_values(array_unique(array_merge(
+                $rolePermissionMap[$roleName] ?? ['dashboard.view'],
+                ['employee.role_access.manage'],
             )));
         }
 
@@ -941,6 +954,14 @@ class RolePermissionSeeder extends Seeder
             'Divisi Bahasa', 'Divisi Program Khusus', 'Wakil Kepala Sekolah',
             'Waka Kurikulum', 'Waka Kesiswaan',
         ];
+        $tuRestrictedPermissions = [
+            'employee.role_access.manage',
+            'sistem.hak_akses',
+            'permission.manage',
+            'role.manage',
+            'user.manage',
+        ];
+        $tuAndOperatorRoles = ['Tata Usaha', 'TU', 'tu', 'tata_usaha', 'Operator', 'operator'];
 
         // Dashboard role-based access: setiap role hanya menerima permission dashboard
         // sesuai kewenangannya (sesuai DASHBOARD_ROLE_ROUTE_MATRIX).
@@ -992,6 +1013,9 @@ class RolePermissionSeeder extends Seeder
         // well; otherwise the broad role template would add it back.
         foreach ($monitoringOnlyRoles as $roleName) {
             Role::query()->where('name', $roleName)->first()?->revokePermissionTo($monitoringOnlyRevocations);
+        }
+        foreach ($tuAndOperatorRoles as $roleName) {
+            Role::query()->where('name', $roleName)->first()?->revokePermissionTo($tuRestrictedPermissions);
         }
 
         // Super Admin wajib memiliki seluruh permission tanpa terkecuali

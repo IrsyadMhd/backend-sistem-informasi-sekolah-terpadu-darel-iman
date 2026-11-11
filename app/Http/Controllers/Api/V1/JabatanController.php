@@ -432,7 +432,7 @@ class JabatanController extends Controller
 
     private function isUnitOnlyManager(Request $request): bool
     {
-        return $this->accessScopeService->canManageUnitAccess($request->user())
+        return $this->accessScopeService->canManageUnitPositions($request->user())
             && ! $this->accessScopeService->canManageGlobalAccess($request->user());
     }
 

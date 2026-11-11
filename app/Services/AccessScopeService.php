@@ -25,9 +25,6 @@ class AccessScopeService
         'pengurus_yayasan', 'Pengurus Yayasan',
         'Sekretaris Yayasan', 'sekretaris_yayasan',
         'Bendahara Yayasan', 'bendahara_yayasan',
-        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
-        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
-        'Divisi Kurikulum', 'Divisi Kesiswaan',
     ];
 
     /**
@@ -54,13 +51,6 @@ class AccessScopeService
         'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
         'Admin', 'admin',
         'pengurus_yayasan', 'Pengurus Yayasan', 'pengurus-yayasan',
-    ];
-
-    private const UNIT_ACCESS_MANAGER_ROLES = [
-        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
-        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan', 'kepala-bidang-pendidikan',
-        'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
-        'Tata Usaha', 'TU', 'tu', 'tata_usaha', 'tata-usaha',
     ];
 
     private const GLOBAL_ROLE_NAMES = [
@@ -111,32 +101,69 @@ class AccessScopeService
         return $this->hasAnyRole($user, self::ABOVE_TU_ROLES);
     }
 
+    private function hasAnyPermission(User $user, array $permissions): bool
+    {
+        foreach ($permissions as $permission) {
+            try {
+                if ($user->checkPermissionTo((string) $permission)) {
+                    return true;
+                }
+            } catch (\Throwable) {
+                // Abaikan bila tabel/record permission belum di-seed pada DB uji terisolasi.
+            }
+        }
+
+        return false;
+    }
+
+    private function minRoleLevel(User $user): int
+    {
+        $level = $user->roles()->min('level');
+
+        return $level !== null ? (int) $level : 99;
+    }
+
     /**
-     * Hanya role ini yang boleh mengubah definisi akses global dan seluruh
-     * data pegawai/unit.
+     * Hanya role/permission tata kelola global yang boleh mengubah definisi akses
+     * sistem secara menyeluruh. Diperiksa dinamis berbasis role DB & permission.
      */
     public function canManageGlobalAccess(User $user): bool
     {
-        return $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES);
+        return $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES)
+            || $this->hasAnyPermission($user, ['sistem.hak_akses', 'permission.manage', 'role.manage'])
+            || $this->minRoleLevel($user) === 1;
     }
 
     /**
-     * Pengelola unit boleh mengatur assignment lokal, tetapi tidak definisi
-     * role/permission global.
+     * Kewenangan mengelola assignment role/hak akses pegawai dalam cakupan unit.
+     * Resolved dinamis dari permission `employee.role_access.manage` (atau global access),
+     * bukan daftar role yang di-hardcode.
      */
     public function canManageUnitAccess(User $user): bool
     {
-        return $this->hasAnyRole($user, self::UNIT_ACCESS_MANAGER_ROLES);
+        return $this->canManageGlobalAccess($user)
+            || $this->hasAnyPermission($user, ['employee.role_access.manage']);
     }
 
     /**
-     * Apakah user memiliki role supervisor/pimpinan (Super Admin, Yayasan, Kepsek, Divisi, TU)?
+     * Kewenangan mengelola jabatan/posisi operasional pegawai per unit.
+     */
+    public function canManageUnitPositions(User $user): bool
+    {
+        return $this->canManageUnitAccess($user)
+            || $this->hasAnyPermission($user, ['employee.position.manage', 'jabatan.manage', 'jabatan.view', 'employee.update']);
+    }
+
+    /**
+     * Apakah user memiliki role/kapabilitas supervisor/pimpinan atau operator unit?
      */
     public function isSupervisor(User $user): bool
     {
         return $this->hasGlobalScope($user)
             || $this->isAboveTu($user)
-            || $this->canManageUnitAccess($user);
+            || $this->canManageAccess($user)
+            || $this->hasAnyPermission($user, ['dashboard.tata-usaha.view', 'dashboard.operator.view', 'lms.manage', 'academic.manage'])
+            || $this->minRoleLevel($user) <= 4;
     }
 
     /**
@@ -256,7 +283,7 @@ class AccessScopeService
         }
 
         abort_unless(
-            $this->canManageUnitAccess($user)
+            $this->canManageUnitPositions($user)
                 && $this->accessiblePositions($user)->whereKey($positionId)->exists(),
             403,
             'Jabatan berada di luar cakupan unit akun.'
@@ -270,6 +297,23 @@ class AccessScopeService
     public function assertEmployeeAssignment(User $user, Employee $employee, ?string $positionId = null): void
     {
         $this->assertAccessManagement($user);
+
+        abort_unless(
+            $this->accessibleEmployees($user)->whereKey($employee->id)->exists(),
+            403,
+            'Pegawai berada di luar cakupan unit akun.'
+        );
+
+        $this->assertPositionAssignment($user, $positionId);
+    }
+
+    public function assertEmployeePositionAssignment(User $user, Employee $employee, ?string $positionId = null): void
+    {
+        abort_unless(
+            $this->canManageUnitPositions($user),
+            403,
+            'Akun tidak memiliki kewenangan untuk mengelola jabatan pegawai.'
+        );
 
         abort_unless(
             $this->accessibleEmployees($user)->whereKey($employee->id)->exists(),
@@ -296,7 +340,7 @@ class AccessScopeService
         }
 
         abort_unless(
-            $this->canManageUnitAccess($user),
+            $this->canManageUnitPositions($user),
             403,
             'Hanya pengelola unit yang dapat mengubah jabatan unit.'
         );
@@ -742,22 +786,20 @@ class AccessScopeService
             }
         }
 
-        // Jika akun memiliki kewenangan lintas-unit (data_scope cross_unit atau permission report.cross_unit.view / Divisi Pendidikan),
-        // berikan akses ke seluruh unit pendidikan aktif yang terdaftar di database yayasan
-        $dataScope = data_get($metadata, 'data_scope');
-        if (
-            $dataScope === 'cross_unit_read' ||
-            $dataScope === 'cross_unit' ||
-            $dataScope === 'semua_unit' ||
-            $user->can('report.cross_unit.view') ||
-            $this->hasAnyRole($user, ['Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan'])
-        ) {
-            return EducationUnit::query()->where('is_active', true)->pluck('id');
-        }
-
         $employeeUnitId = Employee::query()
             ->where('user_id', $user->id)
             ->value('unit_id');
+
+        // Jika metadata akun secara eksplisit menetapkan data_scope lintas-unit,
+        // atau akun bidang pendidikan belum terikat pada satu unit pegawai spesifik
+        // dan memiliki izin report.cross_unit.view, kembalikan unit aktif.
+        $dataScope = data_get($metadata, 'data_scope');
+        if (
+            in_array($dataScope, ['cross_unit_read', 'cross_unit', 'semua_unit'], true)
+            || (! $employeeUnitId && $this->hasAnyPermission($user, ['report.cross_unit.view']))
+        ) {
+            return EducationUnit::query()->where('is_active', true)->pluck('id');
+        }
 
         return collect([$employeeUnitId])->filter()->values();
     }

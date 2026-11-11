@@ -245,7 +245,7 @@ class AuthController extends Controller
             'Admin' => ['Admin'],
             'Divisi Pendidikan' => ['Divisi Pendidikan', 'Kepala Bidang Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus'],
             'Kepala Sekolah' => ['Kepala Sekolah'],
-            'Tata Usaha' => ['Tata Usaha', 'Operator'],
+            'Tata Usaha' => ['Tata Usaha', 'tata_usaha', 'TU'],
             'Guru' => ['Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Wali Kelas'],
             'Guru Tahfizh' => ['Guru Tahfizh'],
             'Musyrif' => ['Musyrif', 'Musyrifah', 'Musyrif / Musyrifah'],

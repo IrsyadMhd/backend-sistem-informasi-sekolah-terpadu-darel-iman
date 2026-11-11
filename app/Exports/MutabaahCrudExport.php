@@ -17,6 +17,31 @@ class MutabaahCrudExport implements FromCollection, WithHeadings
 
     public function collection(): Collection
     {
-        return $this->rows->map(fn ($row) => collect($this->headings)->map(fn ($heading) => data_get($row, $heading))->all());
+        return $this->rows->map(
+            fn ($row) => collect($this->headings)
+                ->map(fn ($heading) => $this->normalizeCellValue(data_get($row, $heading)))
+                ->all()
+        );
+    }
+
+    private function normalizeCellValue(mixed $value): mixed
+    {
+        if ($value instanceof \BackedEnum) {
+            return $value->value;
+        }
+        if ($value instanceof \UnitEnum) {
+            return $value->name;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d H:i:s');
+        }
+        if (is_bool($value)) {
+            return $value ? 'Ya' : 'Tidak';
+        }
+        if (is_array($value)) {
+            return json_encode($value, JSON_UNESCAPED_UNICODE);
+        }
+
+        return $value;
     }
 }

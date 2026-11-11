@@ -3349,7 +3349,13 @@ class StudentParentPortalController extends Controller
             }
         }
 
-        if (! $student && ! $isParentUser && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
+        $hasStaffCalendarPermission = $user && (
+            $user->checkPermissionTo('pembelajaran.kalender_pendidikan')
+            || $user->checkPermissionTo('sekolah.informasi_sekolah')
+            || $user->checkPermissionTo('portal.view')
+        );
+
+        if (! $student && ! $isParentUser && ! $hasStaffCalendarPermission && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
@@ -3450,7 +3456,13 @@ class StudentParentPortalController extends Controller
             }
         }
 
-        if (! $student && ! $isParentUser && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
+        $hasStaffCalendarPermission = $user && (
+            $user->checkPermissionTo('pembelajaran.kalender_pendidikan')
+            || $user->checkPermissionTo('sekolah.informasi_sekolah')
+            || $user->checkPermissionTo('portal.view')
+        );
+
+        if (! $student && ! $isParentUser && ! $hasStaffCalendarPermission && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 

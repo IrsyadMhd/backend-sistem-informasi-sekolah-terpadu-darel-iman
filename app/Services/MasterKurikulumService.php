@@ -21,9 +21,9 @@ class MasterKurikulumService
         return $this->repository->getFiltered($filters, $perPage, $orderBy, $orderDir);
     }
 
-    public function dapatkanStatistik(): array
+    public function dapatkanStatistik(array $filters = []): array
     {
-        return $this->repository->getStats();
+        return $this->repository->getStats($filters);
     }
 
     public function dapatkanDropdown(?string $unitPendidikanId = null): Collection
