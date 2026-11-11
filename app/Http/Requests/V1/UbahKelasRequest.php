@@ -18,9 +18,17 @@ class UbahKelasRequest extends FormRequest
         return true;
     }
 
+    /**
+     * Ambil ID kelas dari parameter route (mendukung `kelas`, singular Laravel `kela`, maupun `id`).
+     */
+    private function resolveKelasId(): mixed
+    {
+        return $this->route('kelas') ?? $this->route('kela') ?? $this->route('id');
+    }
+
     public function rules(): array
     {
-        $kelasId = $this->route('kelas') ?? $this->route('id');
+        $kelasId = $this->resolveKelasId();
 
         return [
             'unit_pendidikan_id' => ['sometimes', 'required', 'uuid', 'exists:education_units,id'],
@@ -60,7 +68,7 @@ class UbahKelasRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function ($validator) {
-            $kelasId = $this->route('kelas') ?? $this->route('id');
+            $kelasId = $this->resolveKelasId();
             $unitId = $this->input('unit_pendidikan_id');
             $tahunId = $this->input('tahun_ajaran_id');
             $semesterId = $this->input('semester_id');
@@ -73,7 +81,7 @@ class UbahKelasRequest extends FormRequest
                     ->where('tahun_ajaran_id', $tahunId)
                     ->where('semester_id', $semesterId)
                     ->whereRaw('LOWER(nama_kelas) = ?', [strtolower(trim($namaKelas))])
-                    ->where('id', '!=', $kelasId)
+                    ->when($kelasId, fn ($q) => $q->where('id', '!=', $kelasId))
                     ->exists();
 
                 if ($duplikatNama) {
@@ -88,7 +96,7 @@ class UbahKelasRequest extends FormRequest
             if ($waliId && $tahunId) {
                 $duplikatWali = Kelas::where('tahun_ajaran_id', $tahunId)
                     ->where('wali_kelas_id', $waliId)
-                    ->where('id', '!=', $kelasId)
+                    ->when($kelasId, fn ($q) => $q->where('id', '!=', $kelasId))
                     ->exists();
 
                 if ($duplikatWali) {

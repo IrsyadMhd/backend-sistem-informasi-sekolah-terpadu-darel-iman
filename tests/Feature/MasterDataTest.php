@@ -368,4 +368,63 @@ class MasterDataTest extends TestCase
             'name' => 'Pengguna CSV',
         ]);
     }
+
+    public function test_kelas_update_with_unchanged_kode_kelas_succeeds(): void
+    {
+        $unit = \App\Models\EducationUnit::create([
+            'code' => 'SDIT-TST',
+            'name' => 'SDIT Test',
+            'level' => 'SD',
+            'is_active' => true,
+        ]);
+        $year = \App\Models\AcademicYear::create([
+            'name' => '2026/2027',
+            'start_date' => '2026-07-01',
+            'end_date' => '2027-06-30',
+            'is_active' => true,
+        ]);
+        $semester = \App\Models\Semester::create([
+            'academic_year_id' => $year->id,
+            'name' => 'Ganjil',
+            'sequence' => 1,
+            'start_date' => '2026-07-01',
+            'end_date' => '2026-12-31',
+            'is_active' => true,
+        ]);
+        $kelas = \App\Models\Kelas::create([
+            'unit_pendidikan_id' => $unit->id,
+            'tahun_ajaran_id' => $year->id,
+            'semester_id' => $semester->id,
+            'jenjang' => 'SD',
+            'tingkat' => '1',
+            'kode_kelas' => 'KLS-QA-99',
+            'nama_kelas' => 'Kelas 1 QA',
+            'kapasitas' => 28,
+            'status' => 'Aktif',
+        ]);
+
+        $res = $this->actingAs($this->user)->putJson("/api/kelas/{$kelas->id}", [
+            'unit_pendidikan_id' => $unit->id,
+            'tahun_ajaran_id' => $year->id,
+            'semester_id' => $semester->id,
+            'jenjang' => 'SD',
+            'tingkat' => '1',
+            'kode_kelas' => 'KLS-QA-99',
+            'nama_kelas' => 'Kelas 1 QA Edited',
+            'kapasitas' => 30,
+            'status' => 'Aktif',
+        ]);
+
+        $res->assertOk()
+            ->assertJsonPath('status', 'success')
+            ->assertJsonPath('data.kode_kelas', 'KLS-QA-99')
+            ->assertJsonPath('data.nama_kelas', 'Kelas 1 QA Edited');
+
+        $this->assertDatabaseHas('tbl_kelas', [
+            'id' => $kelas->id,
+            'kode_kelas' => 'KLS-QA-99',
+            'nama_kelas' => 'Kelas 1 QA Edited',
+            'kapasitas' => 30,
+        ]);
+    }
 }

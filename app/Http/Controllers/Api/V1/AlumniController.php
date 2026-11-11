@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Services\AccessScopeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 
 class AlumniController extends Controller
@@ -239,6 +240,8 @@ class AlumniController extends Controller
             ->count();
 
         // Kumpulkan tahun-tahun kelulusan dan mutasi yang tersedia di DB
+        // Cast tahun_masuk (smallint) ke text/char agar NULLIF aman di PostgreSQL maupun SQLite/MySQL
+        $yearTextType = DB::getDriverName() === 'mysql' ? 'CHAR' : 'TEXT';
         $dbYears = (clone $studentQuery)->where(function ($q) {
             $q->where('metadata->is_alumni', true)
               ->orWhere('metadata->status_siswa', 'alumni')
@@ -247,7 +250,7 @@ class AlumniController extends Controller
               ->orWhere('metadata->status_alumni', 'Lulus')
               ->orWhereNotNull('metadata->mutasi_type');
         })
-        ->selectRaw("DISTINCT COALESCE(NULLIF(metadata->>'tahun_lulus', ''), NULLIF(metadata->>'tahun_mutasi', ''), NULLIF(tahun_masuk, '')) as thn")
+        ->selectRaw("DISTINCT COALESCE(NULLIF(metadata->>'tahun_lulus', ''), NULLIF(metadata->>'tahun_mutasi', ''), NULLIF(CAST(tahun_masuk AS {$yearTextType}), '')) as thn")
         ->pluck('thn')
         ->filter(fn ($y) => ! empty($y) && strlen((string) $y) === 4)
         ->values()
