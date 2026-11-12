@@ -329,6 +329,13 @@ class DisciplineManagementController extends Controller
 
         $student = Student::with(['educationUnit', 'kelas'])->findOrFail($validated['student_id']);
 
+        $user = $request->user();
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $studentUnitId = $student->unit_id ?: $student->kelas?->unit_pendidikan_id;
+            abort_unless($studentUnitId, 403, 'Siswa/santri berada di luar cakupan unit akun.');
+            $this->accessScope->assertEducationUnitAccess($user, (string) $studentUnitId);
+        }
+
         // Validasi Otorisasi Hak Input Berdasarkan Tipe Unit (Boarding vs Fullday)
         $perm = $this->validateRecorderPermission($request, $student);
         if (! $perm['allowed']) {
@@ -662,30 +669,74 @@ class DisciplineManagementController extends Controller
      */
     public function dashboardStats(Request $request): JsonResponse
     {
-        $activeYear = AcademicYear::where('is_active', true)->first();
+        $user = $request->user();
+        $hasGlobalScope = ! $user || $this->accessScope->hasGlobalScope($user);
+        $accessibleUnitIds = $hasGlobalScope
+            ? collect()
+            : $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+
+        if (! $hasGlobalScope && $accessibleUnitIds->isEmpty()) {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'violations_this_month' => 0,
+                    'active_sp_count' => 0,
+                    'permanent_violations_count' => 0,
+                    'resolved_count' => 0,
+                    'cluster_distribution' => [],
+                ],
+            ]);
+        }
+
+        $applyUnitScope = function ($q) use ($hasGlobalScope, $accessibleUnitIds) {
+            if ($hasGlobalScope) {
+                return;
+            }
+            $q->whereHas('student', function ($sq) use ($accessibleUnitIds) {
+                $sq->whereIn('unit_id', $accessibleUnitIds)
+                    ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        };
 
         // 1. Total Pelanggaran Bulan Ini
         $startOfMonth = Carbon::now()->startOfMonth()->toDateString();
-        $violationsThisMonth = StudentPointTransaction::whereDate('transaction_date', '>=', $startOfMonth)->count();
+        $violationsThisMonthQuery = StudentPointTransaction::whereDate('transaction_date', '>=', $startOfMonth);
+        $applyUnitScope($violationsThisMonthQuery);
+        $violationsThisMonth = $violationsThisMonthQuery->count();
 
         // 2. Santri Status SP1 / SP2 Aktif
-        $activeSpCount = StudentWarningLetter::whereIn('letter_type', ['sp1', 'sp2'])
-            ->where('parent_summon_status', '!=', 'selesai_konseling')
-            ->distinct('student_id')
-            ->count('student_id');
+        $activeSpQuery = StudentWarningLetter::whereIn('letter_type', ['sp1', 'sp2'])
+            ->where('parent_summon_status', '!=', 'selesai_konseling');
+        $applyUnitScope($activeSpQuery);
+        $activeSpCount = $activeSpQuery->distinct('student_id')->count('student_id');
 
         // 3. Kasus Berat / Poin Permanen
-        $permanentViolationsCount = StudentPointTransaction::whereHas('category', fn ($q) => $q->where('is_permanent', true))->count();
+        $permanentQuery = StudentPointTransaction::whereHas('category', fn ($q) => $q->where('is_permanent', true));
+        $applyUnitScope($permanentQuery);
+        $permanentViolationsCount = $permanentQuery->count();
 
         // 4. Pembinaan Selesai
-        $resolvedCount = StudentPointTransaction::where('status', 'selesai_pembinaan')->count();
+        $resolvedQuery = StudentPointTransaction::where('status', 'selesai_pembinaan');
+        $applyUnitScope($resolvedQuery);
+        $resolvedCount = $resolvedQuery->count();
 
         // 5. Distribusi Kluster
-        $clusterDistribution = DB::table('student_point_transactions')
+        $clusterQuery = DB::table('student_point_transactions')
             ->join('discipline_categories', 'student_point_transactions.category_id', '=', 'discipline_categories.id')
             ->select('discipline_categories.cluster', DB::raw('count(*) as count'), DB::raw('sum(student_point_transactions.points) as total_points'))
-            ->groupBy('discipline_categories.cluster')
-            ->get();
+            ->groupBy('discipline_categories.cluster');
+
+        if (! $hasGlobalScope) {
+            $scopedStudentSubquery = Student::query()
+                ->select('id')
+                ->where(function ($sq) use ($accessibleUnitIds) {
+                    $sq->whereIn('unit_id', $accessibleUnitIds)
+                        ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+                });
+            $clusterQuery->whereIn('student_point_transactions.student_id', $scopedStudentSubquery);
+        }
+
+        $clusterDistribution = $clusterQuery->get();
 
         return response()->json([
             'success' => true,
@@ -1173,12 +1224,29 @@ class DisciplineManagementController extends Controller
         $unitId = $request->query('unit_id');
         $kelasId = $request->query('kelas_id');
         $programType = $request->query('program_type');
+        $user = $request->user();
 
         $query = Student::query()
             ->with([
                 'educationUnit:id,name,level,program_type',
                 'kelas:id,nama_kelas,tingkat',
-            ])
+            ]);
+
+        if ($user && ! $this->accessScope->hasGlobalScope($user)) {
+            $accessibleUnitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id');
+            if ($accessibleUnitIds->isEmpty()) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [],
+                ]);
+            }
+            $query->where(function ($sq) use ($accessibleUnitIds) {
+                $sq->whereIn('unit_id', $accessibleUnitIds)
+                    ->orWhereHas('kelas', fn ($kq) => $kq->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        }
+
+        $query
             ->when($unitId && ! in_array(strtolower((string) $unitId), ['all', 'semua'], true), fn ($q) => $q->where('unit_id', $unitId))
             ->when($kelasId && ! in_array(strtolower((string) $kelasId), ['all', 'semua'], true), fn ($q) => $q->where('kelas_id', $kelasId))
             ->when($programType && ! in_array(strtolower((string) $programType), ['all', 'semua'], true), function ($q) use ($programType) {

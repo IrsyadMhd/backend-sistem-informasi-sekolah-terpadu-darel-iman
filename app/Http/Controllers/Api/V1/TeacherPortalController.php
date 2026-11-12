@@ -2123,7 +2123,7 @@ class TeacherPortalController extends Controller
         $teacher = $this->getTeacherContext($request);
         $classIds = $this->teacherClassIds($request, $teacher);
 
-        if ($classId) {
+        if ($classId && ! in_array(strtolower((string) $classId), ['all', 'semua'], true)) {
             abort_unless($classIds->contains($classId), 403, 'Rombel berada di luar scope guru.');
             $classIds = collect([$classId]);
         }
@@ -2566,7 +2566,10 @@ class TeacherPortalController extends Controller
 
         // Also populate all students under teacher's classes/homeroom or principal's accessible units so teacher/principal can initiate conversations
         $relevantKelasIds = array_unique(array_filter(array_merge($homeroomKelasIds, $teachingKelasIds)));
-        $teacherUnitId = $employee?->unit_id ?? $teacher?->employee?->unit_id;
+        $teacherUnitId = $employee?->unit_id
+            ?? $employee?->education_unit_id
+            ?? $teacher?->employee?->unit_id
+            ?? $teacher?->employee?->education_unit_id;
 
         $studentsQuery = Student::query()
             ->with(['parent.user', 'parentsPivot.user', 'parents.user', 'kelas.unitPendidikan', 'educationUnit'])
@@ -2584,6 +2587,13 @@ class TeacherPortalController extends Controller
                 $q->where('unit_id', $teacherUnitId)
                     ->orWhereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $teacherUnitId));
             });
+        } elseif ($accessibleUnitIds->isNotEmpty()) {
+            $studentsQuery->where(function ($q) use ($accessibleUnitIds) {
+                $q->whereIn('unit_id', $accessibleUnitIds)
+                    ->orWhereHas('kelas', fn ($k) => $k->whereIn('unit_pendidikan_id', $accessibleUnitIds));
+            });
+        } else {
+            $studentsQuery->whereRaw('1 = 0');
         }
 
         $assignedStudents = $studentsQuery->limit($isElevated ? 250 : 80)->get();
