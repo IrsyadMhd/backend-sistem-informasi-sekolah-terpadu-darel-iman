@@ -6,7 +6,9 @@ use App\Models\AppMenu;
 use App\Models\AppModule;
 use App\Models\User;
 use App\Support\RoleName;
+use App\Support\RolePolicyDefaults;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 
 class NavigationService
 {
@@ -24,12 +26,31 @@ class NavigationService
     }
 
     /**
+     * Return authorized route paths for the authenticated user.
+     *
+     * @return list<string>
+     */
+    public function getAccessiblePathsForUser(User $user, ?string $platform = 'web'): array
+    {
+        $modules = $this->getModulesForUser($user, $platform);
+
+        return collect($modules)
+            ->flatMap(fn (array $module) => collect($module['items'] ?? [])->pluck('path'))
+            ->filter(fn ($path) => is_string($path) && $path !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
      * Return authorized navigation modules and items for the given user,
-     * filtered by platform and evaluated strictly against Spatie database permissions.
+     * filtered by platform and evaluated dynamically against DB role menu policies
+     * and Spatie database permissions.
      */
     public function getModulesForUser(User $user, ?string $platform = 'web'): array
     {
         $platform = empty($platform) ? 'web' : strtolower($platform);
+        $menuOverrideState = $this->resolveUserMenuOverrideState($user);
 
         $modules = AppModule::query()
             ->active()
@@ -45,17 +66,21 @@ class NavigationService
         $result = [];
 
         foreach ($modules as $module) {
-            // Sembunyikan seluruh modul Pengaturan untuk role Kepala Sekolah
-            if ($module->id === 'pengaturan' && RoleName::userHasAny($user, [
-                'kepala sekolah', 'kepala_sekolah', 'kepsek',
-            ])) {
+            // Sembunyikan modul Pengaturan untuk Kepala Sekolah KECUALI bila ada explicit allow DB di role_menu_access atau custom menu mode
+            $hasPengaturanAllow = $module->menus->contains(fn ($m) => isset($menuOverrideState['allow'][$m->id]));
+            if (
+                $module->id === 'pengaturan'
+                && ! $hasPengaturanAllow
+                && ! $menuOverrideState['all_custom']
+                && RoleName::userHasAny($user, ['kepala sekolah', 'kepala_sekolah', 'kepsek'])
+            ) {
                 continue;
             }
 
             $accessibleMenus = [];
 
             foreach ($module->menus as $menu) {
-                if ($this->canAccessMenu($user, $menu)) {
+                if ($this->canAccessMenuWithState($user, $menu, $menuOverrideState)) {
                     $accessibleMenus[] = [
                         'id' => $menu->id,
                         'name' => $menu->name,
@@ -84,9 +109,110 @@ class NavigationService
     }
 
     /**
-     * Check if a user can access a given menu based on target_roles and permissions.
+     * Preload explicit DB menu access overrides for user's roles.
+     *
+     * @return array{allow:array<string,bool>,deny:array<string,bool>,any_custom:bool,all_custom:bool,is_super_admin:bool,is_canonical_role:bool}
+     */
+    private function resolveUserMenuOverrideState(User $user): array
+    {
+        $policy = RolePolicyDefaults::resolveUserPolicy($user);
+        $allow = [];
+        $deny = [];
+
+        if (Schema::hasTable('role_menu_access')) {
+            $roles = $user->relationLoaded('roles') ? $user->roles : $user->roles()->get();
+            if ($roles->isNotEmpty()) {
+                $roles->loadMissing('menuAccesses');
+                foreach ($roles as $role) {
+                    foreach ($role->menuAccesses as $access) {
+                        if ($access->access_mode === 'allow') {
+                            $allow[$access->app_menu_id] = true;
+                        } elseif ($access->access_mode === 'deny') {
+                            $deny[$access->app_menu_id] = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return [
+            'allow' => $allow,
+            'deny' => $deny,
+            'any_custom' => (bool) ($policy['has_custom_menu_access'] ?? false),
+            'all_custom' => (bool) ($policy['all_custom_menu_access'] ?? false),
+            'is_super_admin' => (bool) ($policy['is_super_admin'] ?? false),
+            'is_canonical_role' => (bool) ($policy['is_canonical_role'] ?? true),
+            'portal_groups' => $policy['portal_groups'] ?? [],
+        ];
+    }
+
+    /**
+     * Check if a user can access a given menu based on dynamic DB role overrides,
+     * Spatie permissions, and target_roles.
      */
     public function canAccessMenu(User $user, AppMenu $menu): bool
+    {
+        return $this->canAccessMenuWithState($user, $menu, $this->resolveUserMenuOverrideState($user));
+    }
+
+    private function canAccessMenuWithState(User $user, AppMenu $menu, array $state): bool
+    {
+        // 1. Explicit DB allow row ALWAYS wins for the menu
+        if (isset($state['allow'][$menu->id])) {
+            return true;
+        }
+
+        // 2. Strict custom menu mode: only menus explicitly checked in role_menu_access are shown
+        if ($state['all_custom']) {
+            return false;
+        }
+
+        // 3. Explicit DB deny row blocks access unless allowed by another role
+        if (isset($state['deny'][$menu->id])) {
+            return false;
+        }
+
+        // 4. Super Admin full access
+        if ($state['is_super_admin']) {
+            return true;
+        }
+
+        // 5. Pure custom/non-canonical roles evaluate strictly via DB portal_group + Spatie permissions
+        if (! $state['is_canonical_role']) {
+            $targetRoles = is_array($menu->target_roles) ? $menu->target_roles : [];
+            $externalOnlyTokens = ['student', 'siswa', 'parent', 'orangtua', 'orang tua', 'alumni'];
+            if (! empty($targetRoles)) {
+                $normalizedTargets = array_map(fn ($r) => RoleName::normalize((string) $r), $targetRoles);
+                $isExternalPortalMenu = count(array_diff($normalizedTargets, array_map([RoleName::class, 'normalize'], $externalOnlyTokens))) === 0;
+                $userGroups = array_map([RoleName::class, 'normalize'], $state['portal_groups'] ?? []);
+                $hasMatchingPortalGroup = count(array_intersect($normalizedTargets, $userGroups)) > 0;
+                if ($isExternalPortalMenu && ! $hasMatchingPortalGroup && ! $this->userMatchesTargetRoles($user, $targetRoles)) {
+                    return false;
+                }
+            }
+
+            $requiredPermissions = is_array($menu->required_permissions) ? $menu->required_permissions : [];
+            if (empty($requiredPermissions)) {
+                return true;
+            }
+
+            foreach ($requiredPermissions as $permission) {
+                try {
+                    if ($user->checkPermissionTo($permission)) {
+                        return true;
+                    }
+                } catch (\Throwable) {
+                    // Permission not seeded
+                }
+            }
+
+            return false;
+        }
+
+        return $this->evaluateLegacyCanAccessMenu($user, $menu);
+    }
+
+    protected function evaluateLegacyCanAccessMenu(User $user, AppMenu $menu): bool
     {
         $targetRoles = array_values(array_filter(
             (array) $menu->target_roles,
@@ -193,6 +319,52 @@ class NavigationService
             ]);
             if ($isRestricted) {
                 return false;
+            }
+        }
+
+        // 5b. Strict scoping selaras PermissionElement web routes:
+        // - /dashboard/master-jabatan disembunyikan untuk Divisi Pendidikan & Guru
+        // - /dashboard/lms/penilaian & /dashboard/lms/rapor disembunyikan untuk Yayasan
+        // - /dashboard/absensi-gerbang disembunyikan untuk Yayasan & Divisi Pendidikan
+        $isAdmin = RoleName::userHasAny($user, ['super admin', 'superadmin', 'super_admin', 'admin']);
+        if (! $isAdmin) {
+            if ($menu->id === 'master-jabatan' || $menu->path === '/dashboard/master-jabatan') {
+                if (RoleName::userHasAny($user, [
+                    'divisi pendidikan', 'divisi_pendidikan', 'kepala bidang pendidikan',
+                    'guru', 'guru mata pelajaran', 'guru pai', 'guru tahfizh', 'guru bk', 'wali kelas', 'walas',
+                ])) {
+                    return false;
+                }
+            }
+
+            if (in_array($menu->id, ['lms-penilaian', 'lms-rapor'], true)
+                || in_array($menu->path, ['/dashboard/lms/penilaian', '/dashboard/lms/penilaian-rapor', '/dashboard/lms/rapor'], true)) {
+                if (RoleName::userHasAny($user, [
+                    'yayasan', 'ketua yayasan', 'ketua_yayasan', 'pengurus yayasan', 'pengurus_yayasan',
+                    'sekretaris yayasan', 'sekretaris_yayasan', 'bendahara yayasan', 'bendahara_yayasan',
+                ])) {
+                    return false;
+                }
+            }
+
+            if (in_array($menu->id, ['presensi-device'], true)
+                || in_array($menu->path, ['/dashboard/absensi-gerbang', '/absensi-gerbang'], true)) {
+                if (RoleName::userHasAny($user, [
+                    'yayasan', 'ketua yayasan', 'ketua_yayasan', 'pengurus yayasan', 'pengurus_yayasan',
+                    'sekretaris yayasan', 'sekretaris_yayasan', 'bendahara yayasan', 'bendahara_yayasan',
+                    'divisi pendidikan', 'divisi_pendidikan', 'kepala bidang pendidikan',
+                ])) {
+                    return false;
+                }
+            }
+
+            if ($menu->id === 'presensi-gerbang' || $menu->path === '/dashboard/rekap-absensi-gerbang') {
+                if (RoleName::userHasAny($user, [
+                    'yayasan', 'ketua yayasan', 'ketua_yayasan', 'pengurus yayasan', 'pengurus_yayasan',
+                    'sekretaris yayasan', 'sekretaris_yayasan', 'bendahara yayasan', 'bendahara_yayasan',
+                ])) {
+                    return false;
+                }
             }
         }
 

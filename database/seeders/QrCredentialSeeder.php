@@ -16,11 +16,18 @@ class QrCredentialSeeder extends Seeder
     public function run(): void
     {
         // 1. Employee QR Login Demo Credential
-        $guruUser = User::where('email', 'guru@dareliman.sch.id')->first();
-        $employee = Employee::where('niy', 'TEST-NIY-17')->first()
-            ?? ($guruUser ? Employee::where('user_id', $guruUser->id)->first() : null);
+        $guruUser = User::where('email', 'guru.test@dareliman.sch.id')->first()
+            ?? User::where('email', 'guru@dareliman.sch.id')->first()
+            ?? User::where('email', 'guru@school-erp.local')->first()
+            ?? User::where('email', 'like', '%guru%')->first();
 
-        if ($guruUser && $employee) {
+        $employee = ($guruUser ? Employee::where('user_id', $guruUser->id)->first() : null)
+            ?? Employee::where('niy', 'TEST-NIY-guru')->first()
+            ?? Employee::where('niy', 'TEST-NIY-17')->first()
+            ?? Employee::first();
+
+        if ($employee) {
+            $userId = $employee->user_id ?? $guruUser?->id;
             $employeeRawToken = 'empqr-demo-guru-0017';
             $employeeHash = hash('sha256', $employeeRawToken);
 
@@ -30,7 +37,7 @@ class QrCredentialSeeder extends Seeder
                     'card_type' => 'employee_card',
                 ],
                 [
-                    'user_id' => $guruUser->id,
+                    'user_id' => $userId,
                     'token_hash' => $employeeHash,
                     'card_version' => 'v1',
                     'status' => 'active',
@@ -44,7 +51,9 @@ class QrCredentialSeeder extends Seeder
         }
 
         // 2. Student QR Attendance Demo Credentials
-        $student1 = Student::where('nis', 'TEST-NIS-023')->first();
+        $student1 = Student::where('nis', 'TEST001')->first()
+            ?? Student::where('nis', 'TEST-NIS-023')->first()
+            ?? Student::first();
         if ($student1) {
             $stuRawToken1 = 'stuqr:v1:demo-student-023';
             $stuHash1 = hash('sha256', $stuRawToken1);

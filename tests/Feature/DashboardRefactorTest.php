@@ -14,7 +14,17 @@ class DashboardRefactorTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        putenv('SEED_DUMMY_DATA=true');
+        $_ENV['SEED_DUMMY_DATA'] = 'true';
+        $_SERVER['SEED_DUMMY_DATA'] = 'true';
         $this->seed(DatabaseSeeder::class);
+    }
+
+    protected function tearDown(): void
+    {
+        putenv('SEED_DUMMY_DATA');
+        unset($_ENV['SEED_DUMMY_DATA'], $_SERVER['SEED_DUMMY_DATA']);
+        parent::tearDown();
     }
 
     public function test_all_primary_roles_access_their_respective_dashboards_without_error(): void

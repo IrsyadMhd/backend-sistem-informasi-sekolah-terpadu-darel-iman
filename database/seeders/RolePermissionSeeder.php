@@ -28,7 +28,9 @@ class RolePermissionSeeder extends Seeder
             'Pengurus Yayasan',
             'Wakil Kepala Sekolah',
             'Waka Kurikulum',
+            'Wakil Kurikulum',
             'Waka Kesiswaan',
+            'Wakil Kesiswaan',
             'Wakil Humas dan Program Khusus',
             'Divisi Pendidikan',
             'Kepala Bidang Pendidikan',
@@ -609,6 +611,7 @@ class RolePermissionSeeder extends Seeder
 
         $foundationPerms = [
             'dashboard.view',
+            'dashboard.pemantauan.lihat',
             'foundation.dashboard.view',
             'foundation.unit.view',
             'foundation.employee.view',
@@ -635,7 +638,10 @@ class RolePermissionSeeder extends Seeder
         $readAll = ['mutabaah.dashboard.view', 'mutabaah.recap.view', 'mutabaah.report.view', 'mutabaah.report.export'];
 
         foreach (['Ketua Yayasan', 'Yayasan', 'ketua_yayasan', 'Sekretaris Yayasan', 'sekretaris_yayasan', 'Bendahara Yayasan', 'bendahara_yayasan', 'pengurus_yayasan', 'Pengurus Yayasan'] as $roleName) {
-            $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap[$roleName] ?? ['dashboard.view'], $readAll, $foundationPerms)));
+            $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap[$roleName] ?? ['dashboard.view'], $readAll, $foundationPerms, [
+                'pembelajaran.jadwal_pelajaran',
+                'academic.schedule.view', 'academic.schedule.create', 'academic.schedule.update', 'academic.schedule.delete',
+            ])));
         }
 
         // Hanya Admin dan Pengurus Yayasan yang mendapat kemampuan mutasi
@@ -694,6 +700,8 @@ class RolePermissionSeeder extends Seeder
             'teacher.student_note.view',
             'discipline.point.view', 'discipline.point.manage',
             'dormitory.view', 'dormitory.manage', 'dormitory.permission.approve', 'dashboard.musyrif.view',
+            'academic.subject.view', 'academic.subject.create', 'academic.subject.update', 'academic.subject.delete',
+            'academic.schedule.view', 'academic.schedule.create', 'academic.schedule.update', 'academic.schedule.delete',
         ];
         foreach (['Tata Usaha', 'TU', 'tu', 'operator', 'tata_usaha', 'Operator'] as $roleName) {
             $rolePermissionMap[$roleName] = array_values(array_unique(array_merge($rolePermissionMap['Tata Usaha'] ?? ['dashboard.view'], $tuPermissions)));
@@ -950,6 +958,7 @@ class RolePermissionSeeder extends Seeder
             'divisi.laporan_bulanan',
         ];
         $monitoringOnlyRoles = [
+            'Kepala Sekolah',
             'Kepala Bidang Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan',
             'Divisi Bahasa', 'Divisi Program Khusus', 'Wakil Kepala Sekolah',
             'Waka Kurikulum', 'Waka Kesiswaan',
@@ -990,12 +999,30 @@ class RolePermissionSeeder extends Seeder
         }
 
         foreach ($roles as $roleName) {
+            $policyDefaults = \App\Support\RolePolicyDefaults::forRoleName($roleName, $roleLevels[$roleName] ?? 5);
+            $hasPolicyColumns = \Illuminate\Support\Facades\Schema::hasColumn('roles', 'scope_type');
+
+            $createAttrs = ['level' => $roleLevels[$roleName] ?? 99];
+            if ($hasPolicyColumns) {
+                $createAttrs = array_merge($createAttrs, [
+                    'description' => $policyDefaults['description'] ?? null,
+                    'scope_type' => $policyDefaults['scope_type'],
+                    'portal_group' => $policyDefaults['portal_group'],
+                    'default_route' => $policyDefaults['default_route'],
+                    'is_read_only' => (bool) $policyDefaults['is_read_only'],
+                    'can_switch_unit' => (bool) $policyDefaults['can_switch_unit'],
+                    'is_above_tu' => (bool) $policyDefaults['is_above_tu'],
+                    'can_manage_global_access' => (bool) $policyDefaults['can_manage_global_access'],
+                    'is_system_protected' => (bool) $policyDefaults['is_system_protected'],
+                ]);
+            }
+
             $role = Role::query()->firstOrCreate(
                 ['name' => $roleName, 'guard_name' => 'web'],
-                ['level' => $roleLevels[$roleName] ?? 99]
+                $createAttrs
             );
 
-            if (isset($roleLevels[$roleName])) {
+            if (isset($roleLevels[$roleName]) && (int) $role->level === 99) {
                 $role->update(['level' => $roleLevels[$roleName]]);
             }
 

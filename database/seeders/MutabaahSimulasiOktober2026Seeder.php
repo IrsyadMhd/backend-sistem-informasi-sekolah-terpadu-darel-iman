@@ -41,10 +41,11 @@ class MutabaahSimulasiOktober2026Seeder extends Seeder
             return;
         }
 
+        $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
         $semesterGanjil = Semester::where('academic_year_id', $academicYear->id)
-            ->where(function ($q) {
+            ->where(function ($q) use ($likeOp) {
                 $q->where('is_active', true)
-                    ->orWhere('name', 'ilike', '%ganjil%')
+                    ->orWhere('name', $likeOp, '%ganjil%')
                     ->orWhere('sequence', 1);
             })
             ->first() ?? Semester::first();
@@ -87,7 +88,7 @@ class MutabaahSimulasiOktober2026Seeder extends Seeder
             ->groupBy('template_id');
 
         // Fallback user ID untuk referensi created_by / parent signature
-        $defaultParentUser = User::whereHas('roles', fn ($r) => $r->where('name', 'ilike', '%wali%'))
+        $defaultParentUser = User::whereHas('roles', fn ($r) => $r->where('name', $likeOp, '%wali%'))
             ->value('id')
             ?? User::where('email', 'superadmin@dareliman.sch.id')->value('id')
             ?? User::value('id');

@@ -94,6 +94,7 @@ class AttendanceAccessService
         $employee = $this->employee($user);
 
         return ClassSchedule::query()
+            ->when($employee?->unit_id, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $employee->unit_id)))
             ->when($activeSemesterId, fn ($q) => $q->where(fn ($sub) => $sub->where('semester_id', $activeSemesterId)->orWhereNull('semester_id')))
             ->when($activeAcademicYearId, fn ($q) => $q->where(fn ($sub) => $sub->where('academic_year_id', $activeAcademicYearId)->orWhereNull('academic_year_id')))
             ->where(function (Builder $query) use ($employee, $user) {
@@ -108,7 +109,9 @@ class AttendanceAccessService
     {
         $employee = $this->employee($user);
 
-        return Kelas::query()->where('wali_kelas_id', $employee?->id ?? '__none__');
+        return Kelas::query()
+            ->when($employee?->unit_id, fn ($q) => $q->where('unit_pendidikan_id', $employee->unit_id))
+            ->where('wali_kelas_id', $employee?->id ?? '__none__');
     }
 
     public function homeroomStudentIds(User $user): Collection

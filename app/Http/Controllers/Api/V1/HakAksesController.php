@@ -3,16 +3,21 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppModule;
 use App\Models\Employee;
 use App\Models\Permission;
 use App\Models\Role;
+use App\Models\RoleMenuAccess;
 use App\Models\User;
 use App\Services\AccessScopeService;
+use App\Services\NavigationService;
+use App\Support\RolePolicyDefaults;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
+use Spatie\Permission\PermissionRegistrar;
 
 class HakAksesController extends Controller
 {
@@ -21,15 +26,74 @@ class HakAksesController extends Controller
     ) {}
 
     // ─────────────────────────────────────────────────
-    // ROLE CRUD
+    // ROLE CRUD & DINAMIS POLICY OPTIONS
     // ─────────────────────────────────────────────────
 
     /**
-     * Daftar semua Role beserta jumlah permission & user.
+     * Daftar opsi konfigurasi dinamis Role (Menu Sidebar, Scope, Portal Group, Default Route).
+     */
+    public function navigationOptions(Request $request): JsonResponse
+    {
+        $this->assertCanViewGlobalRoleAccess($request);
+
+        $modules = AppModule::query()
+            ->active()
+            ->forPlatform('web')
+            ->with(['menus' => fn ($q) => $q->active()->forPlatform('web')->orderBy('sort_order')])
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn ($m) => [
+                'id' => $m->id,
+                'name' => $m->name,
+                'icon' => $m->icon,
+                'menus' => $m->menus->map(fn ($menu) => [
+                    'id' => $menu->id,
+                    'name' => $menu->name,
+                    'path' => $menu->path,
+                    'required_permissions' => $menu->required_permissions ?? [],
+                ])->values(),
+            ])
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'modules' => $modules,
+                'scope_options' => [
+                    ['value' => 'global', 'label' => 'Global (Semua Unit Pendidikan)', 'description' => 'Mengakses seluruh unit pendidikan & data lintas unit.'],
+                    ['value' => 'cross_unit', 'label' => 'Lintas Unit Terpilih (Divisi)', 'description' => 'Mengakses unit pendidikan binaan sesuai divisi/penugasan.'],
+                    ['value' => 'education_unit', 'label' => 'Unit Pendidikan Sendiri', 'description' => 'Terkunci hanya pada unit pendidikan pegawai terkait.'],
+                    ['value' => 'own_assignments', 'label' => 'Penugasan / Kelas Sendiri', 'description' => 'Hanya kelas, mapel, halaqah, atau kamar yang diampu.'],
+                    ['value' => 'linked_children', 'label' => 'Data Anak Terhubung (Wali)', 'description' => 'Hanya data anak/siswa yang terhubung sebagai wali.'],
+                    ['value' => 'self', 'label' => 'Data Pribadi Sendiri', 'description' => 'Hanya data akun milik sendiri (Siswa/Alumni).'],
+                ],
+                'portal_group_options' => [
+                    ['value' => 'staff', 'label' => 'Staf / Peran Kustom Internal'],
+                    ['value' => 'super_admin', 'label' => 'Super Admin Sistem'],
+                    ['value' => 'admin', 'label' => 'Admin Sistem'],
+                    ['value' => 'foundation', 'label' => 'Yayasan (Eksekutif / Monitoring)'],
+                    ['value' => 'education', 'label' => 'Divisi Pendidikan'],
+                    ['value' => 'principal', 'label' => 'Kepala Sekolah'],
+                    ['value' => 'waka', 'label' => 'Wakil Kepala Sekolah (Waka)'],
+                    ['value' => 'tu', 'label' => 'Tata Usaha (TU)'],
+                    ['value' => 'operator', 'label' => 'Operator Unit'],
+                    ['value' => 'teacher', 'label' => 'Guru / Tenaga Pendidik'],
+                    ['value' => 'musyrif', 'label' => 'Musyrif / Kepengasuhan Asrama'],
+                    ['value' => 'parent', 'label' => 'Orang Tua / Wali Murid'],
+                    ['value' => 'student', 'label' => 'Siswa / Santri'],
+                    ['value' => 'alumni', 'label' => 'Alumni'],
+                ],
+                'route_options' => RolePolicyDefaults::ROUTE_OPTIONS,
+            ],
+        ]);
+    }
+
+    /**
+     * Daftar semua Role beserta jumlah permission, user, dan kebijakan dinamis.
      */
     public function indexRoles(Request $request): JsonResponse
     {
-        $this->assertSuperAdminRoleAccess($request);
+        $this->assertCanViewGlobalRoleAccess($request);
         $search = $request->get('search', '');
 
         $query = Role::withCount(['permissions', 'users'])
@@ -41,17 +105,8 @@ class HakAksesController extends Controller
             $query->where('name', $likeOp, "%{$search}%");
         }
 
-        $roles = $query->with('permissions')->get()->map(fn ($r) => [
-            'id' => $r->id,
-            'name' => $r->name,
-            'guard_name' => $r->guard_name,
-            'level' => (int) ($r->level ?? 9),
-            'jumlah_izin' => $r->permissions_count,
-            'jumlah_pengguna' => $r->users_count,
-            'permissions' => $r->permissions->pluck('name'),
-            'created_at' => $r->created_at,
-            'updated_at' => $r->updated_at,
-        ]);
+        $roles = $query->with(['permissions', 'menuAccesses'])->get()
+            ->map(fn ($r) => $this->formatRolePayload($r, true));
 
         return response()->json([
             'success' => true,
@@ -61,48 +116,68 @@ class HakAksesController extends Controller
     }
 
     /**
-     * Simpan Role baru.
+     * Simpan Role baru beserta kebijakan akses dinamis & akses menu sidebar.
      */
     public function storeRole(Request $request): JsonResponse
     {
         $this->accessScope->assertGlobalAccessManagement($request->user());
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'min:2', 'max:100', 'unique:roles,name'],
-            'guard_name' => ['nullable', 'string', 'max:50'],
-            'level' => ['nullable', 'integer', 'between:1,9'],
-            'permissions' => ['nullable', 'array'],
-            'permissions.*' => ['string', 'exists:permissions,name'],
-        ]);
+        $validated = $this->validateRolePayload($request);
 
         $user = $request->user();
         $isSuperAdmin = $user && ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin'));
 
-        // Hanya Super Admin yang berhak membuat role level 1 atau 2
-        if (isset($validated['level']) && (int) $validated['level'] <= 2 && ! $isSuperAdmin) {
-            abort(403, 'Hanya Super Admin yang berhak membuat peran dengan tingkat tata kelola 1 atau 2.');
+        $level = (int) ($validated['level'] ?? 5);
+        $defaults = RolePolicyDefaults::forRoleName($validated['name'], $level);
+        $scopeType = $validated['scope_type'] ?? $defaults['scope_type'];
+        $portalGroup = $validated['portal_group'] ?? $defaults['portal_group'];
+        $canManageGlobalAccess = array_key_exists('can_manage_global_access', $validated)
+            ? (bool) $validated['can_manage_global_access']
+            : (bool) $defaults['can_manage_global_access'];
+
+        if (($level <= 2 || $scopeType === 'global' || $canManageGlobalAccess || $portalGroup === 'super_admin') && ! $isSuperAdmin) {
+            abort(403, 'Hanya Super Admin yang berhak membuat peran dengan tingkat tata kelola tinggi atau kewenangan global.');
         }
 
         try {
-            $role = DB::transaction(function () use ($validated) {
+            $role = DB::transaction(function () use ($validated, $level, $defaults, $scopeType, $portalGroup, $canManageGlobalAccess) {
+                $defaultRoute = array_key_exists('default_route', $validated)
+                    ? RolePolicyDefaults::sanitizeRoute($validated['default_route'])
+                    : ($defaults['default_route'] ?? '/dashboard');
+
                 $role = Role::create([
                     'name' => $validated['name'],
                     'guard_name' => $validated['guard_name'] ?? 'web',
-                    'level' => $validated['level'] ?? 5,
+                    'level' => $level,
+                    'description' => $validated['description'] ?? $defaults['description'] ?? null,
+                    'scope_type' => $scopeType,
+                    'portal_group' => $portalGroup,
+                    'default_route' => $defaultRoute ?: '/dashboard',
+                    'is_read_only' => (bool) ($validated['is_read_only'] ?? $defaults['is_read_only'] ?? false),
+                    'can_switch_unit' => (bool) ($validated['can_switch_unit'] ?? $defaults['can_switch_unit'] ?? false),
+                    'is_above_tu' => (bool) ($validated['is_above_tu'] ?? $defaults['is_above_tu'] ?? false),
+                    'can_manage_global_access' => $canManageGlobalAccess,
+                    'use_custom_menu_access' => (bool) ($validated['use_custom_menu_access'] ?? false),
                 ]);
 
                 if (! empty($validated['permissions'])) {
                     $role->syncPermissions($validated['permissions']);
                 }
 
+                $this->syncRoleMenuAccess(
+                    $role,
+                    $validated['allowed_menu_ids'] ?? [],
+                    $validated['denied_menu_ids'] ?? []
+                );
+
                 return $role;
             });
+
+            $this->flushAccessCaches();
 
             return response()->json([
                 'success' => true,
                 'message' => "Role '{$role->name}' berhasil ditambahkan.",
-                'data' => array_merge($role->load('permissions')->toArray(), [
-                    'level' => (int) ($role->level ?? 9),
-                ]),
+                'data' => $this->formatRolePayload($role->fresh(['permissions', 'menuAccesses'])),
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
@@ -113,56 +188,40 @@ class HakAksesController extends Controller
     }
 
     /**
-     * Detail Role beserta permissions-nya.
+     * Detail Role beserta permissions & akses menu dinamis.
      */
     public function showRole(Request $request, string $id): JsonResponse
     {
-        $this->assertSuperAdminRoleAccess($request);
-        $role = Role::with('permissions')->findOrFail($id);
+        $this->assertCanViewGlobalRoleAccess($request);
+        $role = Role::with(['permissions', 'menuAccesses'])->findOrFail($id);
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'id' => $role->id,
-                'name' => $role->name,
-                'guard_name' => $role->guard_name,
-                'level' => (int) ($role->level ?? 9),
-                'permissions' => $role->permissions->pluck('name'),
-                'created_at' => $role->created_at,
-                'updated_at' => $role->updated_at,
-            ],
+            'data' => $this->formatRolePayload($role),
         ]);
     }
 
     /**
-     * Perbarui data Role.
+     * Perbarui data Role beserta kebijakan akses dinamis & akses menu sidebar.
      */
     public function updateRole(Request $request, string $id): JsonResponse
     {
         $this->accessScope->assertGlobalAccessManagement($request->user());
         $role = Role::findOrFail($id);
 
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'min:2', 'max:100', Rule::unique('roles', 'name')->ignore($role->id)],
-            'guard_name' => ['nullable', 'string', 'max:50'],
-            'level' => ['nullable', 'integer', 'between:1,9'],
-            'permissions' => ['nullable', 'array'],
-            'permissions.*' => ['string', 'exists:permissions,name'],
-        ]);
+        $validated = $this->validateRolePayload($request, $role->id);
 
         $user = $request->user();
         $isSuperAdmin = $user && ($user->hasRole('Super Admin') || $user->hasRole('super_admin') || $user->hasRole('Superadmin'));
 
-        // Proteksi nama role sistem krusial
         $protectedNames = ['Super Admin', 'Admin'];
-        if (in_array($role->name, $protectedNames, true) && $role->name !== $validated['name']) {
+        if ((in_array($role->name, $protectedNames, true) || $role->is_system_protected) && $role->name !== $validated['name']) {
             return response()->json([
                 'success' => false,
                 'message' => "Nama role sistem '{$role->name}' dilindungi dan tidak dapat diubah.",
             ], 422);
         }
 
-        // Super Admin wajib tetap level 1
         if ($role->name === 'Super Admin' && isset($validated['level']) && (int) $validated['level'] !== 1) {
             return response()->json([
                 'success' => false,
@@ -170,9 +229,23 @@ class HakAksesController extends Controller
             ], 422);
         }
 
-        // Role selain Super Admin tidak boleh dinaikkan ke level 1 oleh non-Super Admin
-        if (isset($validated['level']) && (int) $validated['level'] <= 2 && ! $isSuperAdmin) {
-            abort(403, 'Hanya Super Admin yang berhak menetapkan tingkatan hierarki tata kelola 1 atau 2.');
+        $targetLevel = isset($validated['level']) ? (int) $validated['level'] : (int) ($role->level ?? 5);
+        $targetScope = $validated['scope_type'] ?? $role->scope_type;
+        $targetPortalGroup = $validated['portal_group'] ?? $role->portal_group;
+        $targetGlobalMgr = array_key_exists('can_manage_global_access', $validated)
+            ? (bool) $validated['can_manage_global_access']
+            : (bool) $role->can_manage_global_access;
+
+        if (
+            ! $isSuperAdmin
+            && (
+                $targetLevel <= 2
+                || $targetScope === 'global'
+                || $targetGlobalMgr
+                || $targetPortalGroup === 'super_admin'
+            )
+        ) {
+            abort(403, 'Hanya Super Admin yang berhak menetapkan tingkatan hierarki atau kewenangan global tersebut.');
         }
 
         try {
@@ -184,17 +257,53 @@ class HakAksesController extends Controller
                 if (isset($validated['level'])) {
                     $role->level = (int) $validated['level'];
                 }
+                if (array_key_exists('description', $validated)) {
+                    $role->description = $validated['description'];
+                }
+                if (isset($validated['scope_type'])) {
+                    $role->scope_type = $validated['scope_type'];
+                }
+                if (isset($validated['portal_group'])) {
+                    $role->portal_group = $validated['portal_group'];
+                }
+                if (array_key_exists('default_route', $validated)) {
+                    $sanitizedRoute = RolePolicyDefaults::sanitizeRoute($validated['default_route']);
+                    $role->default_route = $sanitizedRoute ?: $role->default_route;
+                }
+                if (array_key_exists('is_read_only', $validated)) {
+                    $role->is_read_only = $role->name === 'Super Admin' ? false : (bool) $validated['is_read_only'];
+                }
+                if (array_key_exists('can_switch_unit', $validated)) {
+                    $role->can_switch_unit = (bool) $validated['can_switch_unit'];
+                }
+                if (array_key_exists('is_above_tu', $validated)) {
+                    $role->is_above_tu = (bool) $validated['is_above_tu'];
+                }
+                if (array_key_exists('can_manage_global_access', $validated)) {
+                    $role->can_manage_global_access = $role->name === 'Super Admin' ? true : (bool) $validated['can_manage_global_access'];
+                }
+                if (array_key_exists('use_custom_menu_access', $validated)) {
+                    $role->use_custom_menu_access = (bool) $validated['use_custom_menu_access'];
+                }
                 $role->save();
 
                 $role->syncPermissions($validated['permissions'] ?? []);
+
+                if (array_key_exists('allowed_menu_ids', $validated) || array_key_exists('denied_menu_ids', $validated)) {
+                    $this->syncRoleMenuAccess(
+                        $role,
+                        $validated['allowed_menu_ids'] ?? [],
+                        $validated['denied_menu_ids'] ?? []
+                    );
+                }
             });
+
+            $this->flushAccessCaches();
 
             return response()->json([
                 'success' => true,
                 'message' => "Role '{$role->name}' berhasil diperbarui.",
-                'data' => array_merge($role->fresh()->load('permissions')->toArray(), [
-                    'level' => (int) ($role->level ?? 9),
-                ]),
+                'data' => $this->formatRolePayload($role->fresh(['permissions', 'menuAccesses'])),
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -229,7 +338,7 @@ class HakAksesController extends Controller
             'Alumni',
         ];
 
-        if (in_array($role->name, $protectedCanonicalRoles, true)) {
+        if ((bool) $role->is_system_protected || in_array($role->name, $protectedCanonicalRoles, true)) {
             return response()->json([
                 'success' => false,
                 'message' => "Role sistem '{$role->name}' dilindungi dan tidak dapat dihapus.",
@@ -245,11 +354,126 @@ class HakAksesController extends Controller
 
         $name = $role->name;
         $role->delete();
+        $this->flushAccessCaches();
 
         return response()->json([
             'success' => true,
             'message' => "Role '{$name}' berhasil dihapus.",
         ]);
+    }
+
+    private function validateRolePayload(Request $request, ?int $ignoreRoleId = null): array
+    {
+        $uniqueRule = Rule::unique('roles', 'name');
+        if ($ignoreRoleId !== null) {
+            $uniqueRule->ignore($ignoreRoleId);
+        }
+
+        return $request->validate([
+            'name' => ['required', 'string', 'min:2', 'max:100', $uniqueRule],
+            'guard_name' => ['nullable', 'string', 'max:50'],
+            'level' => ['nullable', 'integer', 'between:1,9'],
+            'description' => ['nullable', 'string', 'max:500'],
+            'scope_type' => ['nullable', 'string', Rule::in(RolePolicyDefaults::VALID_SCOPES)],
+            'portal_group' => ['nullable', 'string', Rule::in(RolePolicyDefaults::VALID_PORTAL_GROUPS)],
+            'default_route' => ['nullable', 'string', 'max:120'],
+            'is_read_only' => ['nullable', 'boolean'],
+            'can_switch_unit' => ['nullable', 'boolean'],
+            'is_above_tu' => ['nullable', 'boolean'],
+            'can_manage_global_access' => ['nullable', 'boolean'],
+            'use_custom_menu_access' => ['nullable', 'boolean'],
+            'permissions' => ['nullable', 'array'],
+            'permissions.*' => ['string', 'exists:permissions,name'],
+            'allowed_menu_ids' => ['nullable', 'array'],
+            'allowed_menu_ids.*' => ['string', 'exists:app_menus,id'],
+            'denied_menu_ids' => ['nullable', 'array'],
+            'denied_menu_ids.*' => ['string', 'exists:app_menus,id'],
+        ]);
+    }
+
+    private function syncRoleMenuAccess(Role $role, array $allowedMenuIds, array $deniedMenuIds): void
+    {
+        RoleMenuAccess::query()->where('role_id', $role->id)->delete();
+
+        $rows = [];
+        $now = now();
+        $allowedSet = [];
+
+        foreach (array_unique($allowedMenuIds) as $menuId) {
+            if (! is_string($menuId) || $menuId === '') {
+                continue;
+            }
+            $allowedSet[$menuId] = true;
+            $rows[] = [
+                'role_id' => $role->id,
+                'app_menu_id' => $menuId,
+                'access_mode' => 'allow',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        foreach (array_unique($deniedMenuIds) as $menuId) {
+            if (! is_string($menuId) || $menuId === '' || isset($allowedSet[$menuId])) {
+                continue;
+            }
+            $rows[] = [
+                'role_id' => $role->id,
+                'app_menu_id' => $menuId,
+                'access_mode' => 'deny',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
+
+        if (! empty($rows)) {
+            RoleMenuAccess::query()->insert($rows);
+        }
+    }
+
+    private function formatRolePayload(Role $role, bool $includeCounts = false): array
+    {
+        $policy = RolePolicyDefaults::extractFromRole($role);
+        $menuAccesses = $role->relationLoaded('menuAccesses') ? $role->menuAccesses : $role->menuAccesses()->get();
+
+        $payload = [
+            'id' => $role->id,
+            'name' => $role->name,
+            'guard_name' => $role->guard_name,
+            'level' => $policy['level'],
+            'description' => $policy['description'],
+            'scope_type' => $policy['scope_type'],
+            'portal_group' => $policy['portal_group'],
+            'default_route' => $policy['default_route'],
+            'is_read_only' => $policy['is_read_only'],
+            'can_switch_unit' => $policy['can_switch_unit'],
+            'is_above_tu' => $policy['is_above_tu'],
+            'can_manage_global_access' => $policy['can_manage_global_access'],
+            'is_system_protected' => $policy['is_system_protected'],
+            'use_custom_menu_access' => $policy['use_custom_menu_access'],
+            'permissions' => $role->permissions->pluck('name')->values(),
+            'allowed_menu_ids' => $menuAccesses->where('access_mode', 'allow')->pluck('app_menu_id')->values(),
+            'denied_menu_ids' => $menuAccesses->where('access_mode', 'deny')->pluck('app_menu_id')->values(),
+            'created_at' => $role->created_at,
+            'updated_at' => $role->updated_at,
+        ];
+
+        if ($includeCounts) {
+            $payload['jumlah_izin'] = $role->permissions_count ?? $role->permissions->count();
+            $payload['jumlah_pengguna'] = $role->users_count ?? 0;
+        }
+
+        return $payload;
+    }
+
+    private function flushAccessCaches(): void
+    {
+        NavigationService::bumpCacheVersion();
+        try {
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+        } catch (\Throwable) {
+            // Ignore cache driver edge cases
+        }
     }
 
     // ─────────────────────────────────────────────────
@@ -261,7 +485,7 @@ class HakAksesController extends Controller
      */
     public function indexPermissions(Request $request): JsonResponse
     {
-        $this->assertSuperAdminRoleAccess($request);
+        $this->assertCanViewGlobalRoleAccess($request);
         $search = $request->get('search', '');
 
         $query = Permission::orderBy('name');
@@ -554,6 +778,8 @@ class HakAksesController extends Controller
                 }
             });
 
+            $this->flushAccessCaches();
+
             return response()->json([
                 'success' => true,
                 'message' => "Hak akses pegawai '{$employee->nama_lengkap}' berhasil diperbarui.",
@@ -564,6 +790,30 @@ class HakAksesController extends Controller
                 'message' => 'Gagal memperbarui hak akses pegawai: '.$e->getMessage(),
             ], 500);
         }
+    }
+
+    private function assertCanViewGlobalRoleAccess(Request $request): void
+    {
+        $user = $request->user();
+        $policy = $user ? RolePolicyDefaults::resolveUserPolicy($user) : [];
+        $isAllowed = $user && (
+            (bool) ($policy['can_manage_global_access'] ?? false)
+            || ($policy['scope_type'] ?? '') === 'global'
+            || $user->hasAnyRole([
+                'Super Admin', 'super_admin', 'Superadmin', 'Admin',
+                'Yayasan', 'Ketua Yayasan', 'ketua_yayasan',
+                'Pengurus Yayasan', 'pengurus_yayasan',
+                'Sekretaris Yayasan', 'sekretaris_yayasan',
+                'Bendahara Yayasan', 'bendahara_yayasan',
+            ])
+            || $user->hasAnyPermission(['sistem.hak_akses', 'role.manage', 'permission.manage'])
+        );
+
+        abort_unless(
+            $isAllowed,
+            403,
+            'Akses ditolak. Role unit hanya berhak mengelola hak akses pegawai di unitnya.'
+        );
     }
 
     private function assertSuperAdminRoleAccess(Request $request): void

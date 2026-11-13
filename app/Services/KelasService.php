@@ -152,10 +152,16 @@ class KelasService
             $kelas->kapasitas = $legacyClass->capacity ?? 30;
         }
 
+        $unitId = $kelas->unit_pendidikan_id ?? null;
+
         $matchingKelasIds = [$kelasId];
         if (! empty($kelas->nama_kelas)) {
-            $tblIds = Kelas::where('nama_kelas', $kelas->nama_kelas)
-                ->orWhere('kode_kelas', $kelas->nama_kelas)
+            $tblIds = Kelas::query()
+                ->when($unitId, fn ($q) => $q->where('unit_pendidikan_id', $unitId))
+                ->where(function ($q) use ($kelas) {
+                    $q->where('nama_kelas', $kelas->nama_kelas)
+                      ->orWhere('kode_kelas', $kelas->nama_kelas);
+                })
                 ->pluck('id')
                 ->toArray();
             $legacyIds = \App\Models\SchoolClass::where('name', $kelas->nama_kelas)
@@ -164,12 +170,13 @@ class KelasService
             $matchingKelasIds = array_values(array_unique(array_filter(array_merge($matchingKelasIds, $tblIds, $legacyIds))));
         }
 
-        $siswa = Student::where(function ($q) use ($matchingKelasIds) {
-            $q->whereIn('kelas_id', $matchingKelasIds)
-              ->orWhereIn('class_id', $matchingKelasIds);
-        })->where(function ($q) {
-            $q->where('is_active', true)->orWhereNull('is_active');
-        })->orderBy('full_name')->get();
+        $siswa = Student::when($unitId, fn ($q) => $q->where('unit_id', $unitId))
+            ->where(function ($q) use ($matchingKelasIds) {
+                $q->whereIn('kelas_id', $matchingKelasIds)
+                  ->orWhereIn('class_id', $matchingKelasIds);
+            })->where(function ($q) {
+                $q->where('is_active', true)->orWhereNull('is_active');
+            })->orderBy('full_name')->get();
 
         $siswaIds = $siswa->pluck('id')->toArray();
         $logsByStudent = \App\Models\TahfizhDailyLog::whereIn('student_id', $siswaIds)

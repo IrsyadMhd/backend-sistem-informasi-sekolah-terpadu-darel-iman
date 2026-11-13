@@ -497,10 +497,6 @@ class KelasController extends Controller
                     return $matchedKelas;
                 }
             }
-
-            if (Kelas::where('id', $id)->exists() || \App\Models\SchoolClass::where('id', $id)->exists()) {
-                abort(Response::HTTP_FORBIDDEN, 'Akses data kelas di luar unit wewenang Anda ditolak.');
-            }
         }
 
         abort(Response::HTTP_NOT_FOUND, 'Data kelas tidak ditemukan.');

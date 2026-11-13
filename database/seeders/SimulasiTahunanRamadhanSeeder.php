@@ -459,6 +459,7 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                 $isRamadhan = ($attDate >= '2027-02-08' && $attDate <= '2027-03-08');
                 $checkIn = $attDate . ($isRamadhan ? ' 07:45:00' : ' 07:05:00');
                 $checkOut = $attDate . ($isRamadhan ? ' 12:30:00' : ' 15:45:00');
+                $classId = $st->kelas_id ?? $st->class_id ?? Kelas::where('unit_pendidikan_id', $st->education_unit_id ?? $st->unit_id)->value('id') ?? Kelas::value('id');
 
                 $batchRecords[] = [
                     'id' => (string) Str::uuid(),
@@ -468,7 +469,7 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                     'attendance_date' => $attDate,
                     'student_id' => $st->id,
                     'employee_id' => null,
-                    'class_id' => $st->kelas_id,
+                    'class_id' => $classId,
                     'unit_pendidikan_id' => $st->unit_id,
                     'check_in_time' => $checkIn,
                     'check_out_time' => $status === 'Hadir' ? $checkOut : null,
@@ -617,6 +618,10 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
         $teachers = Employee::where('status', 'Aktif')->get();
 
         foreach ($students as $sIdx => $st) {
+            $kelasId = $st->kelas_id ?? $st->class_id ?? Kelas::where('unit_pendidikan_id', $st->education_unit_id ?? $st->unit_id)->value('id') ?? Kelas::value('id');
+            if (! $kelasId) {
+                continue;
+            }
             $wali = $teachers->where('unit_id', $st->unit_id)->first() ?? $teachers->first();
             $avgScore = 83.5 + ($sIdx % 14); // 83.5 - 96.5
             $totalHadir = 105 - ($sIdx % 5);
@@ -638,7 +643,7 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                     'tahun_ajaran_id' => $ay->id,
                 ],
                 [
-                    'kelas_id' => $st->kelas_id,
+                    'kelas_id' => $kelasId,
                     'guru_wali_id' => $wali?->id,
                     'total_nilai' => $avgScore * 8,
                     'rata_rata' => $avgScore,
@@ -668,7 +673,7 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                     'tahun_ajaran_id' => $ay->id,
                 ],
                 [
-                    'kelas_id' => $st->kelas_id,
+                    'kelas_id' => $kelasId,
                     'guru_wali_id' => $wali?->id,
                     'total_nilai' => ($avgScore + 1.5) * 8,
                     'rata_rata' => $avgScore + 1.5,
@@ -729,6 +734,10 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
         $surahPool = self::SURAH_LIST;
 
         foreach ($students as $sIdx => $st) {
+            $classId = $st->kelas_id ?? $st->class_id ?? Kelas::where('unit_pendidikan_id', $st->education_unit_id ?? $st->unit_id)->value('id') ?? Kelas::value('id');
+            if (! $classId) {
+                continue;
+            }
             $teacher = $teachers[$sIdx % count($teachers)] ?? $teachers->first();
 
             foreach ($tahfizhDates as $tIdx => $td) {
@@ -751,7 +760,7 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                     'semester_id' => $td['sem']->id,
                     'deposit_date' => $depositDate,
                     'student_id' => $st->id,
-                    'class_id' => $st->kelas_id,
+                    'class_id' => $classId,
                     'teacher_id' => $teacher?->id,
                     'surah_name' => $surah['nama'],
                     'ayah_start' => $ayahStart,
@@ -840,23 +849,34 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
         ];
 
         foreach ($sampleStudents as $sIdx => $st) {
+            $classId = $st->kelas_id ?? $st->class_id ?? Kelas::where('unit_pendidikan_id', $st->education_unit_id ?? $st->unit_id)->value('id') ?? Kelas::value('id');
             foreach ($mutabaahDates as $md) {
                 $actDate = $md['date'];
                 $isRamadhan = ($actDate >= '2027-02-08' && $actDate <= '2027-03-08');
 
-                $header = MutabaahDailyHeader::firstOrCreate(
-                    [
-                        'student_id' => $st->id,
-                        'activity_date' => $actDate,
-                    ],
-                    [
+                $exists = MutabaahDailyHeader::where('student_id', $st->id)
+                    ->where(function ($q) use ($actDate) {
+                        $q->whereDate('activity_date', $actDate)
+                            ->orWhere('activity_date', $actDate)
+                            ->orWhere('activity_date', 'like', $actDate . '%');
+                    })
+                    ->exists();
+
+                if ($exists) {
+                    continue;
+                }
+
+                try {
+                    MutabaahDailyHeader::create([
                         'id' => (string) Str::uuid(),
+                        'student_id' => $st->id,
                         'template_id' => $template->id,
                         'supervisor_assignment_id' => $supervisor->id,
                         'education_unit_id' => $st->unit_id ?? $supervisor->education_unit_id,
-                        'kelas_id' => $st->kelas_id,
+                        'kelas_id' => $classId,
                         'academic_year_id' => $ay->id,
                         'semester_id' => $md['sem']->id,
+                        'activity_date' => $actDate,
                         'status' => 'parent_signed',
                         'total_items' => $isRamadhan ? 10 : 7,
                         'good_count' => $isRamadhan ? 9 : 6,
@@ -865,8 +885,11 @@ class SimulasiTahunanRamadhanSeeder extends Seeder
                         'score' => $md['score'],
                         'supervisor_notes' => $isRamadhan ? 'Alhamdulillah, puasa dan shalat tarawih tuntas dikerjakan.' : 'Amalan yaumiyyah terlaksana dengan baik.',
                         'finalized_at' => $actDate . ' 21:00:00',
-                    ]
-                );
+                    ]);
+                } catch (\Throwable) {
+                    // Safe skip on collision
+                    continue;
+                }
             }
         }
     }

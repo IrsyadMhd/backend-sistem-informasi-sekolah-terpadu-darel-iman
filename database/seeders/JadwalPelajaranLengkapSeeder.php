@@ -219,7 +219,10 @@ class JadwalPelajaranLengkapSeeder extends Seeder
             }
 
             if (! $subj) {
-                $code = 'MAPEL-' . strtoupper(Str::slug(substr($cleanName, 0, 15)));
+                $baseCode = 'MAPEL-' . strtoupper(Str::slug(substr($cleanName, 0, 15)));
+                $code = Subject::where('code', $baseCode)->exists()
+                    ? $baseCode . '-' . substr(md5($cleanName . ($unitId ?? '')), 0, 6)
+                    : $baseCode;
                 $subj = Subject::create([
                     'code' => $code,
                     'kode_mapel' => $code,

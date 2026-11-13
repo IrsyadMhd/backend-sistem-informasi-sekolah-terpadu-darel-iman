@@ -25,10 +25,12 @@ class ProfileController extends Controller
         /** @var User $user */
         $user = $request->user();
         $user->load([
-            'roles:id,name',
+            'roles',
             'employee.unit:id,name,code',
             'employee.position:id,name,level_jabatan',
             'employee.division:id,name,code',
+            'student:id,user_id,unit_id',
+            'parent:id,user_id',
         ]);
 
         return response()->json([
@@ -151,10 +153,12 @@ class ProfileController extends Controller
 
         $user->refresh();
         $user->load([
-            'roles:id,name',
+            'roles',
             'employee.unit:id,name,code',
             'employee.position:id,name,level_jabatan',
             'employee.division:id,name,code',
+            'student:id,user_id,unit_id',
+            'parent:id,user_id',
         ]);
 
         return response()->json([
@@ -221,10 +225,12 @@ class ProfileController extends Controller
 
         $user->refresh();
         $user->load([
-            'roles:id,name',
+            'roles',
             'employee.unit:id,name,code',
             'employee.position:id,name,level_jabatan',
             'employee.division:id,name,code',
+            'student:id,user_id,unit_id',
+            'parent:id,user_id',
         ]);
 
         return response()->json([
@@ -285,6 +291,10 @@ class ProfileController extends Controller
         $employee = $user->employee;
         $roles = $user->getRoleNames()->values()->toArray();
         $permissions = $user->getAllPermissions()->pluck('name')->values()->toArray();
+        $accessPolicy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        $accessiblePaths = app(\App\Services\NavigationService::class)->getAccessiblePathsForUser($user, 'web');
+        $portal = app(\App\Services\Auth\PortalResolver::class)->resolve($user);
+        $unitId = $employee?->unit_id ?? $user->student?->unit_id ?? ($user->metadata['unit_id'] ?? null);
 
         $fotoUrl = null;
         if ($employee && $employee->foto) {
@@ -304,7 +314,15 @@ class ProfileController extends Controller
             'email' => $user->email,
             'phone' => $user->phone ?? $employee?->no_hp,
             'roles' => $roles,
+            'role_level' => $accessPolicy['role_level'] ?? 99,
             'permissions' => $permissions,
+            'access_policy' => $accessPolicy,
+            'accessible_paths' => $accessiblePaths,
+            'default_portal' => $portal['default_portal'],
+            'default_redirect' => $portal['default_redirect'],
+            'available_workspaces' => $portal['available_workspaces'],
+            'unit_id' => $unitId,
+            'unit_code' => $employee?->unit?->code,
             'foto' => $fotoUrl,
             'avatar' => $fotoUrl,
             'unit' => $employee?->unit?->name,

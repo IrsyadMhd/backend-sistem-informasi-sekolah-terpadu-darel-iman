@@ -101,7 +101,7 @@ class ScheduleController extends Controller
             $query->where(function ($subQuery) use ($search) {
                 $subQuery
                     ->whereHas('employee', fn ($q) => $q->where('nama_lengkap', 'ilike', "%{$search}%"))
-                    ->orWhereHas('teacher', fn ($q) => $q->where('name', 'ilike', "%{$search}%"))
+                    ->orWhereHas('teacher', fn ($q) => $q->where('full_name', 'ilike', "%{$search}%"))
                     ->orWhereHas('subject', fn ($q) => $q
                         ->where('name', 'ilike', "%{$search}%")
                         ->orWhere('nama_mapel', 'ilike', "%{$search}%"))
@@ -179,7 +179,7 @@ class ScheduleController extends Controller
                 'aktif' => (clone $statsQuery)->where('is_active', true)->count(),
                 'tidak_aktif' => (clone $statsQuery)->where('is_active', false)->count(),
                 'guru_terjadwal' => (clone $statsQuery)->whereNotNull('employee_id')->distinct('employee_id')->count('employee_id'),
-                'total_bentrok' => count($bentrokScheduleIds),
+                'total_bentrok' => (clone $statsQuery)->whereIn('class_schedules.id', $bentrokScheduleIds)->count(),
                 'per_hari' => $perHari,
             ],
         ]);
@@ -264,7 +264,7 @@ class ScheduleController extends Controller
             $query->where(function ($subQuery) use ($search) {
                 $subQuery
                     ->whereHas('employee', fn ($q) => $q->where('nama_lengkap', 'ilike', "%{$search}%"))
-                    ->orWhereHas('teacher', fn ($q) => $q->where('name', 'ilike', "%{$search}%"))
+                    ->orWhereHas('teacher', fn ($q) => $q->where('full_name', 'ilike', "%{$search}%"))
                     ->orWhereHas('subject', fn ($q) => $q
                         ->where('name', 'ilike', "%{$search}%")
                         ->orWhere('nama_mapel', 'ilike', "%{$search}%"))

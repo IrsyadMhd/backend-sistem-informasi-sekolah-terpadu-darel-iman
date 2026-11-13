@@ -12,6 +12,7 @@ use App\Models\Student;
 use App\Models\StudentNote;
 use App\Models\StudentPointTransaction;
 use App\Models\StudentWarningLetter;
+use App\Models\Teacher;
 use App\Services\AccessScopeService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -376,9 +377,13 @@ class DisciplineManagementController extends Controller
                 default => 'medium',
             };
 
+            $actor = $request->user();
+            $teacherId = $actor?->employee?->teacher?->id
+                ?? ($actor ? Teacher::where('user_id', $actor->id)->value('id') : null);
+
             StudentNote::create([
                 'student_id' => $student->id,
-                'teacher_id' => $request->user()?->employee?->id ?? null,
+                'teacher_id' => $teacherId,
                 'education_unit_id' => $student->unit_id,
                 'academic_year_id' => $activeYear?->id,
                 'semester_id' => $activeSemester?->id,
@@ -435,7 +440,7 @@ class DisciplineManagementController extends Controller
     public function indexViolations(Request $request): JsonResponse
     {
         $query = StudentPointTransaction::with([
-            'student:id,full_name,nis,kelas_id,class_id,unit_id,gender,avatar_url',
+            'student:id,full_name,nis,kelas_id,class_id,unit_id,gender,photo',
             'student.educationUnit:id,name,code,level,program_type',
             'student.kelas:id,nama_kelas',
             'category',

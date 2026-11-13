@@ -89,7 +89,10 @@ class AccessScopeService
      */
     public function hasGlobalScope(User $user): bool
     {
-        return $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES);
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        return ($policy['scope_type'] ?? '') === 'global'
+            || $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES);
     }
 
     /**
@@ -98,7 +101,11 @@ class AccessScopeService
      */
     public function isAboveTu(User $user): bool
     {
-        return $this->hasAnyRole($user, self::ABOVE_TU_ROLES);
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        return (bool) ($policy['is_above_tu'] ?? false)
+            || in_array($policy['scope_type'] ?? '', ['global', 'cross_unit'], true)
+            || $this->hasAnyRole($user, self::ABOVE_TU_ROLES);
     }
 
     private function hasAnyPermission(User $user, array $permissions): bool
@@ -129,7 +136,10 @@ class AccessScopeService
      */
     public function canManageGlobalAccess(User $user): bool
     {
-        return $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES)
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        return (bool) ($policy['can_manage_global_access'] ?? false)
+            || $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES)
             || $this->hasAnyPermission($user, ['sistem.hak_akses', 'permission.manage', 'role.manage'])
             || $this->minRoleLevel($user) === 1;
     }
@@ -159,11 +169,19 @@ class AccessScopeService
      */
     public function isSupervisor(User $user): bool
     {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        $isSupervisorPortal = in_array(
+            $policy['portal_group'] ?? '',
+            ['super_admin', 'admin', 'foundation', 'education', 'principal', 'waka', 'tu', 'operator'],
+            true
+        );
+
         return $this->hasGlobalScope($user)
             || $this->isAboveTu($user)
+            || $isSupervisorPortal
             || $this->canManageAccess($user)
             || $this->hasAnyPermission($user, ['dashboard.tata-usaha.view', 'dashboard.operator.view', 'lms.manage', 'academic.manage'])
-            || $this->minRoleLevel($user) <= 4;
+            || $this->minRoleLevel($user) <= 5;
     }
 
     /**
@@ -171,6 +189,11 @@ class AccessScopeService
      */
     public function isTeacher(User $user): bool
     {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        if (in_array($policy['portal_group'] ?? '', ['teacher', 'musyrif'], true)) {
+            return true;
+        }
+
         return $this->hasAnyRole($user, [
             'Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran',
             'Wali Kelas', 'wali_kelas', 'wali-kelas',
@@ -184,6 +207,11 @@ class AccessScopeService
      */
     public function isStaffOrTeacher(User $user): bool
     {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        if (in_array($policy['portal_group'] ?? '', ['staff'], true) && ($policy['role_level'] ?? 99) <= 7) {
+            return true;
+        }
+
         return $this->isSupervisor($user)
             || $this->isTeacher($user)
             || $this->hasAnyRole($user, ['Operator', 'operator', 'Admin', 'admin']);
@@ -232,8 +260,15 @@ class AccessScopeService
             return;
         }
 
+        $targetRole = \App\Models\Role::query()->where('name', $roleName)->first();
+        $isGlobalDbRole = $targetRole && (
+            $targetRole->scope_type === 'global'
+            || (bool) $targetRole->can_manage_global_access
+            || (int) ($targetRole->level ?? 99) <= 2
+        );
+
         abort_if(
-            $this->hasAnyRoleName($roleName, self::GLOBAL_ROLE_NAMES),
+            $isGlobalDbRole || $this->hasAnyRoleName($roleName, self::GLOBAL_ROLE_NAMES),
             403,
             'Pengelola unit tidak dapat menetapkan role global.'
         );
@@ -377,11 +412,13 @@ class AccessScopeService
      */
     public function accessibleEducationUnits(User $user): Builder
     {
-        if ($this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        if (($policy['scope_type'] ?? '') === 'global' || $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
             return EducationUnit::query();
         }
 
-        if ($this->hasAnyRole($user, [
+        if (($policy['scope_type'] ?? '') === 'cross_unit' || $this->hasAnyRole($user, [
             'Kepala Bidang Pendidikan',
             'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
             'Divisi Program Khusus', 'divisi_pendidikan',
@@ -411,8 +448,8 @@ class AccessScopeService
                 ->pluck('id');
             $unitIds = $unitIds->merge($metadataManagedUnits);
 
-            // Unit dari rombel yang diajar lewat jadwal atau di-walikelasi (hanya untuk guru murni, bukan pimpinan/staf administrasi unit)
-            if (! $this->hasAnyRole($user, [
+            // Unit dari rombel yang diajar lewat jadwal atau di-walikelasi (hanya fallback jika employee belum memiliki unit_id terpasang)
+            if ($unitIds->isEmpty() && ! $this->hasAnyRole($user, [
                 'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
                 'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Waka Kurikulum', 'waka_kurikulum',
                 'Wakil Kesiswaan', 'Waka Kesiswaan', 'waka_kesiswaan',
@@ -533,8 +570,9 @@ class AccessScopeService
             ->first();
 
         if ($employee || $teacher) {
-            // Rombel yang diajar atau di-walikelasi
+            // Rombel yang diajar atau di-walikelasi (terkunci ke unit_id pegawai bila terpasang)
             $teachingRombelIds = ClassSchedule::query()
+                ->when($employee?->unit_id, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $employee->unit_id)))
                 ->where(function ($q) use ($employee, $teacher) {
                     if ($employee && $teacher) {
                         $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
@@ -551,6 +589,7 @@ class AccessScopeService
                 ->unique();
 
             $homeroomRombelIds = Kelas::query()
+                ->when($employee?->unit_id, fn ($q) => $q->where('unit_pendidikan_id', $employee->unit_id))
                 ->where(function ($q) use ($employee, $teacher) {
                     if ($employee) {
                         $q->where('wali_kelas_id', $employee->id);
@@ -660,7 +699,8 @@ class AccessScopeService
      */
     public function accessibleEmployees(User $user): Builder
     {
-        if ($this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        if (($policy['scope_type'] ?? '') === 'global' || $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
             return Employee::query();
         }
 
@@ -693,15 +733,17 @@ class AccessScopeService
             ->first();
 
         if ($employee || $teacher) {
-            return ClassSchedule::query()->where(function ($q) use ($employee, $teacher) {
-                if ($employee && $teacher) {
-                    $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
-                } elseif ($teacher) {
-                    $q->where('teacher_id', $teacher->id);
-                } elseif ($employee) {
-                    $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id);
-                }
-            });
+            return ClassSchedule::query()
+                ->when($employee?->unit_id, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $employee->unit_id)))
+                ->where(function ($q) use ($employee, $teacher) {
+                    if ($employee && $teacher) {
+                        $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
+                    } elseif ($teacher) {
+                        $q->where('teacher_id', $teacher->id);
+                    } elseif ($employee) {
+                        $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id);
+                    }
+                });
         }
 
         $rombelIds = $this->accessibleRombels($user)->pluck('id');

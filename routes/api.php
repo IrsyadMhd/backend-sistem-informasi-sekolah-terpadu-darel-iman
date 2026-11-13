@@ -547,7 +547,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('parents', ParentController::class)->only(['destroy'])
         ->middleware('permission:student.delete|sistem.master_data');
     Route::get('/student-card-settings', [\App\Http\Controllers\Api\V1\StudentCardSettingController::class, 'show']);
-    Route::post('/student-card-settings', [\App\Http\Controllers\Api\V1\StudentCardSettingController::class, 'store']);
+    Route::post('/student-card-settings', [\App\Http\Controllers\Api\V1\StudentCardSettingController::class, 'store'])
+        ->middleware('permission:student.update|student.edit|sistem.master_data');
     Route::get('/education-units/export', [EducationUnitController::class, 'export'])
         ->middleware('permission:unit.view|unit.view_all|foundation.unit.view|sistem.master_data');
     Route::get('/education-units/import-template', [EducationUnitController::class, 'template'])
@@ -815,6 +816,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Rute Master Hak Akses (Role & Permission — Spatie)
     Route::prefix('hak-akses')->middleware('permission:sistem.hak_akses|employee.role_access.manage')->group(function () {
         Route::get('/stats', [HakAksesController::class, 'stats']);
+        Route::get('/navigation-options', [HakAksesController::class, 'navigationOptions']);
 
         // Role CRUD
         Route::get('/roles', [HakAksesController::class, 'indexRoles']);
@@ -1015,8 +1017,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('gate-attendance')->group(function () {
         Route::get('/logs', [GateAttendanceController::class, 'index'])->middleware('can:gate_attendance.view');
         Route::get('/stats', [GateAttendanceController::class, 'stats'])->middleware('can:gate_attendance.view');
-        Route::get('/schedule-config', [GateAttendanceController::class, 'getScheduleConfig'])->middleware('can:gate_attendance.config');
-        Route::get('/schedule-config/all', [GateAttendanceController::class, 'getAllScheduleConfigs'])->middleware('can:gate_attendance.config');
+        Route::get('/schedule-config', [GateAttendanceController::class, 'getScheduleConfig'])->middleware('permission:gate_attendance.config|gate_attendance.view');
+        Route::get('/schedule-config/all', [GateAttendanceController::class, 'getAllScheduleConfigs'])->middleware('permission:gate_attendance.config|gate_attendance.view');
         Route::post('/schedule-config', [GateAttendanceController::class, 'saveScheduleConfig'])->middleware('can:gate_attendance.config');
         Route::post('/scan-in', [GateAttendanceController::class, 'scanCheckIn'])->middleware('can:gate_attendance.scan');
         Route::post('/scan-out', [GateAttendanceController::class, 'scanCheckOut'])->middleware('can:gate_attendance.scan');
@@ -1063,11 +1065,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('schedules', ScheduleController::class)->only(['index', 'show'])
         ->middleware('permission:academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran|teacher.schedule.view');
     Route::apiResource('schedules', ScheduleController::class)->only(['store'])
-        ->middleware('permission:academic.schedule.create|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
+        ->middleware('permission:academic.schedule.create|academic.manage|sistem.master_data');
     Route::apiResource('schedules', ScheduleController::class)->only(['update'])
-        ->middleware('permission:academic.schedule.update|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
+        ->middleware('permission:academic.schedule.update|academic.manage|sistem.master_data');
     Route::apiResource('schedules', ScheduleController::class)->only(['destroy'])
-        ->middleware('permission:academic.schedule.delete|academic.schedule.view|sistem.master_data|pembelajaran.jadwal_pelajaran');
+        ->middleware('permission:academic.schedule.delete|academic.manage|sistem.master_data');
 
     // Jadwal Ujian & Kategori Ujian
     Route::get('/exam-schedules-options', [ExamScheduleController::class, 'options']);
@@ -1289,7 +1291,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/materials', [TeacherPortalController::class, 'materials'])
                 ->middleware('permission:teacher.material.view|pembelajaran.materi');
             Route::post('/materials', [TeacherPortalController::class, 'saveMaterial'])
-                ->middleware('permission:teacher.material.create|pembelajaran.materi');
+                ->middleware('permission:teacher.material.create');
             Route::put('/materials/{id}', [TeacherPortalController::class, 'updateMaterial'])
                 ->middleware('permission:teacher.material.update|pembelajaran.materi');
             Route::delete('/materials/{id}', [TeacherPortalController::class, 'deleteMaterial'])

@@ -51,7 +51,12 @@ class MutabaahDataScope
         $employee = Employee::where('user_id', $user->id)->first(['id', 'unit_id']);
         abort_unless($employee, 403, 'Akun belum terhubung dengan data pegawai.');
 
-        return $query->where('sa.employee_id', $employee->id);
+        return $query->whereExists(function ($sub) use ($employee) {
+            $sub->selectRaw('1')
+                ->from('mutabaah_supervisor_assignments as msa_scope')
+                ->whereColumn('msa_scope.id', 'h.supervisor_assignment_id')
+                ->where('msa_scope.employee_id', $employee->id);
+        });
     }
 
     public function applyStudents(EloquentBuilder $query, User $user, string $date): EloquentBuilder

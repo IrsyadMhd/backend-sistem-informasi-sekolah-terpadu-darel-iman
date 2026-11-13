@@ -45,10 +45,11 @@ class PemantauanDivisiPerformanceService
         $sdmRate = $totalPegawai > 0 ? round((($pegawaiBerjabatan + $pegawaiBerakun) / (2 * $totalPegawai)) * 100, 1) : 0.0;
 
         // 4. Tahfizh & Al-Qur'an: Alokasi pembina halaqah & rasio santri
-        $guruTahfizhCount = Teacher::whereHas('employee.position', function ($pq) {
-            $pq->where('name', 'ilike', '%tahf%')
-               ->orWhere('name', 'ilike', '%qur%')
-               ->orWhere('name', 'ilike', '%tahsin%');
+        $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+        $guruTahfizhCount = Teacher::whereHas('employee.position', function ($pq) use ($likeOp) {
+            $pq->where('name', $likeOp, '%tahf%')
+               ->orWhere('name', $likeOp, '%qur%')
+               ->orWhere('name', $likeOp, '%tahsin%');
         })->count();
         $tahfizhRate = ($guruTahfizhCount > 0 && $totalSiswa > 0) ? min(100.0, round((($guruTahfizhCount * 25) / $totalSiswa) * 100, 1)) : 0.0;
 

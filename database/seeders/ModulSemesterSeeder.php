@@ -712,11 +712,12 @@ class ModulSemesterSeeder extends Seeder
             // Temukan mapel yang cocok berdasarkan kata kunci config
             $subject = null;
             if (! empty($config['mapel_keywords'])) {
+                $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
                 foreach ($config['mapel_keywords'] as $kw) {
                     $subject = Subject::where('unit_pendidikan_id', $unit->id)
-                        ->where(function ($q) use ($kw) {
-                            $q->where('name', 'ilike', '%' . $kw . '%')
-                              ->orWhere('nama_mapel', 'ilike', '%' . $kw . '%');
+                        ->where(function ($q) use ($kw, $likeOp) {
+                            $q->where('name', $likeOp, '%' . $kw . '%')
+                              ->orWhere('nama_mapel', $likeOp, '%' . $kw . '%');
                         })
                         ->first();
                     if ($subject) break;

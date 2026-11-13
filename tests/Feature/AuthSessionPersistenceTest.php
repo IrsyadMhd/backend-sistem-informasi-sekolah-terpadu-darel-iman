@@ -85,20 +85,22 @@ class AuthSessionPersistenceTest extends TestCase
         $token = $user->createToken('test-device')->plainTextToken;
 
         $response = $this->withHeader('Authorization', 'Bearer '.$token)
-            ->getJson('/api/profile');
+            ->getJson('/api/auth/profile');
 
         $response->assertStatus(200)
             ->assertJsonStructure([
-                'id',
-                'name',
-                'email',
-                'roles',
-                'permissions',
-                'default_portal',
-                'scope' => ['employee_id'],
+                'data' => [
+                    'id',
+                    'name',
+                    'email',
+                    'roles',
+                    'permissions',
+                    'default_portal',
+                    'scope' => ['employee_id'],
+                ],
             ])
-            ->assertJsonPath('name', 'Guru Persistence Test')
-            ->assertJsonPath('scope.employee_id', $employee->id);
+            ->assertJsonPath('data.name', 'Guru Persistence Test')
+            ->assertJsonPath('data.scope.employee_id', $employee->id);
     }
 
     public function test_invalid_or_missing_token_returns_401(): void
@@ -124,7 +126,7 @@ class AuthSessionPersistenceTest extends TestCase
         $token = $user->createToken('test-device')->plainTextToken;
 
         $profileResponse = $this->withHeader('Authorization', 'Bearer '.$token)
-            ->getJson('/api/profile');
+            ->getJson('/api/auth/profile');
         $profileResponse->assertStatus(200);
 
         $logoutResponse = $this->withHeader('Authorization', 'Bearer '.$token)
@@ -133,7 +135,7 @@ class AuthSessionPersistenceTest extends TestCase
             ->assertJson(['message' => 'Logout berhasil.']);
 
         $expiredResponse = $this->withHeader('Authorization', 'Bearer '.$token)
-            ->getJson('/api/profile');
+            ->getJson('/api/auth/profile');
         $expiredResponse->assertStatus(401);
     }
 

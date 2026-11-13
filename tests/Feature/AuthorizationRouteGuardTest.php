@@ -125,8 +125,9 @@ class AuthorizationRouteGuardTest extends TestCase
 
     public function test_parent_and_student_action_guards_accept_legacy_aliases(): void
     {
+        $studentAlias = Role::query()->firstOrCreate(['name' => 'student', 'guard_name' => 'web']);
         $student = User::factory()->create();
-        $student->assignRole('student');
+        $student->assignRole($studentAlias);
 
         $this->actingAs($student, 'sanctum')
             ->postJson('/api/portal/assignments/missing-assignment/submit', [])

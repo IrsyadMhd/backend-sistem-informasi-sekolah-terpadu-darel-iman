@@ -391,19 +391,7 @@ class AuthService
 
     private function verifyPassword(User $user, string $password): bool
     {
-        if (Hash::check($password, $user->password)) {
-            return true;
-        }
-
-        // Kompatibilitas kredensial uji coba superadmin (Password123! dan SuperAdmin@2026!)
-        if (
-            ($user->email === 'superadmin@dareliman.sch.id' || $user->hasAnyRole(['Super Admin', 'super_admin', 'Superadmin']))
-            && in_array($password, ['Password123!', 'SuperAdmin@2026!'], true)
-        ) {
-            return true;
-        }
-
-        return false;
+        return Hash::check($password, $user->password);
     }
 
     private function verifyPasswordOrFail(User $user, string $password, string $portalType, string $identifier, ?string $ipAddress): void
