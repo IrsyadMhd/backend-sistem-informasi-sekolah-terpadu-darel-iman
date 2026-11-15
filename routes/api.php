@@ -356,6 +356,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/status', [SystemMaintenanceController::class, 'status']);
             Route::post('/optimize-clear', [SystemMaintenanceController::class, 'optimizeClear']);
             Route::post('/reset-database', [SystemMaintenanceController::class, 'resetDatabase']);
+            Route::post('/cleanup-test-data', [SystemMaintenanceController::class, 'cleanupTestData']);
             Route::get('/export/{table}', [SystemMaintenanceController::class, 'export']);
             Route::post('/import/{table}', [SystemMaintenanceController::class, 'import']);
             Route::get('/template/{table}', [SystemMaintenanceController::class, 'template']);

@@ -544,6 +544,16 @@ class AccessScopeService
     }
 
     /**
+     * Dapatkan daftar ID unit pendidikan yang berhak diakses user.
+     *
+     * @return array<string>
+     */
+    public function getAccessibleUnitIds(User $user): array
+    {
+        return $this->accessibleEducationUnits($user)->pluck('id')->toArray();
+    }
+
+    /**
      * Scope query Rombel / Kelas yang berhak diakses user.
      */
     public function accessibleRombels(User $user): Builder
@@ -656,9 +666,20 @@ class AccessScopeService
             'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah', 'Guru', 'guru',
         ])) {
             $rombelIds = $this->accessibleRombels($user)->pluck('id');
-            return Student::query()->where(function ($query) use ($rombelIds) {
+            $employee = Employee::query()->where('user_id', $user->id)->first();
+            $employeeId = $employee?->id;
+
+            return Student::query()->where(function ($query) use ($rombelIds, $user, $employeeId) {
                 $query->whereIn('kelas_id', $rombelIds)
                     ->orWhereIn('class_id', $rombelIds);
+
+                if ($this->hasAnyRole($user, ['Musyrif', 'musyrif', 'Musyrifah', 'musyrifah'])) {
+                    $query->orWhere('metadata->musyrif', 'like', '%' . $user->name . '%')
+                        ->orWhere('metadata->musyrif_id', $user->id);
+                    if ($employeeId) {
+                        $query->orWhere('metadata->musyrif_employee_id', $employeeId);
+                    }
+                }
             });
         }
 

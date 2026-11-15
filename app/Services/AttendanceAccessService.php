@@ -109,9 +109,13 @@ class AttendanceAccessService
     {
         $employee = $this->employee($user);
 
+        if (! $employee?->id) {
+            return Kelas::query()->whereRaw('1 = 0');
+        }
+
         return Kelas::query()
-            ->when($employee?->unit_id, fn ($q) => $q->where('unit_pendidikan_id', $employee->unit_id))
-            ->where('wali_kelas_id', $employee?->id ?? '__none__');
+            ->when($employee->unit_id, fn ($q) => $q->where('unit_pendidikan_id', $employee->unit_id))
+            ->where('wali_kelas_id', $employee->id);
     }
 
     public function homeroomStudentIds(User $user): Collection

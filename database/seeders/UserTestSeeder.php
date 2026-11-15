@@ -314,10 +314,17 @@ class UserTestSeeder extends Seeder
             ];
 
             foreach ($genericAccounts as $gen) {
+                $defaultPass = match ($gen['role']) {
+                    'Tata Usaha' => 'TuTest@2026!',
+                    'Kepala Sekolah' => 'KepsekTest@2026!',
+                    'Operator' => 'OperatorTest@2026!',
+                    default => 'SekolahTest@2026!',
+                };
+
                 $u = $this->createOrUpdateUser(
                     name: $gen['role'] . ' Test',
                     email: $gen['email'],
-                    password: 'SekolahTest@2026!',
+                    password: $defaultPass,
                     primaryRole: $gen['role'],
                     phone: '081299990010',
                     scope: 'education_unit',

@@ -442,7 +442,7 @@ class StudentBillManagementController extends Controller
             'notes' => 'nullable|string|max:500',
         ]);
 
-        $paidDate = $validated['paid_at'] ? Carbon::parse($validated['paid_at']) : Carbon::now();
+        $paidDate = ! empty($validated['paid_at']) ? Carbon::parse($validated['paid_at']) : Carbon::now();
         $invoiceNumber = 'INV/' . $paidDate->format('Ymd') . '/' . strtoupper(Str::random(6));
 
         $payment = BillPayment::create([

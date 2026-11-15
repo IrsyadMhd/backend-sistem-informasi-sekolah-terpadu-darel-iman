@@ -527,7 +527,7 @@ class DisciplineManagementController extends Controller
         $student = Student::with([
             'educationUnit:id,name,code,level,program_type',
             'kelas:id,nama_kelas',
-            'parentModel:id,name,phone',
+            'parent:id,name,phone',
         ])->findOrFail($studentId);
 
         $activeYear = AcademicYear::where('is_active', true)->first();
@@ -763,7 +763,7 @@ class DisciplineManagementController extends Controller
         $user = $request->user();
         $unitId = $request->query('unit_id');
         if (! $unitId || in_array(strtolower((string) $unitId), ['all', 'semua'], true)) {
-            $accessible = $this->accessScope->getAccessibleUnitIds($user);
+            $accessible = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->toArray();
             $unitId = $user?->employee?->education_unit_id ?: ($accessible[0] ?? null);
             if (! $unitId) {
                 $firstUnit = EducationUnit::first();
@@ -839,8 +839,8 @@ class DisciplineManagementController extends Controller
             ->join('classes', 'students.kelas_id', '=', 'classes.id')
             ->where('students.unit_id', $unitId)
             ->when($activeYear, fn ($q) => $q->where('student_point_transactions.academic_year_id', $activeYear->id))
-            ->groupBy('classes.id', 'classes.nama_kelas')
-            ->select('classes.nama_kelas as class_name', DB::raw('count(*) as count'), DB::raw('sum(student_point_transactions.points) as total_points'))
+            ->groupBy('classes.id', 'classes.name')
+            ->select('classes.name as class_name', DB::raw('count(*) as count'), DB::raw('sum(student_point_transactions.points) as total_points'))
             ->orderByDesc('total_points')
             ->limit(8)
             ->get();

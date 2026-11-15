@@ -289,6 +289,13 @@ class AuthController extends Controller
             });
         }
 
+        // Khusus role Orang Tua: Jangan ambil user dummy #N/A dan utamakan akun yang memiliki anak
+        if ($validated['role'] === 'Orang Tua') {
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'not ilike' : 'not like';
+            $targetQuery->where('name', $likeOp, '#%')
+                ->where('email', $likeOp, '#%');
+        }
+
         $target = $targetQuery->orderBy('name')->first();
 
         if (! $target) {

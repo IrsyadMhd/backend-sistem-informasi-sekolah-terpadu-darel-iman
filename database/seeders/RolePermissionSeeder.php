@@ -483,6 +483,8 @@ class RolePermissionSeeder extends Seeder
             ],
             'Tata Usaha' => [
                 'dashboard.view',
+                'dashboard.pemantauan.lihat',
+                'dashboard.pemantauan.kelola',
                 'kehadiran.siswa.absensi_digital',
                 'kehadiran.siswa.rekap_keterlambatan',
                 'kehadiran.siswa.rekap_ketidakhadiran',

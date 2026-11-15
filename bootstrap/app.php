@@ -27,6 +27,12 @@ return Application::configure(basePath: dirname(__DIR__))
             $msg = $e->getMessage();
             $code = (string) $e->getCode();
 
+            \Illuminate\Support\Facades\Log::error('Database QueryException: ' . $msg, [
+                'code' => $code,
+                'sql' => $e->getSql(),
+                'bindings' => $e->getBindings(),
+            ]);
+
             if ($request->is('api/*') || $request->wantsJson()) {
                 if (str_contains($msg, 'invalid input syntax for type uuid')) {
                     return response()->json([
@@ -50,6 +56,15 @@ return Application::configure(basePath: dirname(__DIR__))
                         'message' => 'Layanan database tidak dapat terhubung. Mohon periksa status database atau hubungi administrator sistem.',
                     ], 503);
                 }
+
+                // Global Sanitasi: Cegah kebocoran SQLSTATE, nama tabel/kolom ke client
+                if (!config('app.debug')) {
+                    return response()->json([
+                        'status' => 'error',
+                        'code' => 'DATABASE_QUERY_ERROR',
+                        'message' => 'Terjadi kendala pemrosesan data pada sistem. Silakan coba kembali atau hubungi administrator.',
+                    ], 500);
+                }
             }
 
             return null;
@@ -60,6 +75,8 @@ return Application::configure(basePath: dirname(__DIR__))
                 return null;
             }
 
+            \Illuminate\Support\Facades\Log::error('PDOException: ' . $e->getMessage());
+
             if ($request->is('api/*') || $request->wantsJson()) {
                 return response()->json([
                     'status' => 'error',
@@ -67,5 +84,31 @@ return Application::configure(basePath: dirname(__DIR__))
                     'message' => 'Layanan database tidak dapat terhubung. Mohon periksa status database atau hubungi administrator sistem.',
                 ], 503);
             }
+        });
+
+        $exceptions->render(function (\Throwable $e, \Illuminate\Http\Request $request) {
+            if ($request->is('api/*') || $request->wantsJson()) {
+                // Biarkan exception bawaan HTTP (401, 403, 404, 422, 429) ditangani secara normal
+                if ($e instanceof \Illuminate\Validation\ValidationException ||
+                    $e instanceof \Illuminate\Auth\AuthenticationException ||
+                    $e instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface) {
+                    return null;
+                }
+
+                \Illuminate\Support\Facades\Log::error('Unhandled API Server Exception: ' . $e->getMessage(), [
+                    'exception' => get_class($e),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                ]);
+
+                if (!config('app.debug')) {
+                    return response()->json([
+                        'status' => 'error',
+                        'code' => 'INTERNAL_SERVER_ERROR',
+                        'message' => 'Terjadi kendala pemrosesan data pada sistem. Silakan coba kembali atau hubungi administrator.',
+                    ], 500);
+                }
+            }
+            return null;
         });
     })->create();

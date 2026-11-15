@@ -521,6 +521,157 @@ class SystemMaintenanceController extends Controller
     }
 
     /**
+     * Bersihkan sisa data pengujian otomatis/manual ([SESI3-QA], [SESI4-QA], [TEST-QA], dll).
+     */
+    public function cleanupTestData(Request $request): JsonResponse
+    {
+        $tags = ['%[SESI3-QA]%', '%[SESI4-QA]%', '%[TEST-QA]%', '%[AUDIT-FULL]%', '%[SIMULASI-NYATA]%', '%[FINAL-QA]%', '%[DEEP-QA]%', '%[PROD-SIM]%'];
+        $deletedCounts = [];
+
+        DB::beginTransaction();
+        try {
+            // 1. Tahfizh Daily Logs
+            if (Schema::hasTable('tahfizh_daily_logs')) {
+                $q = DB::table('tahfizh_daily_logs')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('notes_teacher', 'like', $tag)
+                            ->orWhere('notes_parent', 'like', $tag)
+                            ->orWhere('tilawah_text', 'like', $tag)
+                            ->orWhere('murajaah_text', 'like', $tag);
+                    }
+                    $sub->orWhereIn('id', [
+                        '01a1dd7d-15b8-738f-80f0-f9ed8a722802',
+                        '01a1dd80-d733-72a9-98ff-06114c9f6810',
+                    ]);
+                });
+                $cnt = $q->count();
+                $q->delete();
+                $deletedCounts['tahfizh_daily_logs'] = $cnt;
+            }
+
+            // 2. Student Point Transactions (Discipline)
+            if (Schema::hasTable('student_point_transactions')) {
+                $q = DB::table('student_point_transactions')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('description', 'like', $tag);
+                    }
+                    $sub->orWhere('id', '01a1dd88-239e-736b-99cd-77a5f288ae02');
+                });
+                $cnt = $q->count();
+                $q->delete();
+                $deletedCounts['student_point_transactions'] = $cnt;
+            }
+
+            // 3. Worship Attendance Details
+            if (Schema::hasTable('worship_attendance_details')) {
+                $q = DB::table('worship_attendance_details')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('notes', 'like', $tag);
+                    }
+                    $sub->orWhere(function ($s) {
+                        $s->where('student_id', '01a195d8-7a50-7086-b9b6-4829e8944f13')
+                          ->whereDate('attended_at', '2026-11-15');
+                    });
+                });
+                $cnt = $q->count();
+                $q->delete();
+                $deletedCounts['worship_attendance_details'] = $cnt;
+            }
+
+            // 4. Student Attendance Permissions
+            if (Schema::hasTable('student_attendance_permissions')) {
+                $q = DB::table('student_attendance_permissions')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('reason', 'like', $tag);
+                    }
+                });
+                $cnt = $q->count();
+                $q->delete();
+                $deletedCounts['student_attendance_permissions'] = $cnt;
+            }
+
+            // 5. Dormitory Permits
+            if (Schema::hasTable('dormitory_permits')) {
+                $q = DB::table('dormitory_permits')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('notes', 'like', $tag)
+                            ->orWhere('destination', 'like', $tag)
+                            ->orWhere('medical_complaint', 'like', $tag);
+                    }
+                });
+                $cnt = $q->count();
+                $q->delete();
+                $deletedCounts['dormitory_permits'] = $cnt;
+            }
+
+            // 6. Student Bills & Bill Payments (SPP)
+            if (Schema::hasTable('student_bills')) {
+                $testBillIds = DB::table('student_bills')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('title', 'like', $tag);
+                    }
+                })->pluck('id')->toArray();
+
+                if (! empty($testBillIds) && Schema::hasTable('bill_payments')) {
+                    DB::table('bill_payments')->whereIn('bill_id', $testBillIds)->delete();
+                }
+
+                $cnt = DB::table('student_bills')->whereIn('id', $testBillIds)->delete();
+                $deletedCounts['student_bills'] = $cnt;
+            }
+
+            // 7. Students (Test Students created during QA)
+            if (Schema::hasTable('students')) {
+                $q = DB::table('students')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('full_name', 'like', $tag)
+                            ->orWhere('nis', 'like', $tag);
+                    }
+                });
+                $cnt = $q->count();
+                $q->delete();
+                $deletedCounts['students'] = $cnt;
+            }
+
+            // 8. Portal Messages & Reactions (Chat)
+            if (Schema::hasTable('portal_messages')) {
+                $testMsgIds = DB::table('portal_messages')->where(function ($sub) use ($tags) {
+                    foreach ($tags as $tag) {
+                        $sub->orWhere('message', 'like', $tag);
+                    }
+                })->pluck('id')->toArray();
+
+                if (! empty($testMsgIds)) {
+                    if (Schema::hasTable('portal_message_reactions')) {
+                        DB::table('portal_message_reactions')->whereIn('message_id', $testMsgIds)->delete();
+                    }
+                    if (Schema::hasTable('portal_message_attachments')) {
+                        DB::table('portal_message_attachments')->whereIn('message_id', $testMsgIds)->delete();
+                    }
+                    $cnt = DB::table('portal_messages')->whereIn('id', $testMsgIds)->delete();
+                    $deletedCounts['portal_messages'] = $cnt;
+                } else {
+                    $deletedCounts['portal_messages'] = 0;
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pembersihan data pengujian QA selesai.',
+                'deleted' => $deletedCounts,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal membersihkan data QA: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Ekspor data tabel (parsial per tabel atau semua tabel sekaligus).
      */
     public function export(string $table): BinaryFileResponse
