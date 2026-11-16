@@ -626,7 +626,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/moda-transportasi/dropdown', [ModaTransportasiController::class, 'dropdown']);
             Route::get('/options/dropdown/{group}', [BusinessOptionController::class, 'dropdown']);
             Route::match(['post', 'patch'], '/options/{id}/toggle-status', [BusinessOptionController::class, 'toggleStatus']);
-            Route::apiResource('options', BusinessOptionController::class);
+            Route::apiResource('options', BusinessOptionController::class)->names('v1.master.options');
         });
     });
 
@@ -780,7 +780,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/tahun-ajaran/import', [TahunAjaranController::class, 'import']);
             Route::post('/tahun-ajaran/{id}/set-aktif', [TahunAjaranController::class, 'setAktif']);
             Route::post('/tahun-ajaran/{id}/restore', [TahunAjaranController::class, 'restore']);
-            Route::apiResource('tahun-ajaran', TahunAjaranController::class);
+            Route::apiResource('tahun-ajaran', TahunAjaranController::class)->names('alias.tahun-ajaran');
 
             // Kurikulum
             Route::get('/kurikulum/dropdown', [MasterKurikulumController::class, 'dropdown']);
@@ -788,7 +788,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/kurikulum/export', [MasterKurikulumController::class, 'export']);
             Route::post('/kurikulum/import', [MasterKurikulumController::class, 'import']);
             Route::post('/kurikulum/{id}/restore', [MasterKurikulumController::class, 'restore']);
-            Route::apiResource('kurikulum', MasterKurikulumController::class);
+            Route::apiResource('kurikulum', MasterKurikulumController::class)->names('alias.kurikulum');
 
             // Modul Semester
             Route::get('/modul-semester/options', [ModulSemesterController::class, 'options']);
@@ -796,21 +796,21 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('/modul-semester/{id}/restore', [ModulSemesterController::class, 'restore']);
             Route::post('/modul-semester/{id}/duplicate', [ModulSemesterController::class, 'duplicate']);
             Route::match(['post', 'patch'], '/modul-semester/{id}/toggle-status', [ModulSemesterController::class, 'toggleStatus']);
-            Route::apiResource('modul-semester', ModulSemesterController::class);
+            Route::apiResource('modul-semester', ModulSemesterController::class)->names('alias.modul-semester');
 
             // Options
             Route::get('/options/dropdown/{group}', [BusinessOptionController::class, 'dropdown']);
             Route::match(['post', 'patch'], '/options/{id}/toggle-status', [BusinessOptionController::class, 'toggleStatus']);
-            Route::apiResource('options', BusinessOptionController::class);
+            Route::apiResource('options', BusinessOptionController::class)->names('alias.options');
 
             // Subjects
             Route::get('/subjects/dropdown', [SubjectController::class, 'dropdown']);
             Route::get('/subjects/stats', [SubjectController::class, 'stats']);
-            Route::apiResource('subjects', SubjectController::class);
+            Route::apiResource('subjects', SubjectController::class)->names('alias.subjects');
 
             // Moda Transportasi
             Route::get('/moda-transportasi/dropdown', [ModaTransportasiController::class, 'dropdown']);
-            Route::apiResource('moda-transportasi', ModaTransportasiController::class);
+            Route::apiResource('moda-transportasi', ModaTransportasiController::class)->names('alias.moda-transportasi');
         });
     });
 
@@ -1113,7 +1113,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/capaian-pembelajaran/dropdown', [CapaianPembelajaranController::class, 'dropdown']);
         Route::get('/capaian-pembelajaran/stats', [CapaianPembelajaranController::class, 'stats']);
         Route::post('/capaian-pembelajaran/{id}/restore', [CapaianPembelajaranController::class, 'restore']);
-        Route::apiResource('capaian-pembelajaran', CapaianPembelajaranController::class);
+        Route::apiResource('capaian-pembelajaran', CapaianPembelajaranController::class)->names('lms.capaian-pembelajaran');
 
         Route::get('/modul-ajar/stats', [LmsModulAjarController::class, 'stats']);
         Route::get('/modul-ajar/options', [LmsModulAjarController::class, 'options']);

@@ -163,3 +163,38 @@ SIPDEI_API_KEY=8c64e0685f8619a599e93a5a2c8b8c689ba42407770172cb9d89f25940c48753
 
 Panduan deploy lengkap dan skrip otomatis tersedia di folder [`staging-deploy-kit/`](../staging-deploy-kit/PANDUAN_DEPLOY_STAGING.md).
 
+
+
+### Prosedur Deploy Staging & Pindah Branch di Server
+
+Jika server saat ini sedang berada di branch `main`, lakukan langkah berikut untuk beralih ke branch `staging` secara aman:
+
+```bash
+# 1. Masuk ke folder backend server
+cd /var/www/dareliman-staging-backend
+
+# 2. Amankan perubahan lokal sementara di server
+git stash
+
+# 3. Ambil branch staging terbaru dari GitHub
+git fetch origin
+
+# 4. Pindah ke branch staging
+git checkout -B staging origin/staging
+git pull origin staging
+
+# 5. Pasang konfigurasi .env Staging
+cp staging-deploy-kit/.env.staging.example .env
+# Sesuaikan kredensial database staging Anda di .env
+
+# 6. Eksekusi migrasi & seeder staging (2.555 santri = 2.549 riil + 6 test)
+chmod +x staging-deploy-kit/*.sh
+./staging-deploy-kit/01_deploy_backend_staging.sh
+
+# 7. Verifikasi otomatis data seeder (100% Green)
+php -r "require 'vendor/autoload.php'; \$app = require_once 'bootstrap/app.php'; \$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); require 'staging-deploy-kit/02_verify_staging_seeder.php';"
+```
+
+### Aturan Seeder Berdasarkan Environment:
+- **Staging (`APP_ENV=staging`)**: `SEED_DUMMY_DATA=false` dan `SEED_TEST_ACCOUNTS=true` ➔ Total 2.555 santri (2.549 riil SIPDEI + 6 akun test santri terpadu untuk pengujian multi-role).
+- **Production (`APP_ENV=production`)**: `SEED_DUMMY_DATA=false` dan `SEED_TEST_ACCOUNTS=false` ➔ Total 2.549 santri (HANYA data master riil yayasan & santri SIPDEI, 0 akun test).
