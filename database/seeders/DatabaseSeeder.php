@@ -69,7 +69,8 @@ class DatabaseSeeder extends Seeder
         // --------------------------------------------------------------------------
         // TAHAP 5: AKUN PENGUJIAN MULTI-PERAN (STAGING & LOCAL TESTING ONLY)
         // --------------------------------------------------------------------------
-        if (! app()->environment('production')) {
+        $seedTestAccounts = filter_var(env('SEED_TEST_ACCOUNTS', ! app()->environment('production')), FILTER_VALIDATE_BOOLEAN);
+        if ($seedTestAccounts) {
             $this->call([
                 TestingRoleAccountsSeeder::class,
                 UserTestSeeder::class,
