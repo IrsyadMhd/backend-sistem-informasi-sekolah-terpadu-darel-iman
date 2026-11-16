@@ -138,3 +138,28 @@ GET /api/assignments (placeholder)
 GET /api/exams (placeholder)
 GET /api/alumni (placeholder)
 GET /api/notifications (placeholder)
+
+---
+
+## Deployment Server: Staging & Production Setup
+
+### Informasi Domain & Endpoint Resmi
+- **Staging Backend API**: `https://demoapi.dareliman.sch.id` (Base API: `https://demoapi.dareliman.sch.id/api/v1`)
+- **Staging Web Dashboard**: `https://demoedu.dareliman.sch.id/dashboard`
+- **Production Backend API**: `https://api.dareliman.sch.id` (Base API: `https://api.dareliman.sch.id/api/v1`)
+- **Production Web Dashboard**: `https://edu.dareliman.sch.id/dashboard`
+
+### Konfigurasi Kunci Staging (`.env`)
+```env
+APP_NAME="Dareliman Edu (Staging)"
+APP_ENV=staging
+APP_DEBUG=false
+APP_URL=https://demoapi.dareliman.sch.id
+SANCTUM_STATEFUL_DOMAINS=demoedu.dareliman.sch.id,localhost:5173
+SEED_DUMMY_DATA=false
+SIPDEI_BASE_URL=https://sipdei.dareliman.tech
+SIPDEI_API_KEY=8c64e0685f8619a599e93a5a2c8b8c689ba42407770172cb9d89f25940c48753
+```
+
+Panduan deploy lengkap dan skrip otomatis tersedia di folder [`staging-deploy-kit/`](../staging-deploy-kit/PANDUAN_DEPLOY_STAGING.md).
+

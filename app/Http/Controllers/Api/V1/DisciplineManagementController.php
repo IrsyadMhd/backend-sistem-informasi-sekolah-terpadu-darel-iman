@@ -527,7 +527,7 @@ class DisciplineManagementController extends Controller
         $student = Student::with([
             'educationUnit:id,name,code,level,program_type',
             'kelas:id,nama_kelas',
-            'parent:id,name,phone',
+            'parent:id,full_name,phone',
         ])->findOrFail($studentId);
 
         $activeYear = AcademicYear::where('is_active', true)->first();

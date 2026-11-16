@@ -454,7 +454,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::delete('/laporan-bulanan/{id}', [DashboardPemantauanController::class, 'hapusLaporanBulanan']);
         });
 
-        Route::middleware('can:dashboard.pemantauan.kelola')->group(function () {
+        Route::middleware('role_or_permission:Super Admin|Kepala Sekolah|Divisi Pendidikan|Admin|dashboard.pemantauan.kelola')->group(function () {
             Route::post('/rekap-prestasi-siswa', [DashboardPemantauanController::class, 'simpanRekapPrestasiSiswa']);
             Route::put('/rekap-prestasi-siswa/{id}', [DashboardPemantauanController::class, 'ubahRekapPrestasiSiswa']);
             Route::delete('/rekap-prestasi-siswa/{id}', [DashboardPemantauanController::class, 'hapusRekapPrestasiSiswa']);

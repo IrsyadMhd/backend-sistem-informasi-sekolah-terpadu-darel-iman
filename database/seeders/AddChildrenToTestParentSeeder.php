@@ -26,7 +26,8 @@ class AddChildrenToTestParentSeeder extends Seeder
         $defaultPassword = Hash::make('password');
 
         // 1. Cari Parent Model "Orang Tua Test"
-        $parentUser = User::where('email', 'orangtua@dareliman.sch.id')->first()
+        $parentUser = User::where('email', 'orangtua.test@dareliman.sch.id')->first()
+            ?? User::where('email', 'orangtua@dareliman.sch.id')->first()
             ?? User::where('name', 'like', '%Orang Tua Test%')->first();
 
         if (! $parentUser) {
@@ -171,7 +172,7 @@ class AddChildrenToTestParentSeeder extends Seeder
             }
 
             $student = Student::updateOrCreate(
-                ['nis' => $c['nis']],
+                ['user_id' => $studentUser->id],
                 [
                     'user_id' => $studentUser->id,
                     'parent_id' => $targetParent->id,
@@ -201,6 +202,25 @@ class AddChildrenToTestParentSeeder extends Seeder
             );
 
             $this->command->info("Anak berhasil ditambahkan: {$student->full_name} ({$c['unit']->name} - {$c['kelas']->nama_kelas})");
+        }
+
+        // 5. Hubungkan 1 Santri Riil yang memiliki NIP Pembayaran aktif di SIPDEI
+        // agar pengujian Virtual Account (BSI / Nagari) di Staging dapat dilakukan secara live
+        $realSipdeiStudent = Student::whereNotNull('nis')
+            ->where('nis', 'not like', 'TEST%')
+            ->whereNotNull('metadata->pembiayaan->nip_pembayaran')
+            ->first();
+
+        if ($realSipdeiStudent && $parent) {
+            StudentParent::firstOrCreate(
+                ['student_id' => $realSipdeiStudent->id, 'parent_id' => $parent->id],
+                [
+                    'relationship_type' => 'father',
+                    'is_primary' => false,
+                    'metadata' => ['phone' => $parent->phone ?? '081299990022', 'is_sipdei_live_test' => true],
+                ]
+            );
+            $this->command->info("Santri Riil SIPDEI berhasil dihubungkan untuk uji live: {$realSipdeiStudent->full_name} (NIS: {$realSipdeiStudent->nis})");
         }
 
         $this->command->info("Selesai menambahkan data anak lintas unit untuk Orang Tua Test!");

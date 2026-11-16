@@ -7,116 +7,88 @@ use Illuminate\Database\Seeder;
 class DatabaseSeeder extends Seeder
 {
     /**
-     * Seed the application's database.
+     * Seed the application's database for Staging and Production.
      * Order specified according to Foreign Key dependencies:
-     * 1. Core Auth & System Settings (Role & Permission, Site Settings, Student Card Settings)
-     * 2. Master Data Organizations & Education Units
-     * 3. Kepegawaian (Jabatan, Pegawai, Guru)
-     * 4. Orang Tua & Siswa
-     * 5. Akademik Core (Kurikulum, Mapel, Kelas, Jadwal, Modul Semester)
-     * 6. LMS Content & Evaluasi
-     * 7. Nilai Siswa (StudentGrades) & Rapor Akademik
-     * 8. Presensi, Absensi, Mutabaah & Module Keislaman
+     * 1. Core Auth & System Settings
+     * 2. Master Organizations & Units
+     * 3. Keagamaan & Standar Tata Tertib Pesantren
+     * 4. Civitas Akademika Riil (Pegawai & Siswa dari Google Sheet SIPDEI-Aligned)
+     * 5. Testing Accounts (Staging / Development only)
+     * 6. Simulation & Dummy Fixtures (Strictly gated by SEED_DUMMY_DATA=true)
      */
     public function run(): void
     {
-        // Roles/permissions, core logins (SuperAdmin & Admin), navigation, system defaults & Islamic reference masters are safe bootstrap data.
-        $bootstrapSeeders = [
+        // --------------------------------------------------------------------------
+        // TAHAP 1: PONDASI HAK AKSES, AUTENTIKASI & KONFIGURASI SISTEM
+        // --------------------------------------------------------------------------
+        $this->call([
             RolePermissionSeeder::class,
             AttendancePermissionSeeder::class,
             SiteSettingsSeeder::class,
             StudentCardSettingsSeeder::class,
             CoreAdminUserSeeder::class,
             AppNavigationSeeder::class,
+            BusinessOptionSeeder::class,
+        ]);
+
+        // --------------------------------------------------------------------------
+        // TAHAP 2: MASTER STRUKTUR ORGANISASI & KURIKULUM RIIL
+        // --------------------------------------------------------------------------
+        $this->call([
             MasterJenisUnitPendidikanSeeder::class,
             MasterTahunAjaranSeeder::class,
+            MasterJabatanSeeder::class,
+            MasterKurikulumSeeder::class,
+            SubjectSeeder::class,
+            KonsolidasiMasterMapelSeeder::class,
+            KelasSeeder::class,
             StudentStatusSeeder::class,
             TransportationModeSeeder::class,
+        ]);
+
+        // --------------------------------------------------------------------------
+        // TAHAP 3: MODUL KEISLAMAN & TATA TERTIB PESANTREN
+        // --------------------------------------------------------------------------
+        $this->call([
             QuranSurahSeeder::class,
             DoaSeeder::class,
-        ];
+            PesantrenDisciplineRulesSeeder::class,
+            VocabularyBankSeeder::class,
+            SupervisiKbmSeeder::class,
+        ]);
 
+        // --------------------------------------------------------------------------
+        // TAHAP 4: IMPORT DATA RIIL CIVITAS YAYASAN (GOOGLE SHEETS & SIPDEI-ALIGNED)
+        // --------------------------------------------------------------------------
+        $this->call([
+            ImportGoogleSheetPegawaiSeeder::class,
+            ImportGoogleSheetSiswaSeeder::class,
+            ProvisionDefaultUserPasswordsSeeder::class,
+        ]);
+
+        // --------------------------------------------------------------------------
+        // TAHAP 5: AKUN PENGUJIAN MULTI-PERAN (STAGING & LOCAL TESTING ONLY)
+        // --------------------------------------------------------------------------
         if (! app()->environment('production')) {
-            $bootstrapSeeders[] = TestingRoleAccountsSeeder::class;
-            $bootstrapSeeders[] = UserTestSeeder::class;
+            $this->call([
+                TestingRoleAccountsSeeder::class,
+                UserTestSeeder::class,
+                AddChildrenToTestParentSeeder::class,
+            ]);
         }
 
-        $this->call($bootstrapSeeders);
-
-        // All records below are development/simulation fixtures.
-        // Disabled by default to keep database clean without dummy data.
-        // To seed dummy fixtures, set SEED_DUMMY_DATA=true in .env
+        // --------------------------------------------------------------------------
+        // TAHAP 6: DUMMY / SIMULASI FIXTURES (DINONAKTIFKAN SECARA DEFAULT DI STAGING)
+        // Hanya dijalankan jika sengaja disetel SEED_DUMMY_DATA=true di file .env
+        // --------------------------------------------------------------------------
         if (! env('SEED_DUMMY_DATA', false)) {
             return;
         }
 
-        // 1. Master data and the deterministic login/ownership graph.
-        $this->call([
-            SuperAdminAcceptanceSeeder::class,
-            DefaultRoleUserSeeder::class,
-            MasterKurikulumSeeder::class,
-            KelasSeeder::class,
-            SubjectSeeder::class,
-            JadwalPelajaranSeeder::class,
-            ModulSemesterSeeder::class,
-            QrCredentialSeeder::class,
-            PemantauanDivisiSeeder::class,
-            PengumumanSekolahSeeder::class,
-            IndikatorKinerjaUtamaSeeder::class,
-        ]);
-
-        // 5. LMS Core & Content
+        // Simulasi fixtures lama jika pengembang membutuhkan data mock dummy buatan
         $this->call([
             ModulAjarSeeder::class,
-            LmsReferensiSeeder::class,
-            LmsAktivitasBelajarSeeder::class,
-            LmsMediaSeeder::class,
-            LmsDiskusiSeeder::class,
-            LmsPenugasanSeeder::class,
-            LmsPengumpulanTugasSeeder::class,
-            PresensiPembelajaranSeeder::class,
-            LmsKisiKisiSeeder::class,
-            LmsBankSoalSeeder::class,
-            LmsUjianSeeder::class,
-            LmsPenilaianSeeder::class,
-        ]);
-
-        // 6. Rekap Nilai Akademik & Rapor
-        $this->call([
-            StudentGradesSeeder::class,
-            LmsRaporSeeder::class,
-        ]);
-
-        // 7. Attendance, Mutabaah & Islamic Modules
-        $this->call([
-            AttendanceSeeder::class,
             WorshipAttendanceSeeder::class,
-            MutabaahEnterpriseSeeder::class,
-            MutabaahProgramAndRuleSeeder::class,
-            PrayerScheduleSeeder::class,
         ]);
-
-        if (app()->environment(['local', 'development', 'testing', 'staging'])) {
-            $this->call(TahfizhSeeder::class);
-            $this->call(RekapPrestasiSiswaSeeder::class);
-            $this->call(JadwalBoardingTerpaduSeeder::class);
-            $this->call(JadwalSditFullDay2026Seeder::class);
-            $this->call(JadwalPelajaranLengkapSeeder::class);
-            $this->call(SimulasiTerpadu2026Seeder::class);
-            $this->call(SimulasiSiswaSemuaKelasSeeder::class);
-            $this->call(MateriBelajarTahunanSeeder::class);
-            $this->call(LmsMediaSemesterDinamisSeeder::class);
-            $this->call(TugasSemesterDinamisSeeder::class);
-            $this->call(CapaianPembelajaranSeeder::class);
-            $this->call(WorkspaceGuruSimulasiSeeder::class);
-            $this->call(SimulasiTahunanRamadhanSeeder::class);
-            $this->call(PresensiAwalJuli2026Seeder::class);
-            $this->call(AlumniDanMutasiSeeder::class);
-            $this->call(StudentNoteDemoSeeder::class);
-            $this->call(GuruTestWorkspaceSeeder::class);
-            $this->call(JadwalSiswaAlyaZahraSeeder::class);
-            $this->call(SimulasiOperasionalLengkap2026Seeder::class);
-            $this->call(GuruRolesDanPenugasanSeeder::class);
-        }
     }
 }
