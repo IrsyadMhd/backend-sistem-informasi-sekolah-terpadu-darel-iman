@@ -146,10 +146,13 @@ class TahfizhController extends Controller
             'tilawah_baris' => 'nullable|integer',
 
             // Hafalan Baru (Dari Master Al-Qur'an)
+            'surah_id' => 'nullable|integer|between:1,114',
+            'ayat_mulai' => 'nullable|integer|min:1',
+            'ayat_selesai' => 'nullable|integer|min:1|gte:ayat_mulai',
             'hafalan_surah_number' => 'nullable|integer|between:1,114',
             'hafalan_surah_name' => 'nullable|string',
             'hafalan_ayah_start' => 'nullable|integer|min:1',
-            'hafalan_ayah_end' => 'nullable|integer|min:1',
+            'hafalan_ayah_end' => 'nullable|integer|min:1|gte:hafalan_ayah_start',
             'hafalan_baris' => 'nullable|integer',
 
             // Tugas Murajaah di Rumah dari Guru
