@@ -514,6 +514,20 @@ class TahfizhController extends Controller
         return $this->saveDailyLog($request);
     }
 
+    public function deleteDailyLog(Request $request, $id): JsonResponse
+    {
+        $user = $request->user();
+        abort_unless($user, 401, 'Unauthenticated.');
+
+        $log = TahfizhDailyLog::findOrFail($id);
+        $log->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Catatan setoran tahfizh berhasil dihapus.'
+        ]);
+    }
+
     /**
      * Endpoint pendukung legacy (rekapTahfizh)
      */
