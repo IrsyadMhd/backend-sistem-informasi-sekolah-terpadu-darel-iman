@@ -72,18 +72,18 @@ class DefaultRoleUserSeeder extends Seeder
             ?? Kelas::query()->where('status', 'Aktif')->first();
         $defaultPassword = (string) env('DEFAULT_TEST_ACCOUNT_PASSWORD', 'Password123!');
         $canonicalOverrides = [
-            'Super Admin' => ['superadmin@dareliman.sch.id', (string) env('DEFAULT_SUPER_ADMIN_PASSWORD', 'Password123!')],
-            'Ketua Yayasan' => ['role.ketua.yayasan@dareliman.sch.id', $defaultPassword],
-            'Pengurus Yayasan' => ['role.pengurus.yayasan@dareliman.sch.id', $defaultPassword],
-            'Sekretaris Yayasan' => ['role.sekretaris.yayasan@dareliman.sch.id', $defaultPassword],
-            'Bendahara Yayasan' => ['role.bendahara.yayasan@dareliman.sch.id', $defaultPassword],
-            'Kepala Sekolah' => ['kepsek@dareliman.sch.id', (string) env('DEFAULT_KEPSEK_PASSWORD', 'Kepsek@2026!')],
-            'Tata Usaha' => ['tu@dareliman.sch.id', (string) env('DEFAULT_TU_PASSWORD', 'TU@2026!')],
-            'Guru' => ['guru@dareliman.sch.id', (string) env('DEFAULT_GURU_PASSWORD', 'Guru@2026!')],
-            'Guru Tahfizh' => ['guru.tahfizh@dareliman.sch.id', (string) env('DEFAULT_GURU_TAHFIZH_PASSWORD', 'Tahfizh@2026!')],
-            'Musyrif' => ['musyrif@dareliman.sch.id', (string) env('DEFAULT_MUSYRIF_PASSWORD', 'Musyrif@2026!')],
-            'Orang Tua' => ['orangtua@dareliman.sch.id', (string) env('DEFAULT_ORANG_TUA_PASSWORD', 'OrangTua@2026!')],
-            'Siswa' => ['siswa@dareliman.sch.id', (string) env('DEFAULT_SISWA_PASSWORD', 'Siswa@2026!')],
+            'Super Admin' => ['superadmin@school-erp.local', (string) env('DEFAULT_SUPER_ADMIN_PASSWORD', 'Password123!')],
+            'Ketua Yayasan' => ['role.ketua.yayasan@school-erp.local', $defaultPassword],
+            'Pengurus Yayasan' => ['role.pengurus.yayasan@school-erp.local', $defaultPassword],
+            'Sekretaris Yayasan' => ['role.sekretaris.yayasan@school-erp.local', $defaultPassword],
+            'Bendahara Yayasan' => ['role.bendahara.yayasan@school-erp.local', $defaultPassword],
+            'Kepala Sekolah' => ['kepsek@school-erp.local', (string) env('DEFAULT_KEPSEK_PASSWORD', 'Kepsek@2026!')],
+            'Tata Usaha' => ['tu@school-erp.local', (string) env('DEFAULT_TU_PASSWORD', 'TU@2026!')],
+            'Guru' => ['guru@school-erp.local', (string) env('DEFAULT_GURU_PASSWORD', 'Guru@2026!')],
+            'Guru Tahfizh' => ['guru.tahfizh@school-erp.local', (string) env('DEFAULT_GURU_TAHFIZH_PASSWORD', 'Tahfizh@2026!')],
+            'Musyrif' => ['musyrif@school-erp.local', (string) env('DEFAULT_MUSYRIF_PASSWORD', 'Musyrif@2026!')],
+            'Orang Tua' => ['orangtua@school-erp.local', (string) env('DEFAULT_ORANG_TUA_PASSWORD', 'OrangTua@2026!')],
+            'Siswa' => ['siswa@school-erp.local', (string) env('DEFAULT_SISWA_PASSWORD', 'Siswa@2026!')],
         ];
 
         $users = [];
@@ -91,7 +91,7 @@ class DefaultRoleUserSeeder extends Seeder
             $role = Role::query()->firstOrCreate(['name' => $roleName, 'guard_name' => 'web']);
             $slug = Str::slug($roleName, '.');
             $sequence = str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT);
-            [$email, $password] = $canonicalOverrides[$roleName] ?? [$slug.'@dareliman.sch.id', $defaultPassword];
+            [$email, $password] = $canonicalOverrides[$roleName] ?? [$slug.'@school-erp.local', $defaultPassword];
             $phone = '0812999900'.$sequence;
 
             $user = User::query()->updateOrCreate(
@@ -213,8 +213,18 @@ class DefaultRoleUserSeeder extends Seeder
         // Akun alias lama tetap disediakan agar fixture dan integrasi yang
         // sudah memakai identifier historis tidak rusak.
         $legacyAccounts = [
+            ['Admin', 'Admin Sistem', 'admin@school-erp.local', (string) env('DEFAULT_ADMIN_PASSWORD', 'Admin@2026!')],
+            ['Yayasan', 'Pengurus Yayasan', 'yayasan@school-erp.local', (string) env('DEFAULT_YAYASAN_PASSWORD', 'Yayasan@2026!')],
+            ['ketua_yayasan', 'Ketua Yayasan', 'ketua.yayasan@school-erp.local', (string) env('DEFAULT_KETUA_YAYASAN_PASSWORD', 'Yayasan@2026!')],
+            ['sekretaris_yayasan', 'Sekretaris Yayasan', 'sekretaris.yayasan@school-erp.local', (string) env('DEFAULT_SEKRETARIS_YAYASAN_PASSWORD', 'Yayasan@2026!')],
+            ['bendahara_yayasan', 'Bendahara Yayasan', 'bendahara.yayasan@school-erp.local', (string) env('DEFAULT_BENDAHARA_YAYASAN_PASSWORD', 'Yayasan@2026!')],
+            ['pengurus_yayasan', 'Pengurus Yayasan', 'pengurus.yayasan@school-erp.local', (string) env('DEFAULT_PENGURUS_YAYASAN_PASSWORD', 'Yayasan@2026!')],
+            ['Divisi Pendidikan', 'Divisi Pendidikan', 'divisi.pendidikan@school-erp.local', (string) env('DEFAULT_DIVISI_PASSWORD', 'Divisi@2026!')],
+            ['Wali Kelas', 'Wali Kelas Test', 'role.wali.kelas@school-erp.local', (string) env('DEFAULT_TEST_ACCOUNT_PASSWORD', 'Password123!')],
+            ['Wali Kelas', 'Wali Kelas Test', 'wali.kelas@school-erp.local', (string) env('DEFAULT_TEST_ACCOUNT_PASSWORD', 'Password123!')],
             ['Admin', 'Admin Sistem', 'admin@dareliman.sch.id', (string) env('DEFAULT_ADMIN_PASSWORD', 'Admin@2026!')],
             ['Yayasan', 'Pengurus Yayasan', 'yayasan@dareliman.sch.id', (string) env('DEFAULT_YAYASAN_PASSWORD', 'Yayasan@2026!')],
+            ['Guru', 'Guru Test', 'guru@dareliman.sch.id', (string) env('DEFAULT_GURU_PASSWORD', 'Guru@2026!')],
             ['ketua_yayasan', 'Ketua Yayasan', 'ketua.yayasan@dareliman.sch.id', (string) env('DEFAULT_KETUA_YAYASAN_PASSWORD', 'Yayasan@2026!')],
             ['sekretaris_yayasan', 'Sekretaris Yayasan', 'sekretaris.yayasan@dareliman.sch.id', (string) env('DEFAULT_SEKRETARIS_YAYASAN_PASSWORD', 'Yayasan@2026!')],
             ['bendahara_yayasan', 'Bendahara Yayasan', 'bendahara.yayasan@dareliman.sch.id', (string) env('DEFAULT_BENDAHARA_YAYASAN_PASSWORD', 'Yayasan@2026!')],
@@ -246,9 +256,9 @@ class DefaultRoleUserSeeder extends Seeder
 
             if ($roleName !== 'Admin') {
                 Employee::query()->updateOrCreate(
-                    ['niy' => 'TEST-LEGACY-NIY-'.str_pad((string) ($legacyIndex + 1), 2, '0', STR_PAD_LEFT)],
+                    ['user_id' => $user->id],
                     [
-                        'user_id' => $user->id,
+                        'niy' => Employee::where('user_id', $user->id)->value('niy') ?? ('TEST-LEGACY-NIY-'.str_pad((string) ($legacyIndex + 1), 2, '0', STR_PAD_LEFT)),
                         'role_id' => Role::query()->where('name', $roleName)->value('id'),
                         'unit_id' => $unit?->id,
                         'nama_lengkap' => $name,
@@ -264,7 +274,7 @@ class DefaultRoleUserSeeder extends Seeder
         }
 
         // === Konfigurasi Akun Super Admin: Mengisi Seluruh Role Akses Sistem & Memiliki Unit Utama ===
-        $superAdminUser = $users['Super Admin'] ?? User::where('email', 'superadmin@dareliman.sch.id')->first();
+        $superAdminUser = $users['Super Admin'] ?? User::where('email', 'superadmin@school-erp.local')->first() ?? User::where('email', 'superadmin@dareliman.sch.id')->first();
         if ($superAdminUser) {
             // 1. Berikan SELURUH role akses sistem yang ada di database kepada Super Admin
             $allRoleNames = Role::pluck('name')->toArray();

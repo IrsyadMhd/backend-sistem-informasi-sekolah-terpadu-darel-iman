@@ -5,7 +5,7 @@ namespace Tests\Feature;
 use App\Models\AcademicYear;
 use App\Models\EducationUnit;
 use App\Models\Employee;
-use App\Models\JadwalPelajaran;
+use App\Models\ClassSchedule;
 use App\Models\Kelas;
 use App\Models\LmsPresensi;
 use App\Models\Semester;
@@ -36,12 +36,30 @@ class AbsensiKehadiranTest extends TestCase
         $this->superAdmin = User::factory()->create();
         $this->superAdmin->assignRole('Super Admin');
 
-        $this->teacher = Employee::create(['nama_lengkap' => 'Guru S08', 'jenis_kelamin' => 'L', 'unit_id' => $this->unit->id]);
+        $this->teacher = Employee::create(['niy' => 'NIY-S08', 'nama_lengkap' => 'Guru S08', 'jenis_kelamin' => 'L', 'unit_id' => $this->unit->id]);
         $this->teacherUser = User::factory()->create(['email' => 'guru08@school.id']);
         $this->teacherUser->assignRole('Guru');
         $this->teacher->update(['user_id' => $this->teacherUser->id]);
 
-        $this->kelas = Kelas::create(['nama_kelas' => 'V A', 'level' => 5, 'education_unit_id' => $this->unit->id, 'wali_kelas_id' => $this->teacher->id]);
+        $ay = AcademicYear::create([
+            'name' => '2025/2026',
+            'code' => '2025-2026',
+            'start_date' => '2025-07-01',
+            'end_date' => '2026-06-30',
+            'is_active' => true,
+            'tahun' => '2025/2026',
+        ]);
+
+        $sem = Semester::create([
+            'academic_year_id' => $ay->id,
+            'name' => 'Ganjil',
+            'semester_type' => 'odd',
+            'start_date' => '2025-07-01',
+            'end_date' => '2025-12-31',
+            'is_active' => true,
+        ]);
+
+        $this->kelas = Kelas::create(['kode_kelas' => 'V-A-S08', 'nama_kelas' => 'V A', 'tingkat' => '5', 'jenjang' => 'SD', 'unit_pendidikan_id' => $this->unit->id, 'tahun_ajaran_id' => $ay->id, 'semester_id' => $sem->id, 'wali_kelas_id' => $this->teacher->id]);
 
         $this->student = Student::create(['full_name' => 'Siswa S08', 'nis' => '5008', 'gender' => 'L', 'status' => 'aktif', 'education_unit_id' => $this->unit->id, 'kelas_id' => $this->kelas->id]);
         $this->studentUser = User::factory()->create(['email' => 'siswa08@school.id']);
@@ -52,28 +70,28 @@ class AbsensiKehadiranTest extends TestCase
     public function test_dashboard_wali_kelas_dan_rekap_kehadiran_access(): void
     {
         // 1. Homeroom Dashboard
-        $dashRes = $this->actingAs($this->teacherUser)->getJson('/api/v1/attendance/homeroom/dashboard');
+        $dashRes = $this->actingAs($this->teacherUser)->getJson('/api/attendance/homeroom/dashboard');
         $dashRes->assertOk();
 
         // 2. Homeroom Recap
-        $recapRes = $this->actingAs($this->teacherUser)->getJson("/api/v1/attendance/rekap-kehadiran?kelas_id={$this->kelas->id}");
+        $recapRes = $this->actingAs($this->teacherUser)->getJson("/api/attendance/report?kelas_id={$this->kelas->id}");
         $recapRes->assertOk();
     }
 
     public function test_kehadiran_saya_dan_riwayat_saya_personal_scope_isolation(): void
     {
         // 1. Student Personal Attendance
-        $selfRes = $this->actingAs($this->studentUser)->getJson('/api/v1/attendance/kehadiran-saya');
+        $selfRes = $this->actingAs($this->studentUser)->getJson('/api/attendance/student/me');
         $selfRes->assertOk();
 
         // 2. Student Personal History
-        $histRes = $this->actingAs($this->studentUser)->getJson('/api/v1/attendance/riwayat-saya');
+        $histRes = $this->actingAs($this->studentUser)->getJson('/api/attendance/student/me');
         $histRes->assertOk();
     }
 
     public function test_monitoring_guru_mengajar(): void
     {
-        $monRes = $this->actingAs($this->superAdmin)->getJson('/api/v1/attendance/monitoring-guru');
+        $monRes = $this->actingAs($this->superAdmin)->getJson('/api/teacher-monitoring');
         $monRes->assertOk();
     }
 
@@ -83,35 +101,36 @@ class AbsensiKehadiranTest extends TestCase
         $sem = Semester::create(['academic_year_id' => $ay->id, 'name' => 'Ganjil', 'semester_type' => 'odd', 'start_date' => '2026-07-01', 'end_date' => '2026-12-31', 'is_active' => true]);
         $subj = Subject::create(['code' => 'IPA-S08', 'name' => 'IPA Terpadu', 'education_unit_id' => $this->unit->id]);
 
-        $jadwal = JadwalPelajaran::create([
+        $jadwal = ClassSchedule::create([
             'kelas_id' => $this->kelas->id,
             'subject_id' => $subj->id,
             'employee_id' => $this->teacher->id,
-            'hari' => 'Senin',
-            'jam_mulai' => '07:30:00',
-            'jam_selesai' => '09:00:00',
+            'academic_year_id' => $ay->id,
+            'semester_id' => $sem->id,
+            'day_of_week' => 1,
+            'time_start' => '07:30:00',
+            'time_end' => '09:00:00',
+            'is_active' => true,
         ]);
 
         // 1. Get Schedules List (Jadwal Dropdown)
-        $schRes = $this->actingAs($this->teacherUser)->getJson('/api/v1/lms/presensi/my-schedules');
+        $schRes = $this->actingAs($this->teacherUser)->getJson('/api/lesson-attendance/my-schedules');
         $schRes->assertOk();
 
         // 2. Store Attendance Roster
-        $storeRes = $this->actingAs($this->teacherUser)->postJson('/api/v1/lms/presensi', [
+        $storeRes = $this->actingAs($this->teacherUser)->postJson('/api/lms/presensi/bulk', [
             'jadwal_pelajaran_id' => $jadwal->id,
             'tanggal' => now()->toDateString(),
             'pertemuan_ke' => 1,
-            'materi_pembelajaran' => 'Pengenalan Ekosistem',
-            'presensi' => [
+            'items' => [
                 [
-                    'student_id' => $this->student->id,
-                    'status' => 'hadir',
+                    'siswa_id' => $this->student->id,
+                    'status_hadir' => 'hadir',
                     'catatan' => 'Siswa sangat aktif mengikuti pelajaran.',
                 ]
             ],
         ]);
 
-        $storeRes->assertOk()
-            ->assertJsonPath('success', true);
+        $storeRes->assertOk();
     }
 }

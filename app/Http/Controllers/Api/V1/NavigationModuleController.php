@@ -34,10 +34,11 @@ class NavigationModuleController extends Controller
         $allPermissions = $user->getAllPermissions()->pluck('name')->all();
         $roles = $user->getRoleNames()->all();
 
+        $cacheVersion = NavigationService::getCacheVersion();
         $modules = app()->runningUnitTests()
             ? $this->navigationService->getModulesForUser($user, $platform)
             : \Illuminate\Support\Facades\Cache::remember(
-                "user_nav_modules_{$user->id}_{$platform}_" . md5(implode(',', $roles) . '|' . implode(',', $allPermissions)),
+                "user_nav_modules_v{$cacheVersion}_{$user->id}_{$platform}_" . md5(implode(',', $roles) . '|' . implode(',', $allPermissions)),
                 180,
                 fn () => $this->navigationService->getModulesForUser($user, $platform)
             );

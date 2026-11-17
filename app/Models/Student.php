@@ -97,6 +97,16 @@ class Student extends Model
         return $this->belongsTo(EducationUnit::class, 'unit_id');
     }
 
+    public function pointTransactions()
+    {
+        return $this->hasMany(StudentPointTransaction::class, 'student_id');
+    }
+
+    public function warningLetters()
+    {
+        return $this->hasMany(StudentWarningLetter::class, 'student_id');
+    }
+
     public function bills()
     {
         return $this->hasMany(StudentBill::class, 'student_id');

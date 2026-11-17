@@ -248,4 +248,209 @@ class StudentStatusController extends Controller
             'message' => 'Status siswa berhasil dihapus.',
         ]);
     }
+
+    /**
+     * Impor batch data status siswa dari berkas Excel/CSV atau payload JSON.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        $this->assertCanManageStatus($request);
+
+        $rows = [];
+        $overwrite = $request->boolean('overwrite', false);
+
+        if ($request->hasFile('file')) {
+            $file = $request->file('file');
+            try {
+                $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+                $sheet = $spreadsheet->getActiveSheet();
+                $sheetData = $sheet->toArray(null, true, true, true);
+
+                if (! empty($sheetData)) {
+                    $headerRow = array_shift($sheetData);
+                    $headers = [];
+                    foreach ($headerRow as $colKey => $colName) {
+                        $colName = trim((string) $colName);
+                        if (! empty($colName)) {
+                            $headers[$colKey] = $colName;
+                        }
+                    }
+
+                    foreach ($sheetData as $row) {
+                        $rowData = [];
+                        $hasVal = false;
+                        foreach ($headers as $colKey => $colName) {
+                            $val = isset($row[$colKey]) ? trim((string) $row[$colKey]) : '';
+                            if ($val !== '') {
+                                $hasVal = true;
+                            }
+                            $rowData[$colName] = $val;
+                        }
+                        if ($hasVal) {
+                            $rows[] = $rowData;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'status' => 'error',
+                    'message' => 'Gagal membaca berkas Excel/CSV: '.$e->getMessage(),
+                ], 422);
+            }
+        } else {
+            $inputData = $request->input('data', $request->input('rows', []));
+            if (is_string($inputData)) {
+                $decoded = json_decode($inputData, true);
+                if (is_array($decoded)) {
+                    $rows = $decoded;
+                }
+            } elseif (is_array($inputData)) {
+                $rows = $inputData;
+            }
+        }
+
+        if (empty($rows)) {
+            return response()->json([
+                'success' => false,
+                'status' => 'error',
+                'message' => 'Payload data impor tidak boleh kosong.',
+            ], 422);
+        }
+
+        $berhasil = 0;
+        $diperbarui = 0;
+        $duplikat = 0;
+        $gagal = 0;
+        $errors = [];
+        $duplicates = [];
+
+        foreach ($rows as $index => $row) {
+            $rowNum = $index + 1;
+            $normalized = [];
+            foreach ($row as $k => $v) {
+                $cleanKey = strtolower(trim(str_replace([' ', '-', '/'], '_', (string) $k)));
+                $normalized[$cleanKey] = $v;
+            }
+
+            $code = strtolower(trim((string) (
+                $normalized['code'] ?? $normalized['kode'] ?? $normalized['kode_status'] ?? $row['code'] ?? ''
+            )));
+            $name = trim((string) (
+                $normalized['name'] ?? $normalized['nama'] ?? $normalized['nama_status'] ?? $row['name'] ?? ''
+            ));
+
+            if (empty($code) || empty($name)) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: Kode dan Nama status wajib diisi.";
+                continue;
+            }
+
+            $badgeColor = trim((string) ($normalized['badge_color'] ?? $normalized['warna'] ?? $row['badge_color'] ?? 'emerald'));
+            $order = isset($normalized['order']) ? (int) $normalized['order'] : (isset($row['order']) ? (int) $row['order'] : $rowNum);
+            $rawActive = $normalized['is_active'] ?? $normalized['status'] ?? $row['is_active'] ?? true;
+            $isActive = is_bool($rawActive) ? $rawActive : in_array(strtolower(trim((string) $rawActive)), ['1', 'true', 'aktif', 'active', 'ya']);
+            $description = $normalized['description'] ?? $normalized['deskripsi'] ?? $row['description'] ?? null;
+            if ($description === '-') {
+                $description = null;
+            }
+
+            try {
+                $existing = StudentStatus::withTrashed()
+                    ->where(function ($q) use ($code, $name) {
+                        $q->where('code', $code)
+                            ->orWhere('name', $name);
+                    })
+                    ->first();
+
+                if ($existing) {
+                    if ($overwrite) {
+                        if ($existing->trashed()) {
+                            $existing->restore();
+                        }
+                        $existing->update([
+                            'name' => $name,
+                            'badge_color' => $badgeColor ?: 'emerald',
+                            'order' => $order,
+                            'is_active' => $isActive,
+                            'description' => $description,
+                        ]);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $code,
+                            'nama' => $name,
+                            'status' => 'Ditimpa',
+                            'keterangan' => 'Data status siswa diperbarui dengan data impor terbaru.',
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $code,
+                            'nama' => $name,
+                            'status' => 'Dilewati',
+                            'keterangan' => 'Kode atau nama status sudah terdaftar di database.',
+                        ];
+                    }
+                    continue;
+                }
+
+                StudentStatus::create([
+                    'code' => $code,
+                    'name' => $name,
+                    'badge_color' => $badgeColor ?: 'emerald',
+                    'order' => $order,
+                    'is_active' => $isActive,
+                    'description' => $description,
+                ]);
+                $berhasil++;
+            } catch (\Exception $e) {
+                $gagal++;
+                $errors[] = "Baris {$rowNum}: ".$e->getMessage();
+            }
+        }
+
+        $resultData = [
+            'total' => count($rows),
+            'berhasil' => $berhasil,
+            'diperbarui' => $diperbarui,
+            'duplikat' => $duplikat,
+            'gagal' => $gagal,
+            'overwrite' => $overwrite,
+            'duplicates' => $duplicates,
+            'errors' => $errors,
+        ];
+
+        return response()->json([
+            'success' => true,
+            'status' => 'success',
+            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Ditimpa: {$diperbarui}, Dilewati: {$duplikat}, Gagal: {$gagal}.",
+            'data' => $resultData,
+        ]);
+    }
+
+    /**
+     * Unduh berkas format template CSV untuk impor status siswa.
+     */
+    public function importTemplate(): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $headers = ['code', 'name', 'badge_color', 'order', 'is_active', 'description'];
+        $sample = [
+            ['aktif', 'Aktif', 'emerald', '1', 'true', 'Siswa aktif mengikuti proses belajar mengajar'],
+            ['lulus', 'Lulus', 'blue', '2', 'true', 'Siswa telah menyelesaikan pendidikan dan tamat'],
+            ['mutasi', 'Mutasi Keluar', 'amber', '3', 'true', 'Siswa pindah ke satuan pendidikan lain'],
+        ];
+
+        return response()->streamDownload(function () use ($headers, $sample) {
+            $handle = fopen('php://output', 'w');
+            fputcsv($handle, $headers);
+            foreach ($sample as $row) {
+                fputcsv($handle, $row);
+            }
+            fclose($handle);
+        }, 'Template_Import_Status_Siswa.csv', [
+            'Content-Type' => 'text/csv',
+        ]);
+    }
 }

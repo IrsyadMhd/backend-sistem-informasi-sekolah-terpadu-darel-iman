@@ -25,9 +25,6 @@ class AccessScopeService
         'pengurus_yayasan', 'Pengurus Yayasan',
         'Sekretaris Yayasan', 'sekretaris_yayasan',
         'Bendahara Yayasan', 'bendahara_yayasan',
-        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
-        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan',
-        'Divisi Kurikulum', 'Divisi Kesiswaan',
     ];
 
     /**
@@ -54,13 +51,6 @@ class AccessScopeService
         'Super Admin', 'Superadmin', 'super_admin', 'super-admin',
         'Admin', 'admin',
         'pengurus_yayasan', 'Pengurus Yayasan', 'pengurus-yayasan',
-    ];
-
-    private const UNIT_ACCESS_MANAGER_ROLES = [
-        'Divisi Pendidikan', 'divisi_pendidikan', 'divisi-pendidikan',
-        'Kepala Bidang Pendidikan', 'kepala_bidang_pendidikan', 'kepala-bidang-pendidikan',
-        'Kepala Sekolah', 'kepala_sekolah', 'kepala-sekolah', 'Kepsek', 'kepsek',
-        'Tata Usaha', 'TU', 'tu', 'tata_usaha', 'tata-usaha',
     ];
 
     private const GLOBAL_ROLE_NAMES = [
@@ -99,7 +89,10 @@ class AccessScopeService
      */
     public function hasGlobalScope(User $user): bool
     {
-        return $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES);
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        return ($policy['scope_type'] ?? '') === 'global'
+            || $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES);
     }
 
     /**
@@ -108,35 +101,87 @@ class AccessScopeService
      */
     public function isAboveTu(User $user): bool
     {
-        return $this->hasAnyRole($user, self::ABOVE_TU_ROLES);
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        return (bool) ($policy['is_above_tu'] ?? false)
+            || in_array($policy['scope_type'] ?? '', ['global', 'cross_unit'], true)
+            || $this->hasAnyRole($user, self::ABOVE_TU_ROLES);
+    }
+
+    private function hasAnyPermission(User $user, array $permissions): bool
+    {
+        foreach ($permissions as $permission) {
+            try {
+                if ($user->checkPermissionTo((string) $permission)) {
+                    return true;
+                }
+            } catch (\Throwable) {
+                // Abaikan bila tabel/record permission belum di-seed pada DB uji terisolasi.
+            }
+        }
+
+        return false;
+    }
+
+    private function minRoleLevel(User $user): int
+    {
+        $level = $user->roles()->min('level');
+
+        return $level !== null ? (int) $level : 99;
     }
 
     /**
-     * Hanya role ini yang boleh mengubah definisi akses global dan seluruh
-     * data pegawai/unit.
+     * Hanya role/permission tata kelola global yang boleh mengubah definisi akses
+     * sistem secara menyeluruh. Diperiksa dinamis berbasis role DB & permission.
      */
     public function canManageGlobalAccess(User $user): bool
     {
-        return $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES);
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        return (bool) ($policy['can_manage_global_access'] ?? false)
+            || $this->hasAnyRole($user, self::GLOBAL_ACCESS_MANAGER_ROLES)
+            || $this->hasAnyPermission($user, ['sistem.hak_akses', 'permission.manage', 'role.manage'])
+            || $this->minRoleLevel($user) === 1;
     }
 
     /**
-     * Pengelola unit boleh mengatur assignment lokal, tetapi tidak definisi
-     * role/permission global.
+     * Kewenangan mengelola assignment role/hak akses pegawai dalam cakupan unit.
+     * Resolved dinamis dari permission `employee.role_access.manage` (atau global access),
+     * bukan daftar role yang di-hardcode.
      */
     public function canManageUnitAccess(User $user): bool
     {
-        return $this->hasAnyRole($user, self::UNIT_ACCESS_MANAGER_ROLES);
+        return $this->canManageGlobalAccess($user)
+            || $this->hasAnyPermission($user, ['employee.role_access.manage']);
     }
 
     /**
-     * Apakah user memiliki role supervisor/pimpinan (Super Admin, Yayasan, Kepsek, Divisi, TU)?
+     * Kewenangan mengelola jabatan/posisi operasional pegawai per unit.
+     */
+    public function canManageUnitPositions(User $user): bool
+    {
+        return $this->canManageUnitAccess($user)
+            || $this->hasAnyPermission($user, ['employee.position.manage', 'jabatan.manage', 'jabatan.view', 'employee.update']);
+    }
+
+    /**
+     * Apakah user memiliki role/kapabilitas supervisor/pimpinan atau operator unit?
      */
     public function isSupervisor(User $user): bool
     {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        $isSupervisorPortal = in_array(
+            $policy['portal_group'] ?? '',
+            ['super_admin', 'admin', 'foundation', 'education', 'principal', 'waka', 'tu', 'operator'],
+            true
+        );
+
         return $this->hasGlobalScope($user)
             || $this->isAboveTu($user)
-            || $this->canManageUnitAccess($user);
+            || $isSupervisorPortal
+            || $this->canManageAccess($user)
+            || $this->hasAnyPermission($user, ['dashboard.tata-usaha.view', 'dashboard.operator.view', 'lms.manage', 'academic.manage'])
+            || $this->minRoleLevel($user) <= 5;
     }
 
     /**
@@ -144,6 +189,11 @@ class AccessScopeService
      */
     public function isTeacher(User $user): bool
     {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        if (in_array($policy['portal_group'] ?? '', ['teacher', 'musyrif'], true)) {
+            return true;
+        }
+
         return $this->hasAnyRole($user, [
             'Guru', 'guru', 'Guru Mata Pelajaran', 'guru_mata_pelajaran',
             'Wali Kelas', 'wali_kelas', 'wali-kelas',
@@ -157,6 +207,11 @@ class AccessScopeService
      */
     public function isStaffOrTeacher(User $user): bool
     {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        if (in_array($policy['portal_group'] ?? '', ['staff'], true) && ($policy['role_level'] ?? 99) <= 7) {
+            return true;
+        }
+
         return $this->isSupervisor($user)
             || $this->isTeacher($user)
             || $this->hasAnyRole($user, ['Operator', 'operator', 'Admin', 'admin']);
@@ -205,8 +260,15 @@ class AccessScopeService
             return;
         }
 
+        $targetRole = \App\Models\Role::query()->where('name', $roleName)->first();
+        $isGlobalDbRole = $targetRole && (
+            $targetRole->scope_type === 'global'
+            || (bool) $targetRole->can_manage_global_access
+            || (int) ($targetRole->level ?? 99) <= 2
+        );
+
         abort_if(
-            $this->hasAnyRoleName($roleName, self::GLOBAL_ROLE_NAMES),
+            $isGlobalDbRole || $this->hasAnyRoleName($roleName, self::GLOBAL_ROLE_NAMES),
             403,
             'Pengelola unit tidak dapat menetapkan role global.'
         );
@@ -256,7 +318,7 @@ class AccessScopeService
         }
 
         abort_unless(
-            $this->canManageUnitAccess($user)
+            $this->canManageUnitPositions($user)
                 && $this->accessiblePositions($user)->whereKey($positionId)->exists(),
             403,
             'Jabatan berada di luar cakupan unit akun.'
@@ -270,6 +332,23 @@ class AccessScopeService
     public function assertEmployeeAssignment(User $user, Employee $employee, ?string $positionId = null): void
     {
         $this->assertAccessManagement($user);
+
+        abort_unless(
+            $this->accessibleEmployees($user)->whereKey($employee->id)->exists(),
+            403,
+            'Pegawai berada di luar cakupan unit akun.'
+        );
+
+        $this->assertPositionAssignment($user, $positionId);
+    }
+
+    public function assertEmployeePositionAssignment(User $user, Employee $employee, ?string $positionId = null): void
+    {
+        abort_unless(
+            $this->canManageUnitPositions($user),
+            403,
+            'Akun tidak memiliki kewenangan untuk mengelola jabatan pegawai.'
+        );
 
         abort_unless(
             $this->accessibleEmployees($user)->whereKey($employee->id)->exists(),
@@ -296,7 +375,7 @@ class AccessScopeService
         }
 
         abort_unless(
-            $this->canManageUnitAccess($user),
+            $this->canManageUnitPositions($user),
             403,
             'Hanya pengelola unit yang dapat mengubah jabatan unit.'
         );
@@ -333,11 +412,13 @@ class AccessScopeService
      */
     public function accessibleEducationUnits(User $user): Builder
     {
-        if ($this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+
+        if (($policy['scope_type'] ?? '') === 'global' || $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
             return EducationUnit::query();
         }
 
-        if ($this->hasAnyRole($user, [
+        if (($policy['scope_type'] ?? '') === 'cross_unit' || $this->hasAnyRole($user, [
             'Kepala Bidang Pendidikan',
             'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
             'Divisi Program Khusus', 'divisi_pendidikan',
@@ -367,8 +448,8 @@ class AccessScopeService
                 ->pluck('id');
             $unitIds = $unitIds->merge($metadataManagedUnits);
 
-            // Unit dari rombel yang diajar lewat jadwal atau di-walikelasi (hanya untuk guru murni, bukan pimpinan/staf administrasi unit)
-            if (! $this->hasAnyRole($user, [
+            // Unit dari rombel yang diajar lewat jadwal atau di-walikelasi (hanya fallback jika employee belum memiliki unit_id terpasang)
+            if ($unitIds->isEmpty() && ! $this->hasAnyRole($user, [
                 'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
                 'Wakil Kepala Sekolah', 'Wakil Kurikulum', 'Waka Kurikulum', 'waka_kurikulum',
                 'Wakil Kesiswaan', 'Waka Kesiswaan', 'waka_kesiswaan',
@@ -399,6 +480,45 @@ class AccessScopeService
         }
 
         $unitIds = $unitIds->filter()->unique();
+
+        // Khusus Guru Musyrif / Musyrifah: Hanya dapat melihat unit pendidikan bertipe boarding (pesantren/asrama), tidak bisa fullday.
+        $isMusyrifOnly = $this->hasAnyRole($user, [
+            'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah', 'Musyrif / Musyrifah',
+        ]) && ! $this->hasAnyRole($user, array_merge(self::GLOBAL_SCOPE_ROLES, [
+            'Kepala Sekolah', 'kepala_sekolah', 'kepsek',
+            'Tata Usaha', 'TU', 'tu', 'tata_usaha',
+        ]));
+
+        if ($isMusyrifOnly) {
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $boardingScope = function ($q) use ($likeOp) {
+                $q->where(function ($sub) use ($likeOp) {
+                    $sub->where('program_type', 'boarding')
+                        ->orWhere('name', $likeOp, '%ponpes%')
+                        ->orWhere('name', $likeOp, '%asrama%')
+                        ->orWhere('name', $likeOp, '%pesantren%')
+                        ->orWhere('name', $likeOp, "%ma'had%")
+                        ->orWhere('name', $likeOp, '%mahad%')
+                        ->orWhere('code', $likeOp, '%ponpes%')
+                        ->orWhere('code', $likeOp, '%asrama%')
+                        ->orWhere('code', $likeOp, '%mahad%');
+                });
+            };
+
+            if ($unitIds->isNotEmpty()) {
+                $assignedBoardingIds = EducationUnit::query()
+                    ->whereIn('id', $unitIds)
+                    ->where($boardingScope)
+                    ->pluck('id');
+
+                if ($assignedBoardingIds->isNotEmpty()) {
+                    return EducationUnit::query()->whereIn('id', $assignedBoardingIds);
+                }
+            }
+
+            return EducationUnit::query()->where($boardingScope);
+        }
+
         if ($unitIds->isNotEmpty()) {
             return EducationUnit::query()->whereIn('id', $unitIds);
         }
@@ -421,6 +541,16 @@ class AccessScopeService
         }
 
         return EducationUnit::query()->whereRaw('1 = 0');
+    }
+
+    /**
+     * Dapatkan daftar ID unit pendidikan yang berhak diakses user.
+     *
+     * @return array<string>
+     */
+    public function getAccessibleUnitIds(User $user): array
+    {
+        return $this->accessibleEducationUnits($user)->pluck('id')->toArray();
     }
 
     /**
@@ -450,8 +580,9 @@ class AccessScopeService
             ->first();
 
         if ($employee || $teacher) {
-            // Rombel yang diajar atau di-walikelasi
+            // Rombel yang diajar atau di-walikelasi (terkunci ke unit_id pegawai bila terpasang)
             $teachingRombelIds = ClassSchedule::query()
+                ->when($employee?->unit_id, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $employee->unit_id)))
                 ->where(function ($q) use ($employee, $teacher) {
                     if ($employee && $teacher) {
                         $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
@@ -468,6 +599,7 @@ class AccessScopeService
                 ->unique();
 
             $homeroomRombelIds = Kelas::query()
+                ->when($employee?->unit_id, fn ($q) => $q->where('unit_pendidikan_id', $employee->unit_id))
                 ->where(function ($q) use ($employee, $teacher) {
                     if ($employee) {
                         $q->where('wali_kelas_id', $employee->id);
@@ -534,9 +666,20 @@ class AccessScopeService
             'Guru Tahfizh', 'guru_tahfizh', 'Musyrif', 'musyrif', 'Musyrifah', 'musyrifah', 'Guru', 'guru',
         ])) {
             $rombelIds = $this->accessibleRombels($user)->pluck('id');
-            return Student::query()->where(function ($query) use ($rombelIds) {
+            $employee = Employee::query()->where('user_id', $user->id)->first();
+            $employeeId = $employee?->id;
+
+            return Student::query()->where(function ($query) use ($rombelIds, $user, $employeeId) {
                 $query->whereIn('kelas_id', $rombelIds)
                     ->orWhereIn('class_id', $rombelIds);
+
+                if ($this->hasAnyRole($user, ['Musyrif', 'musyrif', 'Musyrifah', 'musyrifah'])) {
+                    $query->orWhere('metadata->musyrif', 'like', '%' . $user->name . '%')
+                        ->orWhere('metadata->musyrif_id', $user->id);
+                    if ($employeeId) {
+                        $query->orWhere('metadata->musyrif_employee_id', $employeeId);
+                    }
+                }
             });
         }
 
@@ -577,7 +720,8 @@ class AccessScopeService
      */
     public function accessibleEmployees(User $user): Builder
     {
-        if ($this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
+        $policy = \App\Support\RolePolicyDefaults::resolveUserPolicy($user);
+        if (($policy['scope_type'] ?? '') === 'global' || $this->hasAnyRole($user, self::GLOBAL_SCOPE_ROLES)) {
             return Employee::query();
         }
 
@@ -610,15 +754,17 @@ class AccessScopeService
             ->first();
 
         if ($employee || $teacher) {
-            return ClassSchedule::query()->where(function ($q) use ($employee, $teacher) {
-                if ($employee && $teacher) {
-                    $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
-                } elseif ($teacher) {
-                    $q->where('teacher_id', $teacher->id);
-                } elseif ($employee) {
-                    $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id);
-                }
-            });
+            return ClassSchedule::query()
+                ->when($employee?->unit_id, fn ($q) => $q->whereHas('kelas', fn ($k) => $k->where('unit_pendidikan_id', $employee->unit_id)))
+                ->where(function ($q) use ($employee, $teacher) {
+                    if ($employee && $teacher) {
+                        $q->where('employee_id', $employee->id)->orWhere('teacher_id', $teacher->id);
+                    } elseif ($teacher) {
+                        $q->where('teacher_id', $teacher->id);
+                    } elseif ($employee) {
+                        $q->where('employee_id', $employee->id)->orWhere('teacher_id', $employee->id);
+                    }
+                });
         }
 
         $rombelIds = $this->accessibleRombels($user)->pluck('id');
@@ -703,22 +849,20 @@ class AccessScopeService
             }
         }
 
-        // Jika akun memiliki kewenangan lintas-unit (data_scope cross_unit atau permission report.cross_unit.view / Divisi Pendidikan),
-        // berikan akses ke seluruh unit pendidikan aktif yang terdaftar di database yayasan
-        $dataScope = data_get($metadata, 'data_scope');
-        if (
-            $dataScope === 'cross_unit_read' ||
-            $dataScope === 'cross_unit' ||
-            $dataScope === 'semua_unit' ||
-            $user->can('report.cross_unit.view') ||
-            $this->hasAnyRole($user, ['Divisi Pendidikan', 'divisi_pendidikan', 'Kepala Bidang Pendidikan'])
-        ) {
-            return EducationUnit::query()->where('is_active', true)->pluck('id');
-        }
-
         $employeeUnitId = Employee::query()
             ->where('user_id', $user->id)
             ->value('unit_id');
+
+        // Jika metadata akun secara eksplisit menetapkan data_scope lintas-unit,
+        // atau akun bidang pendidikan belum terikat pada satu unit pegawai spesifik
+        // dan memiliki izin report.cross_unit.view, kembalikan unit aktif.
+        $dataScope = data_get($metadata, 'data_scope');
+        if (
+            in_array($dataScope, ['cross_unit_read', 'cross_unit', 'semua_unit'], true)
+            || (! $employeeUnitId && $this->hasAnyPermission($user, ['report.cross_unit.view']))
+        ) {
+            return EducationUnit::query()->where('is_active', true)->pluck('id');
+        }
 
         return collect([$employeeUnitId])->filter()->values();
     }

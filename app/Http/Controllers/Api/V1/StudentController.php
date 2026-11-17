@@ -719,7 +719,14 @@ class StudentController extends Controller
         @set_time_limit(300);
         @ini_set('memory_limit', '512M');
 
+        $overwrite = filter_var($request->input('overwrite', false), FILTER_VALIDATE_BOOLEAN);
         $rows = $request->input('data', []);
+        if (is_string($rows)) {
+            $decoded = json_decode($rows, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $rows = $decoded;
+            }
+        }
 
         if ($request->hasFile('file')) {
             $file = $request->file('file');
@@ -798,9 +805,11 @@ class StudentController extends Controller
         $allClasses = Kelas::all();
 
         $berhasil = 0;
+        $diperbarui = 0;
         $gagal = 0;
         $duplikat = 0;
         $errors = [];
+        $duplicates = [];
 
         foreach ($rows as $index => $row) {
             $rowNum = $index + 1;
@@ -816,20 +825,8 @@ class StudentController extends Controller
 
             $nama = preg_replace('/\s+/', ' ', $nama);
             $nis = preg_replace('/\s+/', ' ', $nis);
-
-            if (Student::withTrashed()->where('nis', $nis)->exists()) {
-                $duplikat++;
-                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NIS '{$nis}' sudah terdaftar.";
-                continue;
-            }
-
             $cleanNisn = trim((string)$nisn);
             $cleanNisn = ($cleanNisn !== '' && $cleanNisn !== '-' && $cleanNisn !== '0') ? $cleanNisn : null;
-            if ($cleanNisn && Student::withTrashed()->where('nisn', $cleanNisn)->exists()) {
-                $duplikat++;
-                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NISN '{$cleanNisn}' sudah terdaftar.";
-                continue;
-            }
 
             // Resolve Unit ID safely to prevent UUID cast errors in PostgreSQL
             $unitVal = $row['unit_id'] ?? $row['unit'] ?? $row['unitpendidikan'] ?? null;
@@ -849,12 +846,6 @@ class StudentController extends Controller
                 }
             }
 
-            if ($resolvedUnitId && Student::withTrashed()->where('unit_id', $resolvedUnitId)->where('nis', $nis)->exists()) {
-                $duplikat++;
-                $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NIS '{$nis}' sudah terdaftar pada unit tersebut.";
-                continue;
-            }
-
             // Resolve Kelas ID safely to prevent UUID cast errors in PostgreSQL
             $classVal = $row['kelas_id'] ?? $row['kelas'] ?? $row['keterangankelas'] ?? $row['rombel'] ?? null;
             $resolvedKelasId = null;
@@ -870,6 +861,61 @@ class StudentController extends Controller
                         return $unitMatch && ($cleanClass === $cName || str_contains($cleanClass, $cName));
                     });
                     $resolvedKelasId = $matchedClass?->id;
+                }
+            }
+
+            // Check existing student
+            $existing = null;
+            if (! empty($nis)) {
+                $existing = Student::withTrashed()->where('nis', $nis)->first();
+            }
+            if (! $existing && $cleanNisn) {
+                $existing = Student::withTrashed()->where('nisn', $cleanNisn)->first();
+            }
+
+            if ($existing) {
+                if ($overwrite) {
+                    try {
+                        if ($existing->trashed()) {
+                            $existing->restore();
+                        }
+                        $updateData = [
+                            'full_name' => $nama,
+                            'gender' => in_array(strtolower($row['gender'] ?? $row['jeniskelamin'] ?? ''), ['female', 'p', 'perempuan']) ? 'female' : 'male',
+                            'is_active' => true,
+                        ];
+                        if ($cleanNisn) $updateData['nisn'] = $cleanNisn;
+                        if ($resolvedUnitId) $updateData['unit_id'] = $resolvedUnitId;
+                        if ($resolvedKelasId) $updateData['kelas_id'] = $resolvedKelasId;
+                        if (! empty($row['birth_date'])) $updateData['birth_date'] = $row['birth_date'];
+                        if (! empty($row['birth_place'])) $updateData['birth_place'] = $row['birth_place'];
+                        if (! empty($row['address']) || ! empty($row['alamatsiswa'])) $updateData['address'] = $row['address'] ?? $row['alamatsiswa'];
+
+                        $existing->update($updateData);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $nis,
+                            'nama' => $nama,
+                            'status' => 'Ditimpa',
+                            'keterangan' => 'Data siswa berhasil diperbarui (ditimpa).',
+                        ];
+                    } catch (\Throwable $e) {
+                        $gagal++;
+                        $errors[] = "Baris {$rowNum}: Gagal memperbarui siswa '{$nama}': " . $e->getMessage();
+                    }
+                    continue;
+                } else {
+                    $duplikat++;
+                    $duplicates[] = [
+                        'baris' => $rowNum,
+                        'kode' => $nis,
+                        'nama' => $nama,
+                        'status' => 'Dilewati',
+                        'keterangan' => "Siswa dengan NIS '{$nis}' atau NISN '{$cleanNisn}' sudah terdaftar (mode timpa tidak aktif).",
+                    ];
+                    $errors[] = "Baris {$rowNum}: Siswa '{$nama}' dilewati karena NIS '{$nis}' atau NISN sudah terdaftar.";
+                    continue;
                 }
             }
 
@@ -897,6 +943,13 @@ class StudentController extends Controller
                 $berhasil++;
             } catch (\Illuminate\Database\UniqueConstraintViolationException $ue) {
                 $duplikat++;
+                $duplicates[] = [
+                    'baris' => $rowNum,
+                    'kode' => $nis,
+                    'nama' => $nama,
+                    'status' => 'Dilewati',
+                    'keterangan' => "Siswa '{$nama}' (NIS: {$nis}) dilewati karena kunci unik sudah ada.",
+                ];
                 $errors[] = "Baris {$rowNum}: Siswa '{$nama}' (NIS: {$nis}) dilewati karena terdapat kunci unik (NIS/NISN) yang sudah terdaftar.";
                 continue;
             } catch (\Throwable $e) {
@@ -907,12 +960,15 @@ class StudentController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Duplikat/Skip: {$duplikat}, Gagal: {$gagal}.",
+            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Diperbarui: {$diperbarui}, Duplikat/Skip: {$duplikat}, Gagal: {$gagal}.",
             'data' => [
                 'total' => count($rows),
                 'berhasil' => $berhasil,
+                'diperbarui' => $diperbarui,
                 'duplikat' => $duplikat,
                 'gagal' => $gagal,
+                'overwrite' => $overwrite,
+                'duplicates' => $duplicates,
                 'errors' => $errors,
             ],
         ]);

@@ -82,15 +82,22 @@ class MasterKurikulumRepository implements MasterKurikulumRepositoryInterface
         return (bool) $item->restore();
     }
 
-    public function getStats(): array
+    public function getStats(array $filters = []): array
     {
-        $total = MasterKurikulum::count();
-        $aktif = MasterKurikulum::where('status', true)->count();
-        $tidakAktif = MasterKurikulum::where('status', false)->count();
-        $terhapus = MasterKurikulum::onlyTrashed()->count();
+        $scopeFilters = collect($filters)
+            ->only(['unit_pendidikan_id', 'unit_ids', 'tahun_ajaran_id', 'jenis_kurikulum', 'jenjang'])
+            ->all();
+
+        $baseQuery = fn () => MasterKurikulum::query()->filter($scopeFilters);
+
+        $total = $baseQuery()->count();
+        $aktif = $baseQuery()->where('status', true)->count();
+        $tidakAktif = $baseQuery()->where('status', false)->count();
+        $terhapus = $baseQuery()->onlyTrashed()->count();
 
         // Breakdown per Jenis Kurikulum
-        $perJenis = MasterKurikulum::selectRaw('jenis_kurikulum, count(*) as count')
+        $perJenis = $baseQuery()
+            ->selectRaw('jenis_kurikulum, count(*) as count')
             ->groupBy('jenis_kurikulum')
             ->pluck('count', 'jenis_kurikulum')
             ->toArray();

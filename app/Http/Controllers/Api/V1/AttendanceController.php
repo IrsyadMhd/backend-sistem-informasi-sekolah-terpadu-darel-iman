@@ -603,7 +603,8 @@ class AttendanceController extends Controller
 
         // Filter tipe_presensi (Pegawai / Siswa)
         if ($request->filled('tipe_presensi')) {
-            $query->where('tipe_presensi', (string) $request->query('tipe_presensi'));
+            $tp = strtolower(trim((string) $request->query('tipe_presensi')));
+            $query->whereRaw('LOWER(tipe_presensi) = ?', [$tp]);
         }
 
         if ($request->filled('student_id')) {

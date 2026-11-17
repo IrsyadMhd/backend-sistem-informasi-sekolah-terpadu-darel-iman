@@ -54,17 +54,23 @@ class MutabaahDailyService
         if ($assignments->isEmpty() && $employeeId) {
             $classSchedules = ClassSchedule::query()
                 ->where('employee_id', $employeeId)
-                ->whereNotNull('class_id')
+                ->where(fn ($q) => $q->whereNotNull('kelas_id')->orWhereNotNull('class_id'))
                 ->where(fn ($q) => $q->where('is_active', true)->orWhereNull('is_active'))
                 ->get();
 
             $activeYearId = AcademicYear::where('is_active', true)->value('id');
             $activeSemId = Semester::where('is_active', true)->value('id');
 
-            foreach ($classSchedules->unique('class_id') as $sched) {
-                $cls = Kelas::find($sched->class_id);
-                $unit = $cls?->unit_pendidikan_id ?: $unitId;
-                if (! $unit || ! $activeYearId || ! $activeSemId) continue;
+            foreach ($classSchedules->unique(fn ($sched) => $sched->kelas_id ?: $sched->class_id) as $sched) {
+                $rombelId = $sched->kelas_id ?: $sched->class_id;
+                $cls = $rombelId ? Kelas::find($rombelId) : null;
+                if (! $cls) {
+                    continue;
+                }
+                $unit = $cls->unit_pendidikan_id ?: $unitId;
+                if (! $unit || ! $activeYearId || ! $activeSemId) {
+                    continue;
+                }
 
                 $tplId = MutabaahTemplate::query()
                     ->where(fn ($q) => $q->where('education_unit_id', $unit)->orWhereNull('education_unit_id'))
@@ -73,7 +79,7 @@ class MutabaahDailyService
                 MutabaahSupervisorAssignment::firstOrCreate(
                     [
                         'employee_id' => $employeeId,
-                        'rombel_id' => $sched->class_id,
+                        'rombel_id' => $cls->id,
                         'academic_year_id' => $activeYearId,
                         'semester_id' => $activeSemId,
                     ],

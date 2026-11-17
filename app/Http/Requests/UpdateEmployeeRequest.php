@@ -57,7 +57,7 @@ class UpdateEmployeeRequest extends FormRequest
         $employeeId = $this->route('employee') ?? $this->route('id');
 
         $accessScope = app(AccessScopeService::class);
-        if ($this->user() && $accessScope->canManageUnitAccess($this->user()) && ! $accessScope->canManageGlobalAccess($this->user())) {
+        if ($this->user() && $accessScope->canManageUnitPositions($this->user()) && ! $accessScope->canManageGlobalAccess($this->user())) {
             return [
                 'jabatan_id' => ['required', 'uuid', 'exists:positions,id'],
             ];

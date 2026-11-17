@@ -35,6 +35,9 @@ use App\Models\DormitoryPermit;
 use App\Models\StudentBill;
 use App\Models\StudentGrade;
 use App\Models\StudentNote;
+use App\Models\StudentPointTransaction;
+use App\Models\DisciplineThresholdRule;
+use App\Models\StudentWarningLetter;
 use App\Models\Subject;
 use App\Models\WorshipAttendanceDetail;
 use App\Models\WorshipAttendanceSession;
@@ -3346,7 +3349,13 @@ class StudentParentPortalController extends Controller
             }
         }
 
-        if (! $student && ! $isParentUser && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
+        $hasStaffCalendarPermission = $user && (
+            $user->checkPermissionTo('pembelajaran.kalender_pendidikan')
+            || $user->checkPermissionTo('sekolah.informasi_sekolah')
+            || $user->checkPermissionTo('portal.view')
+        );
+
+        if (! $student && ! $isParentUser && ! $hasStaffCalendarPermission && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
@@ -3447,7 +3456,13 @@ class StudentParentPortalController extends Controller
             }
         }
 
-        if (! $student && ! $isParentUser && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
+        $hasStaffCalendarPermission = $user && (
+            $user->checkPermissionTo('pembelajaran.kalender_pendidikan')
+            || $user->checkPermissionTo('sekolah.informasi_sekolah')
+            || $user->checkPermissionTo('portal.view')
+        );
+
+        if (! $student && ! $isParentUser && ! $hasStaffCalendarPermission && ! ($user && $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Yayasan', 'yayasan', 'Pengurus', 'pengurus', 'Guru', 'guru', 'Teacher', 'teacher', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'tata_usaha', 'Musyrif', 'musyrif', 'Staff', 'staff']))) {
             return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
         }
 
@@ -4659,9 +4674,263 @@ class StudentParentPortalController extends Controller
      * dikirim ke user-id sembarang (mis. wali/siswa lain).
      */
     /**
+     * Resolusi daftar kontak chat yang sah untuk santri tertentu:
+     * 1. Wali Kelas & Guru Mapel aktif pada kelas santri
+     * 2. Guru yang mencatat buku penghubung (StudentNote)
+     * 3. Jika belum ada kontak Wali Kelas atau Guru Mapel, tampilkan Tata Usaha (TU)
+     *    dan Operator pada unit pendidikan santri tersebut
+     * 4. Fallback terakhir ke guru aktif unit bila semua di atas belum tersedia
+     */
+    private function buildStudentChatContactsMap(Student $student, ?string $excludeUserId = null): array
+    {
+        $contactsMap = [];
+        $hasPrimaryTeacher = false;
+
+        $kelasId = $student->kelas_id ?? $student->class_id;
+        $kelas = null;
+        if ($kelasId && Str::isUuid($kelasId)) {
+            $kelas = Kelas::query()->with(['waliKelas.user', 'unitPendidikan'])->find($kelasId);
+        }
+
+        $resolvedUnitId = $student->unit_id
+            ?? $kelas?->unit_pendidikan_id
+            ?? $student->kelas?->unit_pendidikan_id
+            ?? null;
+        $resolvedUnitName = $student->educationUnit?->name
+            ?? $student->kelas?->unitPendidikan?->name
+            ?? $kelas?->unitPendidikan?->name
+            ?? $student->kelas?->unit_pendidikan?->name
+            ?? $student->unit_name
+            ?? null;
+        $resolvedClassName = $student->kelas?->nama_kelas ?? ($kelas?->nama_kelas ?? null);
+
+        $allowedTeacherRoles = [
+            'Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Guru Tahfizh', 'Wali Kelas',
+            'Teacher', 'Guru BK', 'Musyrif', 'Musyrifah', 'Musyrif / Musyrifah', 'Pembimbing',
+        ];
+        $disallowedTeacherRoles = [
+            'Yayasan', 'Ketua Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Pengurus Yayasan',
+            'Kepala Sekolah', 'Wakil Kepala Sekolah', 'Tata Usaha', 'TU', 'Admin', 'Super Admin',
+            'Operator', 'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
+            'Divisi Program Khusus', 'Kepala Bidang Pendidikan', 'Waka Kurikulum', 'Waka Kesiswaan',
+        ];
+
+        if ($kelas) {
+            // 1a. Wali kelas
+            $waliKelasEmp = $kelas->waliKelas;
+            $waliUser = $waliKelasEmp?->user;
+            if (! $waliUser && $waliKelasEmp?->email) {
+                $waliUser = User::query()->where('email', $waliKelasEmp->email)->first();
+            }
+
+            if ($waliUser && (! $excludeUserId || (string) $waliUser->id !== $excludeUserId)) {
+                $hasPrimaryTeacher = true;
+                $contactsMap[$waliUser->id] = [
+                    'user_id' => $waliUser->id,
+                    'name' => $waliKelasEmp?->nama_lengkap ?? $waliUser->name ?? null,
+                    'photo' => $waliUser->avatar_url ?? null,
+                    'role' => 'Wali Kelas',
+                    'teacher_type' => 'wali_kelas',
+                    'subject' => 'Wali Kelas' . ($kelas->nama_kelas ? ' (' . $kelas->nama_kelas . ')' : ''),
+                    'class_name' => $kelas->nama_kelas ?? null,
+                    'unit_name' => $resolvedUnitName,
+                    'student_id' => $student->id,
+                    'student_name' => $student->full_name,
+                    'last_message' => null,
+                    'last_message_at' => null,
+                    'unread_count' => 0,
+                ];
+            }
+
+            // 1b. Guru mapel pada jadwal aktif kelas
+            $schedules = ClassSchedule::query()
+                ->with(['subject', 'employee.user.roles', 'teacher.user.roles'])
+                ->where(fn ($q) => $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId))
+                ->where('is_active', true)
+                ->get();
+
+            foreach ($schedules as $sched) {
+                $teacherUser = $sched->employee?->user ?? $sched->teacher?->user;
+                if (! $teacherUser && ($sched->employee?->email || $sched->teacher?->email)) {
+                    $teacherUser = User::query()->with('roles')
+                        ->where('email', $sched->employee?->email ?? $sched->teacher?->email)
+                        ->first();
+                }
+                if (! $teacherUser || isset($contactsMap[$teacherUser->id]) || ($excludeUserId && (string) $teacherUser->id === $excludeUserId)) {
+                    continue;
+                }
+
+                $roles = $teacherUser->roles->pluck('name')->all();
+                $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
+                $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
+
+                if ($hasDisallowed || ! $hasAllowed) {
+                    continue;
+                }
+
+                $hasPrimaryTeacher = true;
+                $teacherName = $sched->employee?->nama_lengkap ?? $sched->teacher?->full_name ?? $teacherUser->name;
+                $subjectName = $sched->subject?->name ?? $sched->subject?->nama_mata_pelajaran ?? null;
+
+                $contactsMap[$teacherUser->id] = [
+                    'user_id' => $teacherUser->id,
+                    'name' => $teacherName,
+                    'photo' => $teacherUser->avatar_url ?? null,
+                    'role' => 'Guru Mapel',
+                    'teacher_type' => 'guru_mapel',
+                    'subject' => $subjectName,
+                    'class_name' => $resolvedClassName,
+                    'unit_name' => $resolvedUnitName,
+                    'student_id' => $student->id,
+                    'student_name' => $student->full_name,
+                    'last_message' => null,
+                    'last_message_at' => null,
+                    'unread_count' => 0,
+                ];
+            }
+        }
+
+        // 2. Guru yang mencatat buku penghubung untuk santri ini
+        $notesTeachers = StudentNote::query()
+            ->with(['teacher.user.roles'])
+            ->where('student_id', $student->id)
+            ->get();
+
+        foreach ($notesTeachers as $note) {
+            $teacherUser = $note->teacher?->user;
+            if (! $teacherUser || isset($contactsMap[$teacherUser->id]) || ($excludeUserId && (string) $teacherUser->id === $excludeUserId)) {
+                continue;
+            }
+
+            $roles = $teacherUser->roles->pluck('name')->all();
+            $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
+            $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
+
+            if ($hasDisallowed || ! $hasAllowed) {
+                continue;
+            }
+
+            $teacherName = $note->teacher?->full_name ?? $teacherUser->name;
+            $roleLabel = match ($note->category) {
+                'Tahfizh' => 'Guru Tahfizh',
+                'Konseling' => 'Guru BK',
+                'Ibadah' => 'Musyrif / Pembina',
+                default => 'Guru Pengampu',
+            };
+            $teacherType = match ($note->category) {
+                'Tahfizh' => 'guru_tahfizh',
+                'Konseling' => 'guru_bk',
+                default => 'guru_mapel',
+            };
+
+            $contactsMap[$teacherUser->id] = [
+                'user_id' => $teacherUser->id,
+                'name' => $teacherName,
+                'photo' => $teacherUser->avatar_url ?? null,
+                'role' => $roleLabel,
+                'teacher_type' => $teacherType,
+                'subject' => $note->category ? 'Buku Penghubung (' . $note->category . ')' : 'Guru Pembimbing',
+                'class_name' => $resolvedClassName,
+                'unit_name' => $resolvedUnitName,
+                'student_id' => $student->id,
+                'student_name' => $student->full_name,
+                'last_message' => null,
+                'last_message_at' => null,
+                'unread_count' => 0,
+            ];
+        }
+
+        // 3. Fallback TU & Operator Unit Pendidikan jika belum ada kontak Wali Kelas atau Guru Mapel
+        if (! $hasPrimaryTeacher && $resolvedUnitId) {
+            $unitAdminEmployees = Employee::query()
+                ->with(['user.roles', 'position'])
+                ->where('unit_id', $resolvedUnitId)
+                ->get();
+
+            foreach ($unitAdminEmployees as $emp) {
+                $adminUser = $emp->user;
+                if (! $adminUser && $emp->email) {
+                    $adminUser = User::query()->with('roles')->where('email', $emp->email)->first();
+                }
+                if (! $adminUser || isset($contactsMap[$adminUser->id]) || ($excludeUserId && (string) $adminUser->id === $excludeUserId)) {
+                    continue;
+                }
+
+                $roleNames = $adminUser->roles->pluck('name')->map(fn ($r) => strtolower(trim((string) $r)))->all();
+                $posName = strtolower(trim((string) ($emp->position?->name ?? '')));
+
+                $isOperator = count(array_intersect($roleNames, ['operator', 'operator sekolah', 'operator_sekolah'])) > 0
+                    || str_contains($posName, 'operator');
+                $isTu = count(array_intersect($roleNames, ['tata usaha', 'tata_usaha', 'tu', 'staf_tu', 'staff tu', 'admin tu', 'admin_tu'])) > 0
+                    || str_contains($posName, 'tata usaha');
+
+                if (! $isOperator && ! $isTu) {
+                    continue;
+                }
+
+                $contactsMap[$adminUser->id] = [
+                    'user_id' => $adminUser->id,
+                    'name' => $emp->nama_lengkap ?? $adminUser->name,
+                    'photo' => $adminUser->avatar_url ?? null,
+                    'role' => $isTu ? 'Tata Usaha (TU)' : 'Operator Unit',
+                    'teacher_type' => $isTu ? 'tata_usaha' : 'operator',
+                    'subject' => ($isTu ? 'Tata Usaha ' : 'Operator ') . ($resolvedUnitName ?: 'Unit Pendidikan'),
+                    'class_name' => $resolvedClassName,
+                    'unit_name' => $resolvedUnitName,
+                    'student_id' => $student->id,
+                    'student_name' => $student->full_name,
+                    'last_message' => null,
+                    'last_message_at' => null,
+                    'unread_count' => 0,
+                ];
+            }
+        }
+
+        // 4. Fallback terakhir jika semua daftar masih kosong: guru aktif di unit pendidikan santri tersebut
+        if (empty($contactsMap) && $resolvedUnitId) {
+            $unitEmployees = Employee::query()
+                ->with('user.roles')
+                ->where('unit_id', $resolvedUnitId)
+                ->whereNotNull('user_id')
+                ->get();
+
+            foreach ($unitEmployees as $emp) {
+                $tUser = $emp->user;
+                if (! $tUser || isset($contactsMap[$tUser->id]) || ($excludeUserId && (string) $tUser->id === $excludeUserId)) {
+                    continue;
+                }
+                $roles = $tUser->roles->pluck('name')->all();
+                $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
+                $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
+                if ($hasDisallowed || ! $hasAllowed) {
+                    continue;
+                }
+
+                $contactsMap[$tUser->id] = [
+                    'user_id' => $tUser->id,
+                    'name' => $emp->nama_lengkap ?? $tUser->name,
+                    'photo' => $tUser->avatar_url ?? null,
+                    'role' => in_array('Wali Kelas', $roles) ? 'Wali Kelas' : 'Guru Unit',
+                    'teacher_type' => in_array('Wali Kelas', $roles) ? 'wali_kelas' : 'guru_mapel',
+                    'subject' => 'Guru ' . ($resolvedUnitName ?: 'Unit'),
+                    'class_name' => $resolvedClassName,
+                    'unit_name' => $resolvedUnitName,
+                    'student_id' => $student->id,
+                    'student_name' => $student->full_name,
+                    'last_message' => null,
+                    'last_message_at' => null,
+                    'unread_count' => 0,
+                ];
+            }
+        }
+
+        return $contactsMap;
+    }
+
+    /**
      * Pastikan penerima chat portal adalah kontak sah anak yang dipilih:
-     * wali kelas atau guru mapel aktif di kelas siswa. Mencegah pesan
-     * dikirim ke user-id sembarang (mis. wali/siswa lain).
+     * wali kelas, guru mapel, pembimbing catatan santri, atau TU/Operator unit saat
+     * guru kelas belum tersedia.
      */
     private function isValidTeacherContact(Student $student, string $teacherUserId): bool
     {
@@ -4669,40 +4938,10 @@ class StudentParentPortalController extends Controller
             return false;
         }
 
-        $cacheKey = 'valid_teacher_' . $student->id . '_' . $teacherUserId;
+        $cacheKey = 'valid_chat_contact_v2_' . $student->id . '_' . $teacherUserId;
         return \Illuminate\Support\Facades\Cache::remember($cacheKey, 60, function () use ($student, $teacherUserId) {
-            $kelasId = $student->kelas_id ?? $student->class_id;
-            if ($kelasId && Str::isUuid($kelasId)) {
-                $kelas = Kelas::query()->with(['waliKelas.user'])->find($kelasId);
-
-                // 1. Wali kelas
-                $waliUser = $kelas?->waliKelas?->user;
-                if (! $waliUser && $kelas?->waliKelas?->email) {
-                    $waliUser = User::query()->where('email', $kelas->waliKelas->email)->first();
-                }
-                if ($waliUser && $waliUser->id === $teacherUserId) {
-                    return true;
-                }
-
-                // 2. Guru mapel pada jadwal aktif kelas siswa
-                $schedules = ClassSchedule::query()
-                    ->with(['employee.user', 'teacher.user'])
-                    ->where(fn ($q) => $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId))
-                    ->where('is_active', true)
-                    ->get();
-
-                foreach ($schedules as $sched) {
-                    $teacherUser = $sched->employee?->user ?? $sched->teacher?->user;
-                    if (! $teacherUser && ($sched->employee?->email || $sched->teacher?->email)) {
-                        $teacherUser = User::query()->where('email', $sched->employee?->email ?? $sched->teacher?->email)->first();
-                    }
-                    if ($teacherUser && $teacherUser->id === $teacherUserId) {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
+            $contactsMap = $this->buildStudentChatContactsMap($student);
+            return isset($contactsMap[$teacherUserId]);
         });
     }
 
@@ -4711,186 +4950,15 @@ class StudentParentPortalController extends Controller
         $student = $this->getStudentContext($request);
         $user = $request->user();
         $studentIdKey = $student ? (string) $student->id : 'none';
-        $cacheKey = "chat_contacts_{$user->id}_{$studentIdKey}";
+        $cacheKey = "chat_contacts_v2_{$user->id}_{$studentIdKey}";
 
         $contactsMap = \Illuminate\Support\Facades\Cache::remember($cacheKey, 20, function () use ($student, $user) {
-            $contactsMap = [];
-
-            if ($student) {
-                $kelasId = $student->kelas_id ?? $student->class_id;
-            if ($kelasId && Str::isUuid($kelasId)) {
-                $kelas = Kelas::query()->with(['waliKelas.user', 'unitPendidikan'])->find($kelasId);
-                $waliKelasEmp = $kelas?->waliKelas;
-                $waliUser = $waliKelasEmp?->user;
-                if (! $waliUser && $waliKelasEmp?->email) {
-                    $waliUser = User::query()->where('email', $waliKelasEmp->email)->first();
-                }
-
-                $resolvedUnitName = $student->educationUnit?->name
-                    ?? $student->kelas?->unitPendidikan?->name
-                    ?? $kelas?->unitPendidikan?->name
-                    ?? $student->kelas?->unit_pendidikan?->name
-                    ?? $student->unit_name
-                    ?? null;
-
-                if ($waliUser) {
-                    $contactsMap[$waliUser->id] = [
-                        'user_id' => $waliUser->id,
-                        'name' => $waliKelasEmp?->nama_lengkap ?? $waliUser->name ?? null,
-                        'photo' => $waliUser->avatar_url ?? null,
-                        'role' => 'Wali Kelas',
-                        'teacher_type' => 'wali_kelas',
-                        'subject' => 'Wali Kelas' . ($kelas?->nama_kelas ? ' (' . $kelas->nama_kelas . ')' : ''),
-                        'class_name' => $kelas?->nama_kelas ?? null,
-                        'unit_name' => $resolvedUnitName,
-                        'student_id' => $student->id,
-                        'student_name' => $student->full_name,
-                        'last_message' => null,
-                        'last_message_at' => null,
-                        'unread_count' => 0,
-                    ];
-                }
-
-                $schedules = ClassSchedule::query()
-                    ->with(['subject', 'employee.user.roles', 'teacher.user.roles'])
-                    ->where(fn ($q) => $q->where('kelas_id', $kelasId)->orWhere('class_id', $kelasId))
-                    ->where('is_active', true)
-                    ->get();
-
-                $allowedTeacherRoles = ['Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Guru Tahfizh', 'Wali Kelas', 'Teacher', 'Guru BK', 'Musyrif', 'Musyrifah', 'Musyrif / Musyrifah', 'Pembimbing'];
-                $disallowedTeacherRoles = [
-                    'Yayasan', 'Ketua Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan', 'Pengurus Yayasan',
-                    'Kepala Sekolah', 'Wakil Kepala Sekolah', 'Tata Usaha', 'TU', 'Admin', 'Super Admin',
-                    'Operator', 'Divisi Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa',
-                    'Divisi Program Khusus', 'Kepala Bidang Pendidikan', 'Waka Kurikulum', 'Waka Kesiswaan'
-                ];
-
-                foreach ($schedules as $sched) {
-                    $teacherUser = $sched->employee?->user ?? $sched->teacher?->user;
-                    if (! $teacherUser || isset($contactsMap[$teacherUser->id]) || $teacherUser->id === $user->id) {
-                        continue;
-                    }
-
-                    $roles = $teacherUser->roles->pluck('name')->all();
-                    $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
-                    $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
-
-                    if ($hasDisallowed || ! $hasAllowed) {
-                        continue;
-                    }
-                    $teacherName = $sched->employee?->nama_lengkap ?? $sched->teacher?->full_name ?? $teacherUser->name;
-                    $subjectName = $sched->subject?->name ?? $sched->subject?->nama_mata_pelajaran ?? null;
-
-                    $contactsMap[$teacherUser->id] = [
-                        'user_id' => $teacherUser->id,
-                        'name' => $teacherName,
-                        'photo' => $teacherUser->avatar_url ?? null,
-                        'role' => 'Guru Mapel',
-                        'teacher_type' => 'guru_mapel',
-                        'subject' => $subjectName,
-                        'class_name' => $student->kelas?->nama_kelas ?? ($kelas?->nama_kelas ?? null),
-                        'unit_name' => $resolvedUnitName,
-                        'student_id' => $student->id,
-                        'student_name' => $student->full_name,
-                        'last_message' => null,
-                        'last_message_at' => null,
-                        'unread_count' => 0,
-                    ];
-                }
-
-                // 2. Sertakan guru yang berinteraksi / mencatat buku penghubung untuk santri ini
-                $notesTeachers = StudentNote::query()
-                    ->with(['teacher.user.roles'])
-                    ->where('student_id', $student->id)
-                    ->get();
-
-                foreach ($notesTeachers as $note) {
-                    $teacherUser = $note->teacher?->user;
-                    if (! $teacherUser || isset($contactsMap[$teacherUser->id]) || $teacherUser->id === $user->id) {
-                        continue;
-                    }
-
-                    $roles = $teacherUser->roles->pluck('name')->all();
-                    $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
-                    $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
-
-                    if ($hasDisallowed || ! $hasAllowed) {
-                        continue;
-                    }
-
-                    $teacherName = $note->teacher?->full_name ?? $teacherUser->name;
-                    $roleLabel = match ($note->category) {
-                        'Tahfizh' => 'Guru Tahfizh',
-                        'Konseling' => 'Guru BK',
-                        'Ibadah' => 'Musyrif / Pembina',
-                        default => 'Guru Pengampu',
-                    };
-                    $teacherType = match ($note->category) {
-                        'Tahfizh' => 'guru_tahfizh',
-                        'Konseling' => 'guru_bk',
-                        default => 'guru_mapel',
-                    };
-
-                    $contactsMap[$teacherUser->id] = [
-                        'user_id' => $teacherUser->id,
-                        'name' => $teacherName,
-                        'photo' => $teacherUser->avatar_url ?? null,
-                        'role' => $roleLabel,
-                        'teacher_type' => $teacherType,
-                        'subject' => $note->category ? 'Buku Penghubung (' . $note->category . ')' : 'Guru Pembimbing',
-                        'class_name' => $student->kelas?->nama_kelas ?? ($kelas?->nama_kelas ?? null),
-                        'unit_name' => $resolvedUnitName,
-                        'student_id' => $student->id,
-                        'student_name' => $student->full_name,
-                        'last_message' => null,
-                        'last_message_at' => null,
-                        'unread_count' => 0,
-                    ];
-                }
-
-                // 3. Fallback jika masih kosong: guru aktif di unit pendidikan santri tersebut
-                if (empty($contactsMap) && $student->unit_id) {
-                    $unitEmployees = Employee::query()
-                        ->with('user.roles')
-                        ->where('unit_id', $student->unit_id)
-                        ->whereNotNull('user_id')
-                        ->get();
-
-                    foreach ($unitEmployees as $emp) {
-                        $tUser = $emp->user;
-                        if (! $tUser || isset($contactsMap[$tUser->id]) || $tUser->id === $user->id) {
-                            continue;
-                        }
-                        $roles = $tUser->roles->pluck('name')->all();
-                        $hasDisallowed = count(array_intersect($roles, $disallowedTeacherRoles)) > 0;
-                        $hasAllowed = count(array_intersect($roles, $allowedTeacherRoles)) > 0;
-                        if ($hasDisallowed || ! $hasAllowed) {
-                            continue;
-                        }
-
-                        $contactsMap[$tUser->id] = [
-                            'user_id' => $tUser->id,
-                            'name' => $emp->nama_lengkap ?? $tUser->name,
-                            'photo' => $tUser->avatar_url ?? null,
-                            'role' => in_array('Wali Kelas', $roles) ? 'Wali Kelas' : 'Guru Unit',
-                            'teacher_type' => in_array('Wali Kelas', $roles) ? 'wali_kelas' : 'guru_mapel',
-                            'subject' => 'Guru ' . ($resolvedUnitName ?: 'Unit'),
-                            'class_name' => $student->kelas?->nama_kelas ?? ($kelas?->nama_kelas ?? null),
-                            'unit_name' => $resolvedUnitName,
-                            'student_id' => $student->id,
-                            'student_name' => $student->full_name,
-                            'last_message' => null,
-                            'last_message_at' => null,
-                            'unread_count' => 0,
-                        ];
-                    }
-                }
-            }
-        }
+            return $student ? $this->buildStudentChatContactsMap($student, (string) $user->id) : [];
+        });
 
         // WM-04 PATCH: removed global teacher fallback to prevent cross-parent contact disclosure.
-        // If no student context or no schedule-based contacts found, return empty contacts list.
-        // This prevents a parent from accessing teachers unrelated to their own child's class.
+        // If no student context found, return empty contacts list.
+        // This prevents a parent from accessing contacts unrelated to their own child's unit/class.
 
         $teacherUserIds = array_keys($contactsMap);
         $teacherUserIdsStr = array_map('strval', $teacherUserIds);
@@ -4935,9 +5003,6 @@ class StudentParentPortalController extends Controller
             }
             unset($c);
         }
-
-            return $contactsMap;
-        });
 
         $teacherUserIdsStr = array_map('strval', array_keys($contactsMap));
 
@@ -6246,6 +6311,88 @@ class StudentParentPortalController extends Controller
                 ],
                 'tahfizh' => $tahfizhInfo,
                 'mutabaah' => $mutabaahInfo,
+            ],
+        ]);
+    }
+
+    /**
+     * Rekapitulasi Buku Poin & Tata Tertib Kedisiplinan Santri untuk Orang Tua / Siswa
+     */
+    public function disciplineSummary(Request $request): JsonResponse
+    {
+        $student = $this->getStudentContext($request);
+        if (! $student) {
+            return response()->json(['success' => false, 'message' => 'Data siswa tidak ditemukan.'], 404);
+        }
+
+        $activeYear = AcademicYear::where('is_active', true)->first();
+
+        // 1. Transaksi Poin Siswa (Pelanggaran & Prestasi)
+        $transactions = StudentPointTransaction::with(['category', 'reportedBy:id,name'])
+            ->where('student_id', $student->id)
+            ->when($activeYear, fn ($q) => $q->where('academic_year_id', $activeYear->id))
+            ->orderByDesc('transaction_date')
+            ->latest('created_at')
+            ->get();
+
+        $violationPoints = abs($transactions->filter(fn ($t) => (int) $t->points < 0)->sum('points'));
+        $achievementPoints = $transactions->filter(fn ($t) => (int) $t->points > 0)->sum('points');
+        $maxStandardPoints = 250; // Ambang batas maksimum sanksi TU (Level 6: Keluar / Kembali ke Ortu)
+        $safePointsRemaining = max(0, $maxStandardPoints - $violationPoints);
+        $riskPercentage = min(100, round(($violationPoints / $maxStandardPoints) * 100, 1));
+
+        // Ambang Batas SP / Kedisiplinan dari Master TU
+        $currentStage = DisciplineThresholdRule::where('is_active', true)
+            ->where('min_points', '<=', $violationPoints)
+            ->where(function ($q) use ($violationPoints) {
+                $q->whereNull('max_points')
+                  ->orWhere('max_points', '>=', $violationPoints);
+            })
+            ->orderByDesc('stage_order')
+            ->first();
+
+        $allThresholds = DisciplineThresholdRule::where('is_active', true)
+            ->orderBy('stage_order')
+            ->get();
+
+        // Surat Peringatan yang Sudah Diterbitkan
+        $warningLetters = StudentWarningLetter::where('student_id', $student->id)
+            ->with('issuedBy:id,name')
+            ->orderByDesc('issue_date')
+            ->get();
+
+        $statusLabel = $violationPoints === 0 ? 'Sangat Baik' : ($violationPoints < 31 ? 'Baik (Sanksi Ringan)' : ($violationPoints < 100 ? 'Sanksi Sedang' : 'Peringatan Khusus (ST/SP)'));
+        $statusColor = $violationPoints === 0 ? 'success' : ($violationPoints < 31 ? 'primary' : ($violationPoints < 100 ? 'warning' : 'danger'));
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'student' => [
+                    'id' => $student->id,
+                    'full_name' => $student->full_name,
+                    'nis' => $student->nis,
+                    'nisn' => $student->nisn,
+                    'kelas' => $student->kelas?->nama_kelas,
+                    'unit' => $student->educationUnit?->name,
+                    'program_type' => $student->educationUnit?->program_type,
+                    'is_boarding' => (bool) $student->is_boarding,
+                ],
+                'initial_points' => $maxStandardPoints,
+                'max_standard_points' => $maxStandardPoints,
+                'cumulative_points' => $violationPoints,
+                'violation_points' => $violationPoints,
+                'achievement_points' => $achievementPoints,
+                'current_points' => $violationPoints,
+                'safe_points_remaining' => $safePointsRemaining,
+                'risk_percentage' => $riskPercentage,
+                'status_label' => $statusLabel,
+                'status_color' => $statusColor,
+                'current_stage' => $currentStage,
+                'all_thresholds' => $allThresholds,
+                'total_violations_count' => $transactions->filter(fn ($t) => (int) $t->points < 0)->count(),
+                'total_achievements_count' => $transactions->filter(fn ($t) => (int) $t->points > 0)->count(),
+                'transactions' => $transactions,
+                'warning_letters' => $warningLetters,
             ],
         ]);
     }

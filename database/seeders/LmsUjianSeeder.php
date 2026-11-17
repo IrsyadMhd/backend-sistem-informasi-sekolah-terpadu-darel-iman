@@ -59,7 +59,7 @@ class LmsUjianSeeder extends Seeder
                     'unit_pendidikan_id' => $unitId,
                     'name' => 'Pendidikan Pancasila',
                 ], [
-                    'code' => 'MAPEL-PANCASILA-' . substr($unitId, 0, 8),
+                    'code' => 'MAPEL-PANCASILA-' . substr(md5((string) $unitId), 0, 8),
                     'kurikulum_id' => $kurikulumId,
                     'nama_mapel' => 'Pendidikan Pancasila',
                     'kelompok_mapel' => 'Kelompok A',

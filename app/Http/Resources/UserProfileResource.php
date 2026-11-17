@@ -3,6 +3,8 @@
 namespace App\Http\Resources;
 
 use App\Services\Auth\PortalResolver;
+use App\Services\NavigationService;
+use App\Support\RolePolicyDefaults;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -19,6 +21,8 @@ class UserProfileResource extends JsonResource
             $unit = \App\Models\EducationUnit::find($unitId);
         }
         $portal = app(PortalResolver::class)->resolve($this->resource);
+        $accessPolicy = RolePolicyDefaults::resolveUserPolicy($this->resource);
+        $accessiblePaths = app(NavigationService::class)->getAccessiblePathsForUser($this->resource, 'web');
 
         $photoUrl = $this->photo_url ?? $employee?->photo_url ?? $student?->photo_url;
         $avatarUrl = $this->avatar_url ?? $photoUrl;
@@ -44,6 +48,20 @@ class UserProfileResource extends JsonResource
             'employee' => $employeePayload,
         ];
 
+        $roles = $this->getRoleNames();
+        if ($roles->isEmpty()) {
+            if ($this->is_superadmin || str_starts_with($this->email, 'superadmin@')) {
+                $roles = collect(['Super Admin', 'Admin']);
+            } elseif (! empty($this->role)) {
+                $roles = collect([$this->role]);
+            }
+        }
+
+        $permissions = $this->getAllPermissions()->pluck('name')->values();
+        if ($permissions->isEmpty() && ($this->is_superadmin || $roles->contains('Super Admin'))) {
+            $permissions = collect(['*']);
+        }
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -66,10 +84,12 @@ class UserProfileResource extends JsonResource
             'unit_name' => $unit?->name,
             'unit_code' => $unit?->code,
             'user' => $userData,
-            'roles' => $this->getRoleNames(),
-            'role_level' => $this->roles->min('level') !== null ? (int) $this->roles->min('level') : 99,
+            'roles' => $roles,
+            'role_level' => $accessPolicy['role_level'] ?? ($this->roles->min('level') !== null ? (int) $this->roles->min('level') : 99),
             'role_levels' => $this->roles->pluck('level')->filter()->values(),
-            'permissions' => $this->getAllPermissions()->pluck('name')->values(),
+            'permissions' => $permissions,
+            'access_policy' => $accessPolicy,
+            'accessible_paths' => $accessiblePaths,
             'default_portal' => $portal['default_portal'],
             'default_redirect' => $portal['default_redirect'],
             'available_workspaces' => $portal['available_workspaces'],

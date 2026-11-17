@@ -146,4 +146,50 @@ class PersonnelAccessAuthorizationTest extends TestCase
             ->assertForbidden()
             ->assertJsonPath('status', 'error');
     }
+
+    public function test_tata_usaha_cannot_access_hak_akses_and_unit_access_is_dynamic_by_permission(): void
+    {
+        $unitA = EducationUnit::factory()->create();
+        $localPosition = Position::create([
+            'code' => 'TU-POS-01',
+            'name' => 'Staf Administrasi Unit',
+            'satuan_kerja' => 'Unit Pendidikan',
+            'unit_sekolah_id' => $unitA->id,
+            'level_jabatan' => 8,
+            'scope_akses' => 'unit_sendiri',
+            'is_active' => true,
+        ]);
+        $employee = Employee::factory()->create(['unit_id' => $unitA->id]);
+
+        $tu = User::factory()->create(['email' => 'tu-rbac@school.test']);
+        $tu->assignRole('Tata Usaha');
+        Employee::factory()->create(['user_id' => $tu->id, 'unit_id' => $unitA->id]);
+
+        $this->assertFalse($tu->checkPermissionTo('employee.role_access.manage'));
+        $this->assertFalse($tu->checkPermissionTo('sistem.hak_akses'));
+
+        $this->actingAs($tu, 'sanctum')->getJson('/api/hak-akses/pegawai')->assertForbidden();
+        $this->actingAs($tu, 'sanctum')->getJson('/api/hak-akses/roles')->assertForbidden();
+        $this->actingAs($tu, 'sanctum')
+            ->postJson("/api/hak-akses/pegawai/{$employee->id}/assign-role", ['role_name' => 'Guru'])
+            ->assertForbidden();
+
+        // TU tetap dapat mengelola posisi/jabatan unit tanpa hak akses role
+        $this->actingAs($tu, 'sanctum')
+            ->putJson("/api/jabatan/{$localPosition->id}", [
+                'nama_jabatan' => 'Staf Administrasi Diperbarui TU',
+            ])
+            ->assertOk();
+
+        // Dinamis berbasis permission DB: role kustom baru yang diberi employee.role_access.manage otomatis berwenang
+        $customUnitRole = Role::create(['name' => 'Koordinator SDM Unit', 'guard_name' => 'web', 'level' => 5]);
+        $customUnitRole->givePermissionTo(['employee.role_access.manage', 'employee.view']);
+        $customManager = User::factory()->create(['email' => 'custom-unit-access@school.test']);
+        $customManager->assignRole($customUnitRole);
+        Employee::factory()->create(['user_id' => $customManager->id, 'unit_id' => $unitA->id]);
+
+        $this->actingAs($customManager, 'sanctum')
+            ->postJson("/api/hak-akses/pegawai/{$employee->id}/assign-role", ['role_name' => 'Guru'])
+            ->assertOk();
+    }
 }

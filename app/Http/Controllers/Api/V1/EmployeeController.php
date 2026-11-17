@@ -173,7 +173,7 @@ class EmployeeController extends Controller
         $data = $request->validated();
 
         if (! $this->accessScopeService->canManageGlobalAccess($request->user())) {
-            $this->accessScopeService->assertEmployeeAssignment(
+            $this->accessScopeService->assertEmployeePositionAssignment(
                 $request->user(),
                 $employee,
                 $data['jabatan_id'] ?? null
@@ -236,7 +236,7 @@ class EmployeeController extends Controller
         ]);
         $hasGlobalScope = $this->accessScopeService->hasGlobalScope($user) || $isDivisi;
 
-        if ($this->accessScopeService->canManageUnitAccess($user) && ! $hasGlobalScope) {
+        if ($this->accessScopeService->canManageUnitPositions($user) && ! $hasGlobalScope) {
             $query = $this->accessScopeService->accessiblePositions($user);
         } else {
             $query = \App\Models\Position::query();
@@ -269,6 +269,18 @@ class EmployeeController extends Controller
                 $sub->where('unit_sekolah_id', $unitId)
                     ->orWhereHas('employees', function ($empQuery) use ($unitId) {
                         $empQuery->where('unit_id', $unitId);
+                    })
+                    ->orWhere(function ($tpl) {
+                        $tpl->whereNull('unit_sekolah_id')
+                            ->where('satuan_kerja', 'Unit Pendidikan')
+                            ->where(function ($scopeQ) {
+                                $scopeQ->whereNull('scope_akses')
+                                    ->orWhereNotIn('scope_akses', ['semua_unit', 'bidang_pendidikan', 'lintas_unit']);
+                            })
+                            ->where(function ($lvlQ) {
+                                $lvlQ->whereNull('level_jabatan')
+                                    ->orWhere('level_jabatan', '>', 2);
+                            });
                     });
             });
         }
@@ -378,7 +390,14 @@ class EmployeeController extends Controller
     {
         $this->accessScopeService->assertGlobalEmployeeMutation($request->user());
 
+        $overwrite = filter_var($request->input('overwrite', false), FILTER_VALIDATE_BOOLEAN);
         $rows = $request->input('data', []);
+        if (is_string($rows)) {
+            $decoded = json_decode($rows, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $rows = $decoded;
+            }
+        }
 
         if ($request->hasFile('file')) {
             $file = $request->file('file');
@@ -480,8 +499,10 @@ class EmployeeController extends Controller
 
         $berhasil = 0;
         $diperbarui = 0;
+        $duplikat = 0;
         $gagal = 0;
         $errors = [];
+        $duplicates = [];
 
         // Preload Units and Positions for fast lookup without N+1 queries
         $allUnits = EducationUnit::query()->get(['id', 'name', 'code', 'level']);
@@ -624,24 +645,41 @@ class EmployeeController extends Controller
 
             try {
                 if ($existing) {
-                    $updatePayload = [
-                        'nama_lengkap' => $nama,
-                    ];
-                    if (!empty($nik)) $updatePayload['nik'] = $nik;
-                    if (!empty($unitId)) $updatePayload['unit_id'] = $unitId;
-                    if (!empty($jabatanId)) $updatePayload['jabatan_id'] = $jabatanId;
-                    if (!empty($row['status_pegawai'])) $updatePayload['status_pegawai'] = $row['status_pegawai'];
-                    if (!empty($row['no_hp'])) $updatePayload['no_hp'] = $row['no_hp'];
-                    if (!empty($email)) $updatePayload['email'] = $email;
-                    if (!empty($row['alamat'])) $updatePayload['alamat'] = $row['alamat'];
-                    if (!empty($row['status'])) $updatePayload['status'] = $row['status'];
-                    if (!empty($row['jenis_kelamin'])) $updatePayload['jenis_kelamin'] = $gender;
-                    if (!empty($row['gelar_depan'])) $updatePayload['gelar_depan'] = $row['gelar_depan'];
-                    if (!empty($row['gelar_belakang'])) $updatePayload['gelar_belakang'] = $row['gelar_belakang'];
+                    if ($overwrite) {
+                        $updatePayload = [
+                            'nama_lengkap' => $nama,
+                        ];
+                        if (!empty($nik)) $updatePayload['nik'] = $nik;
+                        if (!empty($unitId)) $updatePayload['unit_id'] = $unitId;
+                        if (!empty($jabatanId)) $updatePayload['jabatan_id'] = $jabatanId;
+                        if (!empty($row['status_pegawai'])) $updatePayload['status_pegawai'] = $row['status_pegawai'];
+                        if (!empty($row['no_hp'])) $updatePayload['no_hp'] = $row['no_hp'];
+                        if (!empty($email)) $updatePayload['email'] = $email;
+                        if (!empty($row['alamat'])) $updatePayload['alamat'] = $row['alamat'];
+                        if (!empty($row['status'])) $updatePayload['status'] = $row['status'];
+                        if (!empty($row['jenis_kelamin'])) $updatePayload['jenis_kelamin'] = $gender;
+                        if (!empty($row['gelar_depan'])) $updatePayload['gelar_depan'] = $row['gelar_depan'];
+                        if (!empty($row['gelar_belakang'])) $updatePayload['gelar_belakang'] = $row['gelar_belakang'];
 
-                    $existing->update($updatePayload);
-                    $diperbarui++;
-                    $berhasil++;
+                        $existing->update($updatePayload);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $niy ?: ($nik ?: '-'),
+                            'nama' => $nama,
+                            'status' => 'Ditimpa',
+                            'keterangan' => 'Pegawai sudah terdaftar dan datanya berhasil diperbarui (ditimpa).',
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $niy ?: ($nik ?: '-'),
+                            'nama' => $nama,
+                            'status' => 'Dilewati',
+                            'keterangan' => 'Pegawai dengan NIY/NIK/Email sudah terdaftar (mode timpa tidak aktif).',
+                        ];
+                    }
                 } else {
                     $niyToSave = $niy ?: \App\Services\CodeGeneratorService::generate('employee_niy', $unitId);
                     Employee::query()->create([
@@ -669,7 +707,10 @@ class EmployeeController extends Controller
 
         $summaryMsg = "Proses impor selesai. Total: " . count($rows) . ", Berhasil: {$berhasil}";
         if ($diperbarui > 0) {
-            $summaryMsg .= " ({$diperbarui} data diperbarui)";
+            $summaryMsg .= " ({$diperbarui} data ditimpa/diperbarui)";
+        }
+        if ($duplikat > 0) {
+            $summaryMsg .= " ({$duplikat} duplikat dilewati)";
         }
         if ($gagal > 0) {
             $summaryMsg .= ", Gagal: {$gagal}";
@@ -682,8 +723,10 @@ class EmployeeController extends Controller
                 'total' => count($rows),
                 'berhasil' => $berhasil,
                 'diperbarui' => $diperbarui,
-                'duplikat' => $diperbarui,
+                'duplikat' => $duplikat,
                 'gagal' => $gagal,
+                'overwrite' => $overwrite,
+                'duplicates' => $duplicates,
                 'errors' => $errors,
             ],
         ]);

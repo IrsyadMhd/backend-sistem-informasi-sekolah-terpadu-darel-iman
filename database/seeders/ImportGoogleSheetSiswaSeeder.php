@@ -379,6 +379,13 @@ class ImportGoogleSheetSiswaSeeder extends Seeder
                     $statusRaw = strtolower(trim($row[54] ?? 'aktif'));
                     $isActive = ($statusRaw === 'aktif' || ! str_contains($statusRaw, 'tidak aktif'));
 
+                    // Hanya impor santri yang memiliki minimal 1 nomor identitas valid untuk SIPDEI (NIS / NIP Pembayaran / No Pendaftaran / NISN)
+                    $nipPembayaran = trim($row[49] ?? '');
+                    $noPendaftaran = trim($row[2] ?? '');
+                    if (empty($cleanNis) && empty($nipPembayaran) && empty($noPendaftaran) && empty($cleanNisn)) {
+                        continue;
+                    }
+
                     // Cari siswa eksisting (idempotent)
                     $studentQuery = Student::withTrashed();
                     if (! empty($cleanNis) && $unitId) {

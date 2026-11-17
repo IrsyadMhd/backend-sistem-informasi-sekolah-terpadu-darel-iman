@@ -295,11 +295,14 @@ class JabatanService
     /**
      * Impor kumpulan data jabatan dengan dukungan format ekspor (round-trip).
      */
-    public function prosesImport(array $rows, ?string $userId = null): array
+    public function prosesImport(array $rows, ?string $userId = null, bool $overwrite = false): array
     {
         $berhasil = 0;
+        $diperbarui = 0;
+        $duplikat = 0;
         $gagal = 0;
         $errors = [];
+        $duplicates = [];
 
         // Preload maps untuk lookup cepat
         $unitCache = EducationUnit::all();
@@ -430,22 +433,46 @@ class JabatanService
                     'boleh_login' => $bolehLogin,
                 ];
 
-                // Upsert: jika kode_jabatan sudah ada di DB, perbarui record lama
+                // Cek duplikasi berdasarkan kode atau nama jabatan
                 $existing = null;
                 if ($kode) {
                     $existing = Position::withTrashed()->where('code', $kode)->first();
                 }
-
-                if ($existing) {
-                    if ($existing->trashed()) {
-                        $existing->restore();
-                    }
-                    $this->ubah($existing->id, $payload, $userId);
-                } else {
-                    $this->simpan($payload, $userId);
+                if (! $existing && $nama) {
+                    $existing = Position::withTrashed()
+                        ->where('name', $nama)
+                        ->when($unitSekolahId, fn ($q) => $q->where('unit_sekolah_id', $unitSekolahId))
+                        ->first();
                 }
 
-                $berhasil++;
+                if ($existing) {
+                    if ($overwrite) {
+                        if ($existing->trashed()) {
+                            $existing->restore();
+                        }
+                        $this->ubah($existing->id, $payload, $userId);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $index + 1,
+                            'kode' => $kode ?: '-',
+                            'nama' => $nama,
+                            'status' => 'Ditimpa',
+                            'keterangan' => 'Data jabatan diperbarui dengan data berkas terbaru.',
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $index + 1,
+                            'kode' => $kode ?: '-',
+                            'nama' => $nama,
+                            'status' => 'Dilewati',
+                            'keterangan' => 'Kode atau nama jabatan sudah terdaftar di database.',
+                        ];
+                    }
+                } else {
+                    $this->simpan($payload, $userId);
+                    $berhasil++;
+                }
             } catch (\Exception $e) {
                 $gagal++;
                 $errors[] = 'Baris '.($index + 1).': '.$e->getMessage();
@@ -453,8 +480,13 @@ class JabatanService
         }
 
         return [
+            'total' => count($rows),
             'berhasil' => $berhasil,
+            'diperbarui' => $diperbarui,
+            'duplikat' => $duplikat,
             'gagal' => $gagal,
+            'overwrite' => $overwrite,
+            'duplicates' => $duplicates,
             'errors' => $errors,
         ];
     }

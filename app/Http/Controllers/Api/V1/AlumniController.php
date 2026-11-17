@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Services\AccessScopeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 
 class AlumniController extends Controller
@@ -239,6 +240,8 @@ class AlumniController extends Controller
             ->count();
 
         // Kumpulkan tahun-tahun kelulusan dan mutasi yang tersedia di DB
+        // Cast tahun_masuk (smallint) ke text/char agar NULLIF aman di PostgreSQL maupun SQLite/MySQL
+        $yearTextType = DB::getDriverName() === 'mysql' ? 'CHAR' : 'TEXT';
         $dbYears = (clone $studentQuery)->where(function ($q) {
             $q->where('metadata->is_alumni', true)
               ->orWhere('metadata->status_siswa', 'alumni')
@@ -247,7 +250,7 @@ class AlumniController extends Controller
               ->orWhere('metadata->status_alumni', 'Lulus')
               ->orWhereNotNull('metadata->mutasi_type');
         })
-        ->selectRaw("DISTINCT COALESCE(NULLIF(metadata->>'tahun_lulus', ''), NULLIF(metadata->>'tahun_mutasi', ''), NULLIF(tahun_masuk, '')) as thn")
+        ->selectRaw("DISTINCT COALESCE(NULLIF(metadata->>'tahun_lulus', ''), NULLIF(metadata->>'tahun_mutasi', ''), NULLIF(CAST(tahun_masuk AS {$yearTextType}), '')) as thn")
         ->pluck('thn')
         ->filter(fn ($y) => ! empty($y) && strlen((string) $y) === 4)
         ->values()
@@ -286,11 +289,16 @@ class AlumniController extends Controller
         $user = $request->user();
         $accessScopeService = app(AccessScopeService::class);
 
+        if ($request->has('tahun_lulus') && is_numeric($request->input('tahun_lulus'))) {
+            $request->merge(['tahun_lulus' => (string) $request->input('tahun_lulus')]);
+        }
+
         $request->validate([
             'full_name' => 'required|string|max:255',
             'unit_id' => 'required|exists:education_units,id',
-            'nis' => 'nullable|string|max:50',
+            'nis' => 'nullable|string|max:50|unique:students,nis',
             'nisn' => 'nullable|string|max:50',
+            'gender' => 'nullable|string|in:male,female,L,P,Laki-laki,Perempuan',
             'tahun_lulus' => 'required|string|max:10',
             'status_lanjutan' => 'nullable|string|max:255',
             'perguruan_tinggi' => 'nullable|string|max:255',
@@ -301,6 +309,16 @@ class AlumniController extends Controller
         if (! $accessScopeService->hasGlobalScope($user)) {
             $accessScopeService->assertEducationUnitAccess($user, (string) $request->input('unit_id'));
         }
+
+        $nisInput = trim((string) $request->input('nis', ''));
+        if ($nisInput === '') {
+            do {
+                $nisInput = 'ALM-' . date('Y') . '-' . strtoupper(\Illuminate\Support\Str::random(6));
+            } while (Student::query()->where('nis', $nisInput)->exists());
+        }
+
+        $rawGender = strtolower(trim((string) $request->input('gender', 'male')));
+        $gender = in_array($rawGender, ['female', 'p', 'perempuan'], true) ? 'female' : 'male';
 
         $metadata = [
             'is_alumni' => true,
@@ -316,8 +334,9 @@ class AlumniController extends Controller
 
         $student = Student::create([
             'full_name' => $request->input('full_name'),
-            'nis' => $request->input('nis', ''),
-            'nisn' => $request->input('nisn', ''),
+            'nis' => $nisInput,
+            'nisn' => $request->input('nisn') ?: null,
+            'gender' => $gender,
             'unit_id' => $request->input('unit_id'),
             'is_active' => false,
             'metadata' => $metadata,

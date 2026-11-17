@@ -627,8 +627,8 @@ class AttendanceWorkflowController extends Controller
             ['Guru', 'guru', 'Guru Mata Pelajaran', 'Wali Kelas', 'Super Admin', 'super_admin', 'Tata Usaha', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah']
         );
         $isGlobal = $request->user()->hasAnyRole(['Super Admin', 'super_admin', 'Tata Usaha', 'tata_usaha', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah']);
-        $accessibleStudentIds = $this->access->homeroomStudentIds($request->user());
-        if ($request->user()->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran'])) {
+        $accessibleStudentIds = $isGlobal ? collect() : $this->access->homeroomStudentIds($request->user());
+        if (! $isGlobal && $request->user()->hasAnyRole(['Guru', 'guru', 'Guru Mata Pelajaran'])) {
             $accessibleStudentIds = $accessibleStudentIds->merge($this->accessScopeService->accessibleStudents($request->user())->pluck('id'));
         }
         abort_unless($isGlobal || $accessibleStudentIds->contains($permission->student_id), 403, 'Siswa berada di luar scope mengajar guru.');

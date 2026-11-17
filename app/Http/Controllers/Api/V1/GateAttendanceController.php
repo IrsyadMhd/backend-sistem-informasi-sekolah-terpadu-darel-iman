@@ -290,9 +290,10 @@ class GateAttendanceController extends Controller
 
         $unitIds = $this->accessScope->accessibleEducationUnits($user)->pluck('id')->filter()->values();
         if ($request->filled('unit_id')) {
-            $this->accessScope->assertEducationUnitAccess($user, (string) $request->query('unit_id'));
+            $requestedUnitId = (string) $request->input('unit_id');
+            $this->accessScope->assertEducationUnitAccess($user, $requestedUnitId);
 
-            return (string) $request->query('unit_id');
+            return $requestedUnitId;
         }
 
         return $unitIds->first() ?: ($user->education_unit_id ?? $user->unit_id ?? $user->employee?->unit_id ?? '__none__');

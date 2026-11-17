@@ -21,6 +21,7 @@ class AlumniApiTest extends TestCase
             'nis' => '123456789',
             'full_name' => 'Siswa Alumni Test',
             'gender' => 'L',
+            'tahun_masuk' => 2022,
             'is_active' => false,
             'metadata' => ['status_alumni' => 'Tamat', 'tahun_lulus' => 2025],
         ]);

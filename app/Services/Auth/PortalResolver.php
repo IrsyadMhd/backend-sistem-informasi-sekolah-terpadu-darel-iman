@@ -2,13 +2,14 @@
 
 namespace App\Services\Auth;
 
+use App\Models\Role;
 use App\Models\User;
+use App\Support\RolePolicyDefaults;
 
 /**
  * Satu pemetaan role database ke workspace default.
- *
- * Route yang dikembalikan di sini adalah allow-listed; client tidak boleh
- * mengubahnya menjadi redirect URL arbitrary.
+ * Memprioritaskan kolom dinamis pada tabel `roles` (`portal_group`, `default_route`, `level`)
+ * lalu fallback ke pemetaan kanonik.
  */
 class PortalResolver
 {
@@ -38,19 +39,47 @@ class PortalResolver
      */
     public function resolve(User $user): array
     {
-        $isRestricted = !$this->hasAnyRole($user, ['Super Admin', 'Superadmin', 'super_admin'])
-            && $this->hasAnyRole($user, [
-                'Yayasan', 'Ketua Yayasan', 'Pengurus Yayasan', 'Sekretaris Yayasan', 'Bendahara Yayasan',
-                'ketua_yayasan', 'pengurus_yayasan', 'sekretaris_yayasan', 'bendahara_yayasan',
-                'Kepala Sekolah', 'kepala_sekolah', 'kepsek'
-            ]);
+        $dbRoles = $user->relationLoaded('roles') ? $user->roles : $user->roles()->get();
+        $sortedRoles = $dbRoles->sortBy(fn ($r) => (int) ($r->level ?? 99))->values();
+        $policy = RolePolicyDefaults::resolveUserPolicy($user);
 
-        $matches = collect(self::WORKSPACES)
+        $isRestricted = ($policy['portal_group'] ?? '') !== 'super_admin'
+            && in_array($policy['portal_group'] ?? '', ['foundation', 'principal'], true);
+
+        // Build dynamic workspaces from DB-configured roles first when explicitly set
+        $dbWorkspaces = $sortedRoles
+            ->map(function ($role) {
+                $route = $role instanceof Role ? RolePolicyDefaults::sanitizeRoute($role->default_route) : null;
+                $portalGroup = $role instanceof Role ? ($role->portal_group ?: 'staff') : 'staff';
+                if (! $route) {
+                    return null;
+                }
+
+                return [
+                    'key' => $portalGroup !== 'staff' ? $portalGroup : 'role_' . $role->id,
+                    'label' => $role->name,
+                    'route' => $route,
+                ];
+            })
+            ->filter()
+            ->unique('route')
+            ->values();
+
+        $legacyMatches = collect(self::WORKSPACES)
             ->filter(fn (array $workspace) => $this->hasAnyRole($user, $workspace['roles']))
             ->when($isRestricted, fn ($collection) => $collection->reject(
                 fn (array $workspace) => in_array($workspace['key'], ['teacher', 'musyrif'], true)
             ))
+            ->map(fn (array $workspace) => [
+                'key' => $workspace['key'],
+                'label' => $workspace['label'],
+                'route' => $workspace['route'],
+            ])
             ->values();
+
+        $matches = $dbWorkspaces->isNotEmpty()
+            ? $dbWorkspaces->merge($legacyMatches)->unique('route')->values()
+            : $legacyMatches;
 
         if ($matches->isEmpty() && $user->employee()->exists()) {
             $matches = collect([
@@ -59,10 +88,9 @@ class PortalResolver
         }
 
         $default = $matches->first() ?? [
-            'key' => 'admin',
+            'key' => $policy['portal_group'] ?? 'admin',
             'label' => 'Admin',
-            'route' => '/dashboard',
-            'roles' => [],
+            'route' => $policy['default_route'] ?? '/dashboard',
         ];
 
         return [

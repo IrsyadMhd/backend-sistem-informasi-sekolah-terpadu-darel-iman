@@ -26,7 +26,17 @@ class DemoDataAndPresentationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        putenv('SEED_DUMMY_DATA=true');
+        $_ENV['SEED_DUMMY_DATA'] = 'true';
+        $_SERVER['SEED_DUMMY_DATA'] = 'true';
         $this->seed(DatabaseSeeder::class);
+    }
+
+    protected function tearDown(): void
+    {
+        putenv('SEED_DUMMY_DATA');
+        unset($_ENV['SEED_DUMMY_DATA'], $_SERVER['SEED_DUMMY_DATA']);
+        parent::tearDown();
     }
 
     public function test_all_14_demo_accounts_login_and_resolve_portals_correctly(): void

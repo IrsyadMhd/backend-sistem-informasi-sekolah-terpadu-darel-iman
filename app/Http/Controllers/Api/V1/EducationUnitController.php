@@ -342,9 +342,13 @@ class EducationUnitController extends Controller
             ], 422);
         }
 
+        $overwrite = filter_var($request->input('overwrite', false), FILTER_VALIDATE_BOOLEAN);
+
         $berhasil = 0;
-        $gagal = 0;
+        $diperbarui = 0;
         $duplikat = 0;
+        $gagal = 0;
+        $duplicates = [];
         $errors = [];
 
         foreach ($rows as $index => $row) {
@@ -365,12 +369,13 @@ class EducationUnitController extends Controller
                 $code = preg_replace('/\s+/', ' ', $code);
             }
 
-            // Check duplicate name
-            $existingName = EducationUnit::query()->where('name', $name)->first();
-            if ($existingName && empty($code)) {
-                $duplikat++;
-                $errors[] = "Baris {$rowNum}: Nama unit pendidikan '{$name}' sudah terdaftar.";
-                continue;
+            // Check duplicate by code or name
+            $existing = null;
+            if (! empty($code)) {
+                $existing = EducationUnit::withTrashed()->where('code', $code)->first();
+            }
+            if (! $existing) {
+                $existing = EducationUnit::withTrashed()->where('name', $name)->first();
             }
 
             try {
@@ -391,12 +396,34 @@ class EducationUnitController extends Controller
                     ],
                 ]);
 
-                if (! empty($code)) {
-                    EducationUnit::query()->updateOrCreate(['code' => $code], $payload);
-                } else {
-                    EducationUnit::query()->create($payload);
+                if ($existing) {
+                    if ($overwrite) {
+                        if ($existing->trashed()) {
+                            $existing->restore();
+                        }
+                        $existing->update($payload);
+                        $diperbarui++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $existing->code ?: $code ?: '-',
+                            'nama' => $name,
+                            'status' => 'Ditimpa',
+                            'keterangan' => "Unit pendidikan '{$name}' sudah ada dan berhasil ditimpa.",
+                        ];
+                    } else {
+                        $duplikat++;
+                        $duplicates[] = [
+                            'baris' => $rowNum,
+                            'kode' => $existing->code ?: $code ?: '-',
+                            'nama' => $name,
+                            'status' => 'Duplikat (Dilewati)',
+                            'keterangan' => "Unit pendidikan '{$name}' sudah terdaftar dan dilewati karena opsi timpa tidak aktif.",
+                        ];
+                    }
+                    continue;
                 }
 
+                EducationUnit::query()->create($payload);
                 $berhasil++;
             } catch (\Exception $e) {
                 $gagal++;
@@ -404,14 +431,24 @@ class EducationUnitController extends Controller
             }
         }
 
+        $msgParts = [];
+        if ($berhasil > 0) $msgParts[] = "{$berhasil} baru ditambahkan";
+        if ($diperbarui > 0) $msgParts[] = "{$diperbarui} berhasil ditimpa";
+        if ($duplikat > 0) $msgParts[] = "{$duplikat} duplikat dilewati";
+        if ($gagal > 0) $msgParts[] = "{$gagal} gagal";
+        $summary = $msgParts ? implode(', ', $msgParts) : 'Tidak ada baris data yang diproses';
+
         return response()->json([
             'status' => 'success',
-            'message' => "Proses impor selesai. Berhasil: {$berhasil}, Duplikat/Skip: {$duplikat}, Gagal: {$gagal}.",
+            'message' => "Proses impor selesai: {$summary}.",
             'data' => [
                 'total' => count($rows),
                 'berhasil' => $berhasil,
+                'diperbarui' => $diperbarui,
                 'duplikat' => $duplikat,
                 'gagal' => $gagal,
+                'overwrite' => $overwrite,
+                'duplicates' => $duplicates,
                 'errors' => $errors,
             ],
         ]);

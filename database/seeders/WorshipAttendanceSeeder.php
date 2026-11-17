@@ -134,6 +134,7 @@ class WorshipAttendanceSeeder extends Seeder
                 'gender_scope' => 'all',
                 'participant_scope' => 'all_students',
                 'time_source' => 'fixed',
+                'prayer_name' => 'dhuha',
                 'start_time' => '07:30',
                 'end_time' => '08:00',
                 'open_offset_minutes' => 10,
@@ -154,6 +155,7 @@ class WorshipAttendanceSeeder extends Seeder
                 'gender_scope' => 'all',
                 'participant_scope' => 'tahfizh_only',
                 'time_source' => 'fixed',
+                'prayer_name' => 'tahajud',
                 'start_time' => '03:30',
                 'end_time' => '04:10',
                 'open_offset_minutes' => 15,
@@ -187,8 +189,19 @@ class WorshipAttendanceSeeder extends Seeder
             ],
         ];
 
-        $todayStr = today()->toDateString();
-        $students = Student::active()->limit(15)->get();
+        $boardingUnitIds = \App\Models\EducationUnit::where('program_type', 'boarding')
+            ->orWhere('name', 'like', '%PONPES%')
+            ->orWhere('name', 'like', '%Asrama%')
+            ->pluck('id');
+
+        $boardingStudents = Student::active()
+            ->whereIn('unit_id', $boardingUnitIds)
+            ->limit(50)
+            ->get();
+
+        if ($boardingStudents->isEmpty()) {
+            $boardingStudents = Student::active()->limit(50)->get();
+        }
 
         foreach ($templates as $tData) {
             $template = WorshipAttendanceTemplate::where('code', $tData['code'])->first();
@@ -196,43 +209,50 @@ class WorshipAttendanceSeeder extends Seeder
                 $template = WorshipAttendanceTemplate::create($tData);
             }
 
-            // Generate today's session for each template
-            $session = WorshipAttendanceSession::where('template_id', $template->id)
-                ->whereDate('session_date', $todayStr)
-                ->first();
+            // Generate past 7 days of sessions & attendance details
+            for ($dayOffset = 6; $dayOffset >= 0; $dayOffset--) {
+                $sessionDate = Carbon::today()->subDays($dayOffset)->toDateString();
 
-            if (! $session) {
-                $session = WorshipAttendanceSession::create([
-                    'id' => (string) Str::uuid(),
-                    'template_id' => $template->id,
-                    'session_date' => $todayStr,
-                    'scheduled_start_at' => Carbon::parse("{$todayStr} {$template->start_time}"),
-                    'scheduled_end_at' => Carbon::parse("{$todayStr} {$template->end_time}"),
-                    'opened_at' => Carbon::parse("{$todayStr} {$template->start_time}")->subMinutes(15),
-                    'location_name' => $template->location_name,
-                    'status' => 'opened',
-                    'generated_automatically' => true,
-                ]);
-            }
+                $session = WorshipAttendanceSession::where('template_id', $template->id)
+                    ->whereDate('session_date', $sessionDate)
+                    ->first();
 
-            // Seed details for active students
-            if ($session->wasRecentlyCreated && $students->isNotEmpty()) {
-                $statusList = ['hadir_berjamaah', 'hadir_berjamaah', 'hadir_sendiri', 'terlambat', 'izin', 'sakit'];
-                foreach ($students as $index => $st) {
-                    $stStatus = $statusList[$index % count($statusList)];
-                    WorshipAttendanceDetail::firstOrCreate(
-                        [
-                            'session_id' => $session->id,
-                            'student_id' => $st->id,
-                        ],
-                        [
-                            'id' => (string) Str::uuid(),
-                            'attendance_status' => $stStatus,
-                            'method' => 'checklist',
-                            'attended_at' => now(),
-                            'is_private' => false,
-                        ]
-                    );
+                if (! $session) {
+                    $startTime = $template->start_time ?: '12:00';
+                    $endTime = $template->end_time ?: '12:45';
+                    $session = WorshipAttendanceSession::create([
+                        'id' => (string) Str::uuid(),
+                        'template_id' => $template->id,
+                        'session_date' => $sessionDate,
+                        'scheduled_start_at' => Carbon::parse("{$sessionDate} {$startTime}"),
+                        'scheduled_end_at' => Carbon::parse("{$sessionDate} {$endTime}"),
+                        'opened_at' => Carbon::parse("{$sessionDate} {$startTime}")->subMinutes(15),
+                        'location_name' => $template->location_name,
+                        'status' => 'opened',
+                        'generated_automatically' => true,
+                    ]);
+                }
+
+                // Seed details for boarding students
+                if ($boardingStudents->isNotEmpty()) {
+                    $statusList = ['hadir_berjamaah', 'hadir_berjamaah', 'hadir_berjamaah', 'hadir_sendiri', 'hadir_berjamaah', 'terlambat', 'izin', 'sakit'];
+                    $attTime = $template->start_time ?: '12:00';
+                    foreach ($boardingStudents as $index => $st) {
+                        $stStatus = $statusList[($index + $dayOffset) % count($statusList)];
+                        WorshipAttendanceDetail::firstOrCreate(
+                            [
+                                'session_id' => $session->id,
+                                'student_id' => $st->id,
+                            ],
+                            [
+                                'id' => (string) Str::uuid(),
+                                'attendance_status' => $stStatus,
+                                'method' => 'checklist',
+                                'attended_at' => Carbon::parse("{$sessionDate} {$attTime}"),
+                                'is_private' => false,
+                            ]
+                        );
+                    }
                 }
             }
         }

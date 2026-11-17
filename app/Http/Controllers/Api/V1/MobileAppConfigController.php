@@ -24,7 +24,7 @@ class MobileAppConfigController extends Controller
         }
 
         return response()->json(['data' => $this->payload($setting, $request)])
-            ->header('Cache-Control', 'public, max-age=300')
+            ->header('Cache-Control', 'no-cache, must-revalidate')
             ->header('ETag', $etag);
     }
 
@@ -35,6 +35,12 @@ class MobileAppConfigController extends Controller
 
     public function update(Request $request): JsonResponse
     {
+        if (is_array($request->input('onboarding.slides'))) {
+            $onboardingInput = $request->input('onboarding');
+            $onboardingInput['slides'] = $this->normalizeOnboardingSlides($onboardingInput['slides']);
+            $request->merge(['onboarding' => $onboardingInput]);
+        }
+
         $validated = $request->validate($this->rules());
         $setting = MobileAppConfig::android();
         $currentConfig = $setting->config ?? MobileAppConfig::defaults();
@@ -50,6 +56,14 @@ class MobileAppConfigController extends Controller
             } else {
                 $mergedConfig[$key] = $value;
             }
+        }
+
+        if (isset($validated['onboarding']['slides']) && is_array($validated['onboarding']['slides'])) {
+            $mergedConfig['onboarding']['slides'] = $this->normalizeOnboardingSlides(
+                $validated['onboarding']['slides'],
+                $mergedConfig['media_paths'] ?? [],
+                $request,
+            );
         }
 
         $setting->update([
@@ -92,7 +106,7 @@ class MobileAppConfigController extends Controller
 
         // Store new asset in public disk under mobile-config/{type}
         $newPath = $request->file('file')->store("mobile-config/{$type}", 'public');
-        $newUrl = url('/storage/'.$newPath);
+        $newUrl = $request->getSchemeAndHttpHost().'/storage/'.ltrim($newPath, '/');
 
         if ($isOnboarding) {
             $idx = ((int) $matches[1]) - 1;
@@ -100,6 +114,7 @@ class MobileAppConfigController extends Controller
                 $config['onboarding'] = MobileAppConfig::defaults()['onboarding'];
             }
             $config['onboarding']['slides'][$idx]['image_url'] = $newUrl;
+            $config['onboarding']['slides'] = $this->normalizeOnboardingSlides($config['onboarding']['slides']);
         } elseif ($isBanner) {
             $config['theme']['login_banner_url'] = $newUrl;
         } else {
@@ -201,10 +216,12 @@ class MobileAppConfigController extends Controller
 
         $features = array_replace_recursive($defaults['features'], $config['features'] ?? []);
         $system = array_replace_recursive($defaults['system'], $config['system'] ?? []);
+        $mediaPaths = is_array($config['media_paths'] ?? null) ? $config['media_paths'] : [];
         $onboarding = array_replace_recursive($defaults['onboarding'], $config['onboarding'] ?? []);
         if (isset($config['onboarding']['slides']) && is_array($config['onboarding']['slides'])) {
             $onboarding['slides'] = $config['onboarding']['slides'];
         }
+        $onboarding['slides'] = $this->normalizeOnboardingSlides($onboarding['slides'] ?? [], $mediaPaths, $request);
 
         $siteSetting = SiteSetting::current();
         $system['mapbox_token'] = $siteSetting->mapbox_token;
@@ -212,32 +229,48 @@ class MobileAppConfigController extends Controller
             ? $request->getSchemeAndHttpHost().$siteSetting->logo_url
             : null;
 
-        $branding['has_dedicated_logo_header'] = !empty($config['branding']['logo_header_url']);
-        $branding['has_dedicated_logo_login'] = !empty($config['branding']['logo_login_url']);
-        $branding['has_dedicated_logo_footer'] = !empty($config['branding']['logo_footer_url']);
+        $branding['has_dedicated_logo_header'] = !empty($config['branding']['logo_header_url']) || !empty($mediaPaths['logo_header']);
+        $branding['has_dedicated_logo_login'] = !empty($config['branding']['logo_login_url']) || !empty($mediaPaths['logo_login']);
+        $branding['has_dedicated_logo_footer'] = !empty($config['branding']['logo_footer_url']) || !empty($mediaPaths['logo_footer']);
         $branding['fallback_logo_url'] = $fallbackLogoUrl;
 
-        $theme['has_dedicated_login_banner'] = !empty($config['theme']['login_banner_url']);
+        $theme['login_banner_url'] = $this->resolveStoredMediaUrl(
+            $mediaPaths['login_banner'] ?? null,
+            $theme['login_banner_url'] ?? null,
+            $request,
+        );
+        $theme['has_dedicated_login_banner'] = !empty($theme['login_banner_url']);
 
         $branding['logo_url'] = !empty($branding['logo_url']) ? $branding['logo_url'] : $fallbackLogoUrl;
-        $branding['logo_header_url'] = !empty($branding['logo_header_url']) ? $branding['logo_header_url'] : $branding['logo_url'];
-        $branding['logo_login_url'] = !empty($branding['logo_login_url']) ? $branding['logo_login_url'] : $branding['logo_url'];
-        $branding['logo_footer_url'] = !empty($branding['logo_footer_url']) ? $branding['logo_footer_url'] : $branding['logo_url'];
+        $branding['logo_header_url'] = $this->resolveStoredMediaUrl($mediaPaths['logo_header'] ?? null, $branding['logo_header_url'] ?? null, $request) ?: $branding['logo_url'];
+        $branding['logo_login_url'] = $this->resolveStoredMediaUrl($mediaPaths['logo_login'] ?? null, $branding['logo_login_url'] ?? null, $request) ?: $branding['logo_url'];
+        $branding['logo_footer_url'] = $this->resolveStoredMediaUrl($mediaPaths['logo_footer'] ?? null, $branding['logo_footer_url'] ?? null, $request) ?: $branding['logo_url'];
         $branding['card_rules_student'] = $siteSetting->card_rules_student;
         $branding['card_footer_motto'] = $siteSetting->card_footer_motto;
+
+        $configuredContact = is_array($config['branding']['contact'] ?? null) ? $config['branding']['contact'] : [];
+        $branding['contact'] = [
+            'phone' => !empty($configuredContact['phone']) ? $configuredContact['phone'] : ($siteSetting->phone ?: null),
+            'email' => !empty($configuredContact['email']) ? $configuredContact['email'] : ($siteSetting->email ?: null),
+            'website' => !empty($configuredContact['website']) ? $configuredContact['website'] : ($siteSetting->website ?: null),
+            'service_hours' => !empty($configuredContact['service_hours'])
+                ? $configuredContact['service_hours']
+                : ($defaults['branding']['contact']['service_hours'] ?? "Senin – Jum'at: 07.30 – 16.00 WIB"),
+        ];
 
         $educationUnits = \App\Models\EducationUnit::query()
             ->select(['id', 'name', 'code', 'metadata'])
             ->orderBy('id')
             ->get()
             ->map(function ($u) {
+                $meta = is_array($u->metadata) ? $u->metadata : [];
                 return [
                     'id' => $u->id,
                     'name' => $u->name,
                     'code' => $u->code,
-                    'phone' => $u->metadata['phone'] ?? null,
-                    'email' => $u->metadata['email'] ?? null,
-                    'address' => $u->metadata['address'] ?? null,
+                    'phone' => $meta['phone'] ?? $meta['no_telp'] ?? $meta['telepon'] ?? $meta['whatsapp'] ?? null,
+                    'email' => $meta['email'] ?? null,
+                    'address' => $meta['address'] ?? $meta['alamat'] ?? null,
                 ];
             });
 
@@ -284,6 +317,8 @@ class MobileAppConfigController extends Controller
             'theme.card_radius' => ['sometimes', 'required', 'integer', 'between:0,32'],
             'theme.welcome_text' => ['nullable', 'string', 'max:255'],
             'theme.login_banner_url' => $urlNullable,
+            'theme.news_gradient_start' => $hexNullable,
+            'theme.news_gradient_end' => $hexNullable,
             'branding' => ['sometimes', 'required', 'array'],
             'branding.app_name' => ['sometimes', 'required', 'string', 'max:100'],
             'branding.school_name' => ['sometimes', 'required', 'string', 'max:150'],
@@ -292,6 +327,11 @@ class MobileAppConfigController extends Controller
             'branding.logo_header_url' => $urlNullable,
             'branding.logo_login_url' => $urlNullable,
             'branding.logo_footer_url' => $urlNullable,
+            'branding.contact' => ['sometimes', 'nullable', 'array'],
+            'branding.contact.phone' => ['nullable', 'string', 'max:50'],
+            'branding.contact.email' => ['nullable', 'email', 'max:150'],
+            'branding.contact.website' => ['nullable', 'string', 'max:255'],
+            'branding.contact.service_hours' => ['nullable', 'string', 'max:120'],
             'navigation' => ['sometimes', 'required', 'array'],
             'navigation.style' => ['sometimes', 'required', Rule::in(['bottom_tabs'])],
             'navigation.show_labels' => ['sometimes', 'required', 'boolean'],
@@ -307,9 +347,10 @@ class MobileAppConfigController extends Controller
             'home_layout.sections.*.type' => ['required_with:home_layout.sections', Rule::in(['announcements', 'quick_menu', 'metrics', 'schedule'])],
             'home_layout.sections.*.enabled' => ['required_with:home_layout.sections', 'boolean'],
             'home_layout.sections.*.order' => ['required_with:home_layout.sections', 'integer', 'between:1,20'],
-            'role_home_layouts' => ['sometimes', 'required', 'array:super_admin,foundation,principal,teacher,parent,student,staff'],
+            'role_home_layouts' => ['sometimes', 'required', 'array:super_admin,foundation,principal,divisi,tu,teacher,musyrif,parent,student,staff,alumni'],
             'role_home_layouts.*' => ['sometimes', 'required', 'array'],
             'role_home_layouts.*.template' => ['sometimes', 'required', Rule::in(['dashboard_default', 'dashboard_compact'])],
+            'role_home_layouts.*.customized' => ['nullable', 'boolean'],
             'role_home_layouts.*.sections' => ['sometimes', 'required', 'array', 'min:1', 'max:8'],
             'role_home_layouts.*.sections.*.type' => ['required_with:role_home_layouts.*.sections', Rule::in(['announcements', 'quick_menu', 'metrics', 'schedule'])],
             'role_home_layouts.*.sections.*.enabled' => ['required_with:role_home_layouts.*.sections', 'boolean'],
@@ -352,9 +393,58 @@ class MobileAppConfigController extends Controller
             'onboarding' => ['sometimes', 'nullable', 'array'],
             'onboarding.enabled' => ['nullable', 'boolean'],
             'onboarding.slides' => ['nullable', 'array'],
+            'onboarding.slides.*.id' => ['nullable', 'integer'],
             'onboarding.slides.*.title' => ['required_with:onboarding.slides', 'string', 'max:100'],
             'onboarding.slides.*.desc' => ['required_with:onboarding.slides', 'string', 'max:300'],
+            'onboarding.slides.*.description' => ['nullable', 'string', 'max:300'],
             'onboarding.slides.*.image_url' => ['nullable', 'url', 'max:500'],
         ];
+    }
+
+    /**
+     * Ensure every onboarding slide includes id, title, desc, description, and host-aware image_url.
+     */
+    private function normalizeOnboardingSlides(array $slides, array $mediaPaths = [], ?Request $request = null): array
+    {
+        return array_values(array_map(function ($slide, int $idx) use ($mediaPaths, $request) {
+            $item = is_array($slide) ? $slide : [];
+            $text = (string) ($item['description'] ?? $item['desc'] ?? '');
+            $mediaKey = 'onboarding_'.($idx + 1);
+            $imageUrl = $item['image_url'] ?? null;
+
+            if ($request) {
+                $imageUrl = $this->resolveStoredMediaUrl($mediaPaths[$mediaKey] ?? null, $imageUrl, $request);
+            }
+
+            return [
+                'id' => isset($item['id']) ? (int) $item['id'] : $idx + 1,
+                'title' => (string) ($item['title'] ?? ''),
+                'desc' => $text,
+                'description' => $text,
+                'image_url' => $imageUrl,
+            ];
+        }, $slides, array_keys($slides)));
+    }
+
+    /**
+     * Resolve uploaded storage asset URLs dynamically against the current request scheme/host.
+     */
+    private function resolveStoredMediaUrl(?string $mediaPath, ?string $storedUrl, Request $request): ?string
+    {
+        $hostBase = rtrim($request->getSchemeAndHttpHost(), '/');
+        if (!empty($mediaPath)) {
+            return $hostBase.'/storage/'.ltrim($mediaPath, '/');
+        }
+
+        if (empty($storedUrl) || !is_string($storedUrl)) {
+            return null;
+        }
+
+        $parsedPath = parse_url(trim($storedUrl), PHP_URL_PATH);
+        if (is_string($parsedPath) && str_starts_with($parsedPath, '/storage/mobile-config/')) {
+            return $hostBase.$parsedPath;
+        }
+
+        return trim($storedUrl);
     }
 }

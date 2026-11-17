@@ -196,6 +196,7 @@ class AuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         $request->user()?->currentAccessToken()?->delete();
+        auth('sanctum')->forgetUser();
 
         return response()->json([
             'message' => 'Logout berhasil.',
@@ -245,7 +246,7 @@ class AuthController extends Controller
             'Admin' => ['Admin'],
             'Divisi Pendidikan' => ['Divisi Pendidikan', 'Kepala Bidang Pendidikan', 'Divisi Kurikulum', 'Divisi Kesiswaan', 'Divisi Bahasa', 'Divisi Program Khusus'],
             'Kepala Sekolah' => ['Kepala Sekolah'],
-            'Tata Usaha' => ['Tata Usaha', 'Operator'],
+            'Tata Usaha' => ['Tata Usaha', 'tata_usaha', 'TU'],
             'Guru' => ['Guru', 'Guru Mata Pelajaran', 'Guru PAI', 'Wali Kelas'],
             'Guru Tahfizh' => ['Guru Tahfizh'],
             'Musyrif' => ['Musyrif', 'Musyrifah', 'Musyrif / Musyrifah'],
@@ -265,6 +266,34 @@ class AuthController extends Controller
         // Pemisahan tegas: Jika meminta role Guru atau Guru Tahfizh, jangan ambil akun pejabat struktural/tendik
         if (in_array($validated['role'], ['Guru', 'Guru Tahfizh'], true)) {
             $targetQuery->whereDoesntHave('roles', fn ($q) => $q->whereIn('name', ['Kepala Sekolah', 'Tata Usaha', 'Yayasan', 'Ketua Yayasan', 'Divisi Pendidikan']));
+        }
+
+        // Khusus role Musyrif: Hanya ambil akun yang bertugas di unit boarding (pesantren/asrama), bukan fullday
+        if ($validated['role'] === 'Musyrif') {
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $targetQuery->where(function ($mq) use ($likeOp) {
+                $mq->where('email', 'musyrif.test@dareliman.sch.id')
+                   ->orWhereHas('employee.unit', function ($uq) use ($likeOp) {
+                       $uq->where(function ($sub) use ($likeOp) {
+                           $sub->where('program_type', 'boarding')
+                              ->orWhere('name', $likeOp, '%ponpes%')
+                              ->orWhere('name', $likeOp, '%asrama%')
+                              ->orWhere('name', $likeOp, '%pesantren%')
+                              ->orWhere('name', $likeOp, "%ma'had%")
+                              ->orWhere('name', $likeOp, '%mahad%');
+                       })->where(function ($sub) {
+                           $sub->whereNull('program_type')
+                              ->orWhere('program_type', '!=', 'fullday');
+                       });
+                   });
+            });
+        }
+
+        // Khusus role Orang Tua: Jangan ambil user dummy #N/A dan utamakan akun yang memiliki anak
+        if ($validated['role'] === 'Orang Tua') {
+            $likeOp = \Illuminate\Support\Facades\DB::getDriverName() === 'pgsql' ? 'not ilike' : 'not like';
+            $targetQuery->where('name', $likeOp, '#%')
+                ->where('email', $likeOp, '#%');
         }
 
         $target = $targetQuery->orderBy('name')->first();

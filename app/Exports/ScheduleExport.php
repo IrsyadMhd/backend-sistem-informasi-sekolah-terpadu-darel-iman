@@ -24,6 +24,7 @@ class ScheduleExport implements FromCollection, WithHeadings, ShouldAutoSize
             'Tahun Ajaran',
             'Semester',
             'Ruangan',
+            'Status',
         ];
     }
 
@@ -41,23 +42,29 @@ class ScheduleExport implements FromCollection, WithHeadings, ShouldAutoSize
 
         return $this->schedules->map(function ($sch, $idx) use ($dayNames) {
             $day = $dayNames[$sch->day_of_week] ?? $sch->day_name ?? $sch->day_of_week ?? '-';
-            $mapel = $sch->subject?->nama_mapel ?? $sch->subject?->name ?? '-';
+            $activity = $sch->activity_name ?? $sch->activity_type;
+            $mapel = $sch->subject?->nama_mapel ?? $sch->subject?->name ?? ($activity ?: '-');
             $kelas = $sch->kelas?->nama_kelas ?? $sch->schoolClass?->name ?? '-';
             $guru = $sch->employee?->nama_lengkap ?? $sch->teacher?->name ?? '-';
             $thn = $sch->academicYear?->name ?? '-';
             $sem = $sch->semester?->name ?? '-';
+            $startTime = $sch->time_start ? substr($sch->time_start, 0, 5) : ($sch->start_time ? substr($sch->start_time, 0, 5) : '-');
+            $endTime = $sch->time_end ? substr($sch->time_end, 0, 5) : ($sch->end_time ? substr($sch->end_time, 0, 5) : '-');
+            $room = $sch->room ?? $sch->classroom?->name ?? '-';
+            $status = $sch->is_active ? 'Aktif' : 'Nonaktif';
 
             return [
                 $idx + 1,
                 $day,
-                $sch->start_time ?? '-',
-                $sch->end_time ?? '-',
+                $startTime,
+                $endTime,
                 $mapel,
                 $kelas,
                 $guru,
                 $thn,
                 $sem,
-                $sch->room ?? '-',
+                $room,
+                $status,
             ];
         });
     }
