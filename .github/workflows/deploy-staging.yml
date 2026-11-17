@@ -1,0 +1,43 @@
+name: Deploy Staging Backend API
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  deploy:
+    name: Deploy to Staging Server
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and Deploy to Staging
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            TARGET_DIR="${{ secrets.STAGING_BACKEND_PATH || '/var/www/demoapi.dareliman.sch.id' }}"
+            echo "🚀 Menuju direktori backend staging: $TARGET_DIR"
+            cd "$TARGET_DIR"
+
+            echo "📥 Menarik kode terbaru dari branch staging..."
+            git pull origin staging
+
+            echo "📦 Mengoptimalkan dependensi composer..."
+            composer install --no-dev --optimize-autoloader --no-interaction
+
+            echo "🌱 Menjalankan migrasi database..."
+            php artisan migrate --force
+
+            echo "⚡ Mengoptimasi dan menyegarkan cache Laravel..."
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
+            php artisan event:cache
+
+            echo "✅ Deployment Backend API ke Staging Berhasil!"
+
