@@ -363,16 +363,26 @@ Route::middleware('auth:sanctum')->group(function () {
         });
     }
 
-    Route::get('/dashboard', [DashboardPemantauanController::class, 'ringkasan'])
-        ->middleware('can:dashboard.pemantauan.lihat');
-    Route::get('/dashboard/super-admin', [SuperAdminDashboardController::class, 'index'])
-        ->middleware('role:Super Admin|super_admin|Admin|admin|Administrator');
-    Route::get('/dashboard/kepala-sekolah', [KepalaSekolahDashboardController::class, 'index'])
-        ->middleware('can:dashboard.kepala-sekolah.view');
-    Route::get('/dashboard/divisi-pendidikan', [DivisiPendidikanDashboardController::class, 'index'])
-        ->middleware('role_or_permission:Super Admin|Admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Divisi Pendidikan|Kepala Bidang Pendidikan|dashboard.divisi-pendidikan.view|foundation.dashboard.view|divisi.monitoring');
-    Route::get('/dashboard/divisi-pendidikan/kpi/{type}', [DivisiPendidikanDashboardController::class, 'kpiDetail'])
-        ->middleware('role_or_permission:Super Admin|Admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Divisi Pendidikan|Kepala Bidang Pendidikan|dashboard.divisi-pendidikan.view|foundation.dashboard.view|divisi.monitoring');
+    foreach (['dashboard', 'v1/dashboard'] as $dashPrefix) {
+        $dashSuffix = $dashPrefix === 'v1/dashboard' ? '.v1' : '';
+        Route::prefix($dashPrefix)->group(function () use ($dashSuffix) {
+            Route::get('/', [DashboardPemantauanController::class, 'ringkasan'])
+                ->middleware('can:dashboard.pemantauan.lihat')
+                ->name('dashboard.ringkasan' . $dashSuffix);
+            Route::get('/super-admin', [SuperAdminDashboardController::class, 'index'])
+                ->middleware('role:Super Admin|super_admin|Admin|admin|Administrator')
+                ->name('dashboard.super-admin' . $dashSuffix);
+            Route::get('/kepala-sekolah', [KepalaSekolahDashboardController::class, 'index'])
+                ->middleware('can:dashboard.kepala-sekolah.view')
+                ->name('dashboard.kepala-sekolah' . $dashSuffix);
+            Route::get('/divisi-pendidikan', [DivisiPendidikanDashboardController::class, 'index'])
+                ->middleware('role_or_permission:Super Admin|Admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Divisi Pendidikan|Kepala Bidang Pendidikan|dashboard.divisi-pendidikan.view|foundation.dashboard.view|divisi.monitoring')
+                ->name('dashboard.divisi-pendidikan' . $dashSuffix);
+            Route::get('/divisi-pendidikan/kpi/{type}', [DivisiPendidikanDashboardController::class, 'kpiDetail'])
+                ->middleware('role_or_permission:Super Admin|Admin|Yayasan|Ketua Yayasan|Pengurus Yayasan|Divisi Pendidikan|Kepala Bidang Pendidikan|dashboard.divisi-pendidikan.view|foundation.dashboard.view|divisi.monitoring')
+                ->name('dashboard.divisi-pendidikan.kpi' . $dashSuffix);
+        });
+    }
 
     // Supervisi Kelas & Pembelajaran (KBM) Divisi Pendidikan
     Route::apiResource('/divisi/supervisi-kbm', SupervisiKbmController::class);
