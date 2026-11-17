@@ -946,6 +946,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/tahfizh/weekly-sheet', [TahfizhController::class, 'getWeeklySheet']);
     Route::post('/tahfizh/daily-log', [TahfizhController::class, 'saveDailyLog'])
         ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
+    Route::delete('/tahfizh/daily-log/{id}', [TahfizhController::class, 'deleteDailyLog'])
+        ->middleware('role:Super Admin|super_admin|Admin|admin|Yayasan|Ketua Yayasan|Kepala Sekolah|kepala_sekolah|Divisi Pendidikan|divisi_pendidikan|Kepala Bidang Pendidikan|Waka Kurikulum|waka_kurikulum|Waka Kesiswaan|waka_kesiswaan|Guru|guru|Guru Tahfizh|guru_tahfizh|Musyrif|musyrif|Musyrifah|musyrifah|Wali Kelas|wali_kelas');
     Route::post('/tahfizh/upload-audio', [TahfizhController::class, 'uploadAudio']);
     Route::get('/tahfizh/student-progress/{studentId}', [TahfizhController::class, 'getStudentProgress']);
     Route::get('/tahfizh/last-hafalan/{studentId}', [TahfizhController::class, 'getLastHafalan']);

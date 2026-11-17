@@ -109,7 +109,7 @@ class AchievementReportService
         // 1. REKAPITULASI PER UNIT PENDIDIKAN
         $units = collect();
         try {
-            $units = EducationUnit::with('leader')->get();
+            $units = EducationUnit::all();
         } catch (\Throwable $e) {
             Log::warning("EducationUnit fetch exception: " . $e->getMessage());
         }
@@ -131,7 +131,7 @@ class AchievementReportService
                 'unit_id' => $unit->id,
                 'unit_code' => $unit->code,
                 'unit_name' => $unit->name,
-                'principal_name' => $unit->leader?->name ?? 'Kepala Sekolah ' . $unit->code,
+                'principal_name' => $unit->metadata['kepala_sekolah'] ?? $unit->metadata['principal_name'] ?? ('Kepala Sekolah ' . $unit->name),
                 'total_prestasi' => $uTotal,
                 'siswa_berprestasi_count' => $unitAchievements->pluck('id_siswa')->unique()->count(),
                 'tahfizh_count' => $unitAchievements->filter(fn ($i) => strtolower($i->jenis_prestasi ?? '') === 'tahfizh')->count(),

@@ -789,10 +789,25 @@ class AttendanceWorkflowController extends Controller
 
     public function followUps(Request $request): JsonResponse
     {
-        $this->permit($request, ['homeroom_attendance.follow_up'], ['Wali Kelas']);
-        $employee = $this->access->employee($request->user());
-        abort_unless($employee, 403, 'Akun belum terhubung dengan data pegawai.');
-        $classIds = $this->access->homeroomClasses($request->user())->pluck('id');
+        $this->permit($request, ['homeroom_attendance.follow_up', 'homeroom_attendance.view', 'attendance.view'], [
+            'Wali Kelas', 'Super Admin', 'Admin', 'Kepala Sekolah', 'Tata Usaha', 'TU', 'Divisi Pendidikan'
+        ]);
+
+        $user = $request->user();
+        $isManager = $user && (
+            $user->hasAnyRole(['Super Admin', 'super_admin', 'Admin', 'admin', 'Kepala Sekolah', 'kepala_sekolah', 'Tata Usaha', 'TU', 'Divisi Pendidikan']) ||
+            $user->hasAnyPermission(['homeroom_attendance.view', 'attendance.view'])
+        );
+
+        $employee = $this->access->employee($user);
+        if (!$isManager) {
+            abort_unless($employee, 403, 'Akun belum terhubung dengan data pegawai.');
+        }
+
+        $homeroomClasses = $this->access->homeroomClasses($user)->pluck('id');
+        $classIds = ($isManager && $homeroomClasses->isEmpty())
+            ? \App\Models\Kelas::pluck('id')
+            : $homeroomClasses;
 
         if ($request->isMethod('get')) {
             return response()->json(['success' => true, 'data' => HomeroomAttendanceFollowUp::with('student')
@@ -800,6 +815,8 @@ class AttendanceWorkflowController extends Controller
                 ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
                 ->latest('case_date')->paginate($request->integer('per_page', 15))]);
         }
+
+        abort_unless($employee, 403, 'Akun belum terhubung dengan data pegawai.');
 
         $data = $request->validate([
             'class_id' => ['required', 'uuid', Rule::in($classIds->all())],
