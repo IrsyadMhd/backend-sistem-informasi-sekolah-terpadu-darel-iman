@@ -109,7 +109,11 @@ class GateAttendanceService
             });
 
             if ($result['success'] && isset($result['notification'])) {
-                SendParentAttendanceNotification::dispatch(...array_values($result['notification']));
+                try {
+                    SendParentAttendanceNotification::dispatch(...array_values($result['notification']));
+                } catch (\Throwable $notifErr) {
+                    \Illuminate\Support\Facades\Log::warning('SendParentAttendanceNotification failed (Queue/Redis offline): ' . $notifErr->getMessage());
+                }
                 
                 // Realtime broadcast ke mobile app orang tua (channel student.{id})
                 try {
@@ -250,7 +254,11 @@ class GateAttendanceService
             });
 
             if ($result['success'] && isset($result['notification'])) {
-                SendParentAttendanceNotification::dispatch(...array_values($result['notification']));
+                try {
+                    SendParentAttendanceNotification::dispatch(...array_values($result['notification']));
+                } catch (\Throwable $notifErr) {
+                    \Illuminate\Support\Facades\Log::warning('SendParentAttendanceNotification failed (Queue/Redis offline): ' . $notifErr->getMessage());
+                }
                 
                 // Realtime broadcast ke mobile app orang tua (channel student.{id})
                 try {
