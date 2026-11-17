@@ -806,7 +806,7 @@ class AttendanceWorkflowController extends Controller
 
         $homeroomClasses = $this->access->homeroomClasses($user)->pluck('id');
         $classIds = ($isManager && $homeroomClasses->isEmpty())
-            ? \App\Models\ClassRoom::pluck('id')
+            ? \App\Models\Kelas::pluck('id')
             : $homeroomClasses;
 
         if ($request->isMethod('get')) {
